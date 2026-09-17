@@ -99,7 +99,7 @@ if "settings" not in st.session_state:
   }
 
 # ÎNLOCUIEȘTE AICI CU LINKUL SCHIMBAT DIN GOOGLE SHEETS (care conține gid=...)
-GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRs6o_ryWI3jCSZ_EpNyv6lDvQakwdEb0RoeuhXXXCdv9lzwCkkEXMorkk2W3ZBvg/pub?output=csv"
+GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRs6o_ryWI3jCSZ_EpNyv6lDvQakwdEb0RoeuhXXXCdv9lzwCkkEXMorkk2W3ZBvg/pub?gid=61188452&single=true&output=csv"
 
 # ==========================================
 # ECRAN AUTENTIFICARE

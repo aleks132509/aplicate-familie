@@ -100,7 +100,6 @@ if "settings" not in st.session_state:
       "target_ta_dia": 80,
   }
 
-# Pune AICI link-ul tău din Google Sheets (poate fi link-ul din browser sau cel publicat CSV)
 GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRs6o_ryWI3jCSZ_EpNyv6lDvQakwdEb0RoeuhXXXCdv9lzwCkkEXMorkk2W3ZBvg/pub?output=csv"
 
 # ==========================================
@@ -142,6 +141,7 @@ current_user_info = st.session_state.users.get(
     st.session_state.user, {"role": "Membru"}
 )
 current_role = current_user_info.get("role", "Membru")
+is_admin = current_role == "Administrator"
 
 # ==========================================
 # SIDEBAR
@@ -162,29 +162,40 @@ st.sidebar.markdown("---")
 
 
 # ==========================================
-# CITIRE ROBUSTĂ & FALLBACK GOOGLE SHEET
+# GENERARE DATE DEFAULT / DEMO
 # ==========================================
 def get_mock_data():
-  """Generare date de rezervă dacă linkul Google Sheet nu funcționează."""
   return pd.DataFrame({
-      "Data": ["12.09.2026", "13.09.2026", "14.09.2026", "15.09.2026"],
-      "Ora / Moment": [
+      "Data": [
+          "12.09.2026",
+          "13.09.2026",
+          "14.09.2026",
+          "15.09.2026",
+          "16.09.2026",
+      ],
+      "Moment / Ora": [
           "08:00 Dimineața",
           "12:30 Prânz",
           "08:15 Dimineața",
           "19:00 Seara",
+          "08:00 Dimineața",
       ],
-      "Glicemie (mg/dL)": [105, 128, 98, 115],
-      "Tensiune Sistolică": [122, 130, 118, 125],
-      "Tensiune Diastolică": [78, 82, 75, 80],
-      "Puls (bpm)": [72, 76, 70, 74],
-      "Observații": ["Înainte de masă", "După masă", "Normal", "Ușoară oboseală"],
+      "Glicemie": [105, 128, 98, 115, 110],
+      "Sistolică": [122, 130, 118, 125, 120],
+      "Diastolică": [78, 82, 75, 80, 79],
+      "Puls": [72, 76, 70, 74, 71],
+      "Observații": [
+          "Înainte de masă",
+          "După masă",
+          "Normal",
+          "Ușoară oboseală",
+          "Stare bună",
+      ],
   })
 
 
 @st.cache_data(ttl=5)
 def load_and_clean_data(url):
-  # Formatare URL în caz că este link direct de editare din browser
   target_url = url
   if "/edit" in url:
     match = re.search(r"/d/([a-zA-Z0-9-_]+)", url)
@@ -194,121 +205,115 @@ def load_and_clean_data(url):
 
   try:
     df_raw = pd.read_csv(target_url, dtype=str, header=None)
-
-    if df_raw.empty or len(df_raw.columns) == 0:
+    if df_raw.empty:
       return get_mock_data()
 
-    # Căutăm rândul care conține denumirile de coloane (ex: Data / Glicemie / Tensiune)
-    header_row_idx = 0
+    header_row_idx = None
     for idx, row in df_raw.iterrows():
-      row_str = " ".join([str(v) for v in row.dropna().values]).lower()
-      row_norm = remove_diacritics(row_str)
-      if (
-          "data" in row_norm
-          or "glic" in row_norm
-          or "tens" in row_norm
-          or "sis" in row_norm
-      ):
+      row_str = remove_diacritics(" ".join([str(v) for v in row.dropna() if str(v) != 'nan'])).lower()
+      if any(k in row_str for k in ["data", "glic", "tens", "sist", "puls"]):
         header_row_idx = idx
         break
 
-    # Reîncărcăm datele de la rândul identificat
-    df_clean = pd.read_csv(target_url, skiprows=header_row_idx)
+    if header_row_idx is not None:
+      df_clean = pd.read_csv(target_url, skiprows=header_row_idx)
+    else:
+      df_clean = pd.read_csv(target_url)
 
-    # Curățăm coloanele Unnamed / goale
     df_clean.columns = [str(c).strip() for c in df_clean.columns]
     valid_cols = [
-        c
-        for c in df_clean.columns
-        if "unnamed" not in c.lower() and c.strip() != ""
+        c for c in df_clean.columns if "unnamed" not in c.lower() and c != ""
     ]
-
-    if not valid_cols:
-      return get_mock_data()
-
     df_clean = df_clean[valid_cols].dropna(how="all")
 
-    if df_clean.empty:
+    if df_clean.empty or len(df_clean.columns) < 2:
       return get_mock_data()
 
     return df_clean
 
   except Exception:
-    # Dacă apare orice eroare la descărcare/parsare, returnăm datele mock pentru a nu bloca aplicația
     return get_mock_data()
 
 
 df = load_and_clean_data(GOOGLE_SHEET_URL)
 
-# Detectare și conversie coloană Dată
+# Identificare coloane cheie
 date_col = None
-if not df.empty:
-  for c in df.columns:
-    c_norm = remove_diacritics(str(c)).lower()
-    if "data" in c_norm or "date" in c_norm:
-      date_col = c
-      break
+for c in df.columns:
+  c_norm = remove_diacritics(str(c)).lower()
+  if "data" in c_norm or "date" in c_norm:
+    date_col = c
+    break
 
-  if not date_col and len(df.columns) > 0:
-    date_col = df.columns[0]
+if not date_col and len(df.columns) > 0:
+  date_col = df.columns[0]
 
-  if date_col and date_col in df.columns:
-    df[date_col] = pd.to_datetime(
-        df[date_col].astype(str).str.strip(), format="%d.%m.%Y", errors="coerce"
-    )
+# Conversie Dată
+if date_col and date_col in df.columns:
+  df[date_col] = pd.to_datetime(
+      df[date_col].astype(str).str.strip(), format="%d.%m.%Y", errors="coerce"
+  )
+  if df[date_col].isna().all():
+    df[date_col] = pd.to_datetime(df[date_col], dayfirst=True, errors="coerce")
+  df = df.dropna(subset=[date_col]).sort_values(by=date_col, ascending=False)
 
-    if df[date_col].isna().all():
-      df[date_col] = pd.to_datetime(
-          df[date_col], dayfirst=True, errors="coerce"
-      )
+# Identificare coloane numerice pentru grafice
+cols = list(df.columns)
+col_glic = next(
+    (
+        c
+        for c in cols
+        if any(
+            k in remove_diacritics(str(c)).lower()
+            for k in ["glic", "inainte", "dupa"]
+        )
+    ),
+    None,
+)
+col_sis = next(
+    (c for c in cols if "sist" in remove_diacritics(str(c)).lower()), None
+)
+col_dia = next(
+    (c for c in cols if "diast" in remove_diacritics(str(c)).lower()), None
+)
+col_puls = next(
+    (c for c in cols if "puls" in remove_diacritics(str(c)).lower()), None
+)
 
-    df = df.dropna(subset=[date_col])
-    df = df.sort_values(by=date_col, ascending=False)
+# Dacă nu au fost găsite prin nume, asignăm fallback după index
+if not col_glic and len(cols) > 2:
+  col_glic = cols[2]
+if not col_sis and len(cols) > 3:
+  col_sis = cols[3]
+if not col_dia and len(cols) > 4:
+  col_dia = cols[4]
+if not col_puls and len(cols) > 5:
+  col_puls = cols[5]
 
 # ==========================================
-# INTERFAȚĂ PRINCIPALĂ
+# ORGANIZARE TAB-URI PE BAZĂ DE ROL
 # ==========================================
-tab_jurnal, tab_add, tab_med, tab_prog, tab_pdf, tab_settings = st.tabs([
-    "📊 Jurnal & Grafice",
-    "➕ Adaugă Înregistrare",
-    "💊 Tratament",
-    "📅 Programări",
-    "📄 Raport PDF",
-    "⚙️ Setări",
-])
+tab_titles = ["📊 Jurnal & Grafice"]
+if is_admin:
+  tab_titles.append("➕ Adaugă Înregistrare")
+tab_titles.append("💊 Tratament")
+if is_admin:
+  tab_titles.append("📅 Programări")
+tab_titles.extend(["📄 Raport PDF", "⚙️ Setări"])
 
-# ----------------- TAB 1: JURNAL & GRAFICE -----------------
-with tab_jurnal:
+tabs = st.tabs(tab_titles)
+tab_dict = {title: tabs[i] for i, title in enumerate(tab_titles)}
+
+# ----------------- TAB: JURNAL & GRAFICE -----------------
+with tab_dict["📊 Jurnal & Grafice"]:
   st.markdown("### 📊 Tablou de Bord Medical")
 
-  if not df.empty and date_col is not None and date_col in df.columns:
+  if not df.empty and date_col in df.columns:
     kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-    cols = df.columns
-
-    col_glic = next(
-        (
-            c
-            for c in cols
-            if any(
-                k in remove_diacritics(str(c)).lower()
-                for k in ["glic", "inainte", "dupa"]
-            )
-        ),
-        None,
-    )
-    col_sis = next(
-        (c for c in cols if "sis" in remove_diacritics(str(c)).lower()), None
-    )
-    col_dia = next(
-        (c for c in cols if "dia" in remove_diacritics(str(c)).lower()), None
-    )
-    col_puls = next(
-        (c for c in cols if "puls" in remove_diacritics(str(c)).lower()), None
-    )
 
     with kpi1:
       val_glic = "N/A"
-      if col_glic:
+      if col_glic and col_glic in df.columns:
         s_glic = pd.to_numeric(df[col_glic], errors="coerce").dropna()
         if not s_glic.empty:
           val_glic = f"{int(s_glic.iloc[0])} mg/dL"
@@ -320,11 +325,11 @@ with tab_jurnal:
 
     with kpi2:
       val_sis, val_dia = "-", "-"
-      if col_sis:
+      if col_sis and col_sis in df.columns:
         s_sis = pd.to_numeric(df[col_sis], errors="coerce").dropna()
         if not s_sis.empty:
           val_sis = int(s_sis.iloc[0])
-      if col_dia:
+      if col_dia and col_dia in df.columns:
         s_dia = pd.to_numeric(df[col_dia], errors="coerce").dropna()
         if not s_dia.empty:
           val_dia = int(s_dia.iloc[0])
@@ -337,7 +342,7 @@ with tab_jurnal:
 
     with kpi3:
       val_puls = "N/A"
-      if col_puls:
+      if col_puls and col_puls in df.columns:
         s_puls = pd.to_numeric(df[col_puls], errors="coerce").dropna()
         if not s_puls.empty:
           val_puls = f"{int(s_puls.iloc[0])} bpm"
@@ -364,25 +369,19 @@ with tab_jurnal:
 
     with g1:
       fig_g = go.Figure()
-      glic_cols = [
-          c
-          for c in cols
-          if any(
-              k in remove_diacritics(str(c)).lower()
-              for k in ["glic", "inainte", "dupa"]
-          )
-      ]
-      for gc in glic_cols[:2]:
+      if col_glic and col_glic in df.columns:
         fig_g.add_trace(
             go.Scatter(
                 x=x_data,
-                y=pd.to_numeric(df[gc], errors="coerce"),
+                y=pd.to_numeric(df[col_glic], errors="coerce"),
                 mode="lines+markers",
-                name=gc,
+                name="Glicemie",
+                line=dict(color="#38bdf8", width=3),
+                marker=dict(size=8),
             )
         )
       fig_g.update_layout(
-          title="Evoluție Glicemie",
+          title="Evoluție Glicemie (mg/dL)",
           template="plotly_dark",
           paper_bgcolor="rgba(0,0,0,0)",
           plot_bgcolor="rgba(0,0,0,0)",
@@ -392,21 +391,34 @@ with tab_jurnal:
 
     with g2:
       fig_ta = go.Figure()
-      ta_cols = [
-          c
-          for c in cols
-          if any(
-              k in remove_diacritics(str(c)).lower()
-              for k in ["sist", "diast", "puls"]
-          )
-      ]
-      for tc in ta_cols:
+      if col_sis and col_sis in df.columns:
         fig_ta.add_trace(
             go.Scatter(
                 x=x_data,
-                y=pd.to_numeric(df[tc], errors="coerce"),
+                y=pd.to_numeric(df[col_sis], errors="coerce"),
                 mode="lines+markers",
-                name=tc,
+                name="Sistolică",
+                line=dict(color="#ef4444", width=2),
+            )
+        )
+      if col_dia and col_dia in df.columns:
+        fig_ta.add_trace(
+            go.Scatter(
+                x=x_data,
+                y=pd.to_numeric(df[col_dia], errors="coerce"),
+                mode="lines+markers",
+                name="Diastolică",
+                line=dict(color="#f59e0b", width=2),
+            )
+        )
+      if col_puls and col_puls in df.columns:
+        fig_ta.add_trace(
+            go.Scatter(
+                x=x_data,
+                y=pd.to_numeric(df[col_puls], errors="coerce"),
+                mode="lines+markers",
+                name="Puls",
+                line=dict(color="#10b981", width=2),
             )
         )
       fig_ta.update_layout(
@@ -423,44 +435,45 @@ with tab_jurnal:
     # Tabel Afișare Date
     st.markdown("#### 📋 Tabelul Măsurătorilor")
     df_display = df.copy()
-    if date_col and date_col in df_display.columns:
-      df_display[date_col] = df_display[date_col].dt.strftime("%d.%m.%Y")
+    df_display[date_col] = df_display[date_col].dt.strftime("%d.%m.%Y")
+    st.dataframe(df_display, use_container_width=True, height=400)
 
-    st.dataframe(df_display, use_container_width=True, height=420)
+# ----------------- TAB: ADAUGĂ ÎNREGISTRARE (EXCLUSIV ADMIN) -----------------
+if is_admin and "➕ Adaugă Înregistrare" in tab_dict:
+  with tab_dict["➕ Adaugă Înregistrare"]:
+    st.markdown("### 📝 Formular Introducere Măsurători (Admin)")
+    with st.container(border=True):
+      with st.form("form_add"):
+        c1, c2 = st.columns(2)
+        with c1:
+          st.date_input("📅 Data Măsurătorii", value=date.today())
+          st.time_input("🕒 Ora Măsurătorii")
+          st.selectbox(
+              "🍽️ Momentul Măsurătorii",
+              [
+                  "Dimineața (Înainte de masă)",
+                  "Dimineața (După masă)",
+                  "Seara (Înainte de masă)",
+                  "Seara (După masă)",
+              ],
+          )
+        with c2:
+          st.number_input("🩸 Glicemie (mg/dL)", value=100)
+          st.number_input("🫀 Tensiune Sistolică", value=120)
+          st.number_input("🫀 Tensiune Diastolică", value=80)
+          st.number_input("💓 Puls (bpm)", value=72)
 
-# ----------------- TAB 2: ADAUGĂ ÎNREGISTRARE -----------------
-with tab_add:
-  st.markdown("### 📝 Formular Introducere Măsurători")
-  with st.container(border=True):
-    with st.form("form_add"):
-      c1, c2 = st.columns(2)
-      with c1:
-        st.date_input("📅 Data Măsurătorii", value=date.today())
-        st.time_input("🕒 Ora Măsurătorii")
-        st.selectbox(
-            "🍽️ Momentul Măsurătorii",
-            [
-                "Dimineața (Înainte de masă)",
-                "Dimineața (După masă)",
-                "Seara (Înainte de masă)",
-                "Seara (După masă)",
-            ],
-        )
-      with c2:
-        st.number_input("🩸 Glicemie (mg/dL)", value=100)
-        st.number_input("🫀 Tensiune Sistolică", value=120)
-        st.number_input("🫀 Tensiune Diastolică", value=80)
-        st.number_input("💓 Puls (bpm)", value=72)
+        st.text_area("✍️ Notițe / Observații")
 
-      st.text_area("✍️ Notițe / Observații")
+        if st.form_submit_button(
+            "💾 Salvează Înregistrarea",
+            type="primary",
+            use_container_width=True,
+        ):
+          st.success("Măsurătoarea a fost salvată!")
 
-      if st.form_submit_button(
-          "💾 Salvează Înregistrarea", type="primary", use_container_width=True
-      ):
-        st.success("Măsurătoarea a fost salvată!")
-
-# ----------------- TAB 3: MEDICAMENTE -----------------
-with tab_med:
+# ----------------- TAB: TRATAMENT -----------------
+with tab_dict["💊 Tratament"]:
   st.markdown("### 💊 Schemă Tratament Medical")
   meds_df = pd.DataFrame([
       {
@@ -496,27 +509,28 @@ with tab_med:
   ])
   st.dataframe(meds_df, use_container_width=True)
 
-# ----------------- TAB 4: PROGRAMĂRI -----------------
-with tab_prog:
-  st.markdown("### 📅 Programări Medicale")
-  prog_df = pd.DataFrame([
-      {
-          "Dată": "2026-09-25",
-          "Tip": "Analize de laborator",
-          "Clinică": "Regina Maria",
-          "Observații": "Repetare analize Diabet",
-      },
-      {
-          "Dată": "2026-10-05",
-          "Tip": "Consult Diabet",
-          "Clinică": "Dr. Clenciu Craiova",
-          "Observații": "Rețetă 3 luni",
-      },
-  ])
-  st.dataframe(prog_df, use_container_width=True)
+# ----------------- TAB: PROGRAMĂRI (EXCLUSIV ADMIN) -----------------
+if is_admin and "📅 Programări" in tab_dict:
+  with tab_dict["📅 Programări"]:
+    st.markdown("### 📅 Programări Medicale (Admin)")
+    prog_df = pd.DataFrame([
+        {
+            "Dată": "2026-09-25",
+            "Tip": "Analize de laborator",
+            "Clinică": "Regina Maria",
+            "Observații": "Repetare analize Diabet",
+        },
+        {
+            "Dată": "2026-10-05",
+            "Tip": "Consult Diabet",
+            "Clinică": "Dr. Clenciu Craiova",
+            "Observații": "Rețetă 3 luni",
+        },
+    ])
+    st.dataframe(prog_df, use_container_width=True)
 
-# ----------------- TAB 5: RAPORT PDF -----------------
-with tab_pdf:
+# ----------------- TAB: RAPORT PDF -----------------
+with tab_dict["📄 Raport PDF"]:
   st.markdown("### 📄 Generare Raport PDF")
 
   def make_pdf(data_frame):
@@ -575,13 +589,13 @@ with tab_pdf:
         mime="application/pdf",
     )
 
-# ----------------- TAB 6: SETĂRI & ROLURI -----------------
-with tab_settings:
+# ----------------- TAB: SETĂRI -----------------
+with tab_dict["⚙️ Setări"]:
   st.markdown("### ⚙️ Setări & Drepturi Acces")
   s1, s2 = st.columns(2)
 
   with s1:
-    if current_role == "Administrator":
+    if is_admin:
       with st.container(border=True):
         st.markdown("#### ➕ Adaugă Utilizator Nou (Admin)")
         new_username = st.text_input("Nume Utilizator Nou")
@@ -644,22 +658,22 @@ with tab_settings:
       st.number_input(
           "Glicemie Minimă Țintă (mg/dL)",
           value=st.session_state.settings["target_glic_min"],
-          disabled=(current_role != "Administrator"),
+          disabled=not is_admin,
       )
       st.number_input(
           "Glicemie Maximă Țintă (mg/dL)",
           value=st.session_state.settings["target_glic_max"],
-          disabled=(current_role != "Administrator"),
+          disabled=not is_admin,
       )
       st.number_input(
           "Tensiune Sistolică Max Țintă",
           value=st.session_state.settings["target_ta_sis"],
-          disabled=(current_role != "Administrator"),
+          disabled=not is_admin,
       )
       st.number_input(
           "Tensiune Diastolică Max Țintă",
           value=st.session_state.settings["target_ta_dia"],
-          disabled=(current_role != "Administrator"),
+          disabled=not is_admin,
       )
 
     with st.container(border=True):
@@ -667,10 +681,12 @@ with tab_settings:
       st.toggle(
           "Activează notificările",
           value=st.session_state.settings["notif_enabled"],
+          disabled=not is_admin,
       )
       st.slider(
           "Alertă programări (zile înainte)",
           1,
           14,
           st.session_state.settings["notif_days"],
+          disabled=not is_admin,
       )

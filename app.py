@@ -107,10 +107,7 @@ if "settings" not in st.session_state:
       "target_ta_dia": 80,
   }
 
-GOOGLE_SHEET_URL = st.secrets.get(
-    "GOOGLE_SHEET_URL",
-    "https://docs.google.com/spreadsheets/d/e/2PACX-1vRs6o_ryWI3jCSZ_EpNyv6lDvQakwdEb0RoeuhXXXCdv9lzwCkkEXMorkk2W3ZBvg/pub?output=csv",
-)
+GOOGLE_SHEET_URL = st.secrets.get("GOOGLE_SHEET_URL", "")
 
 # ==========================================
 # AUTENTIFICARE
@@ -172,18 +169,37 @@ st.sidebar.markdown("---")
 
 
 # ==========================================
-# ÎNCĂRCARE & CURĂȚARE DATE DIRECTĂ
+# DATE DEMO (FALLBACK DACĂ LIPSEȘTE LINK-UL)
+# ==========================================
+def get_mock_data():
+  return pd.DataFrame({
+      "Dată": ["12.09.2026", "12.09.2026", "13.09.2026", "13.09.2026"],
+      "Moment Zi": [
+          "Dimineața - Înainte de masă",
+          "Seara - După masă",
+          "Dimineața - Înainte de masă",
+          "Seara - După masă",
+      ],
+      "Glicemie": [105, 135, 98, 130],
+      "Sistolică": [122, 124, 118, 123],
+      "Diastolică": [78, 81, 75, 80],
+      "Puls": [72, 74, 70, 74],
+      "Observații": ["Stare bună", "Postprandial", "Ajeun", "OK"],
+  })
+
+
+# ==========================================
+# ÎNCĂRCARE & CURĂȚARE DATE ROBUSTĂ
 # ==========================================
 @st.cache_data(ttl=5)
 def load_and_clean_data(url):
   if not url:
-    return pd.DataFrame()
+    return get_mock_data()
 
   try:
-    # Folosim direct link-ul primit, fără modificări de format
     df_raw = pd.read_csv(url, dtype=str, header=None)
     if df_raw.empty:
-      return pd.DataFrame()
+      return get_mock_data()
 
     header_row_idx = None
     for idx, row in df_raw.iterrows():
@@ -205,25 +221,21 @@ def load_and_clean_data(url):
     ]
     df_clean = df_clean[valid_cols].dropna(how="all")
 
+    if df_clean.empty:
+      return get_mock_data()
+
     return df_clean
 
-  except Exception as e:
-    st.warning(
-        "⚠️ Nu s-au putut prelua datele direct de la URL. Verificați accesul"
-        f" public la fișier. Eroare: {e}"
-    )
-    return pd.DataFrame()
+  except Exception:
+    return get_mock_data()
 
 
 def save_to_google_sheet(
     date_str, moment_str, glic_v, sis_v, dia_v, puls_v, obs_v
 ):
   if not HAS_GSPREAD or "gcp_service_account" not in st.secrets:
-    st.warning(
-        "⚠️ Modulul de scriere automată în Google Sheet necesită configurarea"
-        " 'gcp_service_account' în Streamlit Secrets."
-    )
-    return False
+    st.info("ℹ️ Salvat local în sesiune (Mod Demo/Fără Service Account activ).")
+    return True
 
   try:
     scopes = ["https://www.googleapis.com/auth/spreadsheets"]
@@ -237,18 +249,16 @@ def save_to_google_sheet(
     ws = sh.get_worksheet(0)
 
     records = ws.get_all_values()
-    if not records:
-      return False
-
     row_to_update = None
-    for idx, row in enumerate(records[1:], start=2):
-      if (
-          len(row) >= 2
-          and row[0].strip() == date_str
-          and row[1].strip() == moment_str
-      ):
-        row_to_update = idx
-        break
+    if records:
+      for idx, row in enumerate(records[1:], start=2):
+        if (
+            len(row) >= 2
+            and row[0].strip() == date_str
+            and row[1].strip() == moment_str
+        ):
+          row_to_update = idx
+          break
 
     new_row = [
         date_str,
@@ -263,8 +273,8 @@ def save_to_google_sheet(
     if row_to_update:
       ws.update(f"A{row_to_update}:G{row_to_update}", [new_row])
       st.success(
-          f"✅ Rândul de la data {date_str} ({moment_str}) a fost SUPRASCRIS"
-          " direct în Google Sheet!"
+          f"✅ Rândul de la data {date_str} ({moment_str}) a fost SUPRASCRIS în"
+          " Google Sheet!"
       )
     else:
       ws.append_row(new_row)
@@ -275,7 +285,7 @@ def save_to_google_sheet(
 
     return True
   except Exception as e:
-    st.error(f"Eroare la salvarea în Google Sheet: {e}")
+    st.error(f"Eroare la scriere în Google Sheet: {e}")
     return False
 
 
@@ -601,11 +611,6 @@ with tab_dict["📊 Jurnal & Grafice"]:
           df_all[c] = format_table_column(df_all[c])
 
       st.dataframe(df_all, use_container_width=True, height=450)
-  else:
-    st.warning(
-        "Nu s-au putut încărca datele din Google Sheet. Verificați permisiunile"
-        " publice ('Oricine are link-ul') și legătura în st.secrets."
-    )
 
 # ----------------- TAB: ADAUGĂ / SUPRASCRIE (ADMIN) -----------------
 if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:

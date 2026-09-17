@@ -162,53 +162,8 @@ st.sidebar.markdown("---")
 
 
 # ==========================================
-# GENERARE DATE DEFAULT / DEMO (CRONOLOGIC DE SUS IN JOS)
+# ÎNCĂRCARE ȘI PARSARE DIRECTĂ A DATELOR REALEE
 # ==========================================
-def get_mock_data():
-  return pd.DataFrame({
-      "Data": [
-          "12.09.2026",
-          "12.09.2026",
-          "12.09.2026",
-          "12.09.2026",  # Vineri (4 intrari)
-          "13.09.2026",
-          "13.09.2026",
-          "13.09.2026",
-          "13.09.2026",
-          "13.09.2026",
-          "13.09.2026",  # Sambata (6 intrari)
-      ],
-      "Moment Zi": [
-          "Dimineața - Înainte de masă",
-          "Dimineața - După masă",
-          "Seara - Înainte de masă",
-          "Seara - După masă",
-          "Dimineața - Înainte de masă",
-          "Dimineața - După masă",
-          "Prânz - Înainte de masă",
-          "Prânz - După masă",
-          "Seara - Înainte de masă",
-          "Seara - După masă",
-      ],
-      "Glicemie": [105, 128, 110, 135, 98, 120, 115, 140, 108, 130],
-      "Sistolică": [122, 125, 120, 124, 118, 122, 121, 126, 119, 123],
-      "Diastolică": [78, 80, 79, 81, 75, 78, 77, 82, 76, 80],
-      "Puls": [72, 75, 71, 74, 70, 73, 72, 76, 71, 74],
-      "Observații": [
-          "Ajeun",
-          "Postprandial",
-          "Înainte de cină",
-          "După cină",
-          "Ajeun",
-          "Postprandial",
-          "Înainte de prânz",
-          "După prânz",
-          "Înainte de cină",
-          "Stare bună",
-      ],
-  })
-
-
 @st.cache_data(ttl=5)
 def load_and_clean_data(url):
   target_url = url
@@ -221,14 +176,15 @@ def load_and_clean_data(url):
   try:
     df_raw = pd.read_csv(target_url, dtype=str, header=None)
     if df_raw.empty:
-      return get_mock_data()
+      return pd.DataFrame()
 
+    # Căutăm linia cu antetul (care conține Dată)
     header_row_idx = None
     for idx, row in df_raw.iterrows():
       row_str = remove_diacritics(
           " ".join([str(v) for v in row.dropna() if str(v) != "nan"])
       ).lower()
-      if any(k in row_str for k in ["data", "glic", "tens", "sist", "puls"]):
+      if "data" in row_str or "date" in row_str:
         header_row_idx = idx
         break
 
@@ -243,50 +199,71 @@ def load_and_clean_data(url):
     ]
     df_clean = df_clean[valid_cols].dropna(how="all")
 
-    if df_clean.empty or len(df_clean.columns) < 2:
-      return get_mock_data()
-
     return df_clean
 
-  except Exception:
-    return get_mock_data()
+  except Exception as e:
+    st.error(f"Eroare la citirea datelor din Google Sheets: {e}")
+    return pd.DataFrame()
 
 
 df = load_and_clean_data(GOOGLE_SHEET_URL)
 
 # Identificare coloană Dată
 date_col = None
-for c in df.columns:
-  c_norm = remove_diacritics(str(c)).lower()
-  if "data" in c_norm or "date" in c_norm:
-    date_col = c
-    break
+if not df.empty:
+  for c in df.columns:
+    c_norm = remove_diacritics(str(c)).lower()
+    if "data" in c_norm or "date" in c_norm:
+      date_col = c
+      break
 
-if not date_col and len(df.columns) > 0:
-  date_col = df.columns[0]
+  if not date_col and len(df.columns) > 0:
+    date_col = df.columns[0]
 
-# Conversie Dată și Sortează ASCENDENTĂ (De la data mică/veche în sus la data nouă în jos)
-if date_col and date_col in df.columns:
-  df[date_col] = pd.to_datetime(
+# Procesare dată și sortare cronologică (de sus în jos)
+if not df.empty and date_col and date_col in df.columns:
+  # Salvăm data parsată temporar pentru sortare
+  df["_temp_date"] = pd.to_datetime(
       df[date_col].astype(str).str.strip(), format="%d.%m.%Y", errors="coerce"
   )
-  if df[date_col].isna().all():
-    df[date_col] = pd.to_datetime(df[date_col], dayfirst=True, errors="coerce")
-  df = df.dropna(subset=[date_col]).sort_values(by=date_col, ascending=True)
+  if df["_temp_date"].isna().all():
+    df["_temp_date"] = pd.to_datetime(
+        df[date_col], dayfirst=True, errors="coerce"
+    )
 
-# Identificare coloane numerice pentru grafice
+  df = df.dropna(subset=["_temp_date"]).sort_values(
+      by="_temp_date", ascending=True
+  )
+
+  # Păstrăm pe axa X un format clar de text FĂRĂ ORA (ex: 12.09.2026)
+  df["Data_Display"] = df["_temp_date"].dt.strftime("%d.%m.%Y")
+else:
+  df["Data_Display"] = []
+
+# Identificare coloane numerice specifice
 cols = list(df.columns)
-col_glic = next(
+col_glic_inainte = next(
     (
         c
         for c in cols
-        if any(
-            k in remove_diacritics(str(c)).lower()
-            for k in ["glic", "inainte", "dupa"]
-        )
+        if "glic" in remove_diacritics(str(c)).lower()
+        and "inainte" in remove_diacritics(str(c)).lower()
     ),
     None,
 )
+col_glic_dupa = next(
+    (
+        c
+        for c in cols
+        if "glic" in remove_diacritics(str(c)).lower()
+        and "dupa" in remove_diacritics(str(c)).lower()
+    ),
+    None,
+)
+col_glic_gen = next(
+    (c for c in cols if "glic" in remove_diacritics(str(c)).lower()), None
+)
+
 col_sis = next(
     (c for c in cols if "sist" in remove_diacritics(str(c)).lower()), None
 )
@@ -296,16 +273,16 @@ col_dia = next(
 col_puls = next(
     (c for c in cols if "puls" in remove_diacritics(str(c)).lower()), None
 )
-
-# Fallback index
-if not col_glic and len(cols) > 2:
-  col_glic = cols[2]
-if not col_sis and len(cols) > 3:
-  col_sis = cols[3]
-if not col_dia and len(cols) > 4:
-  col_dia = cols[4]
-if not col_puls and len(cols) > 5:
-  col_puls = cols[5]
+col_moment = next(
+    (
+        c
+        for c in cols
+        if any(
+            k in remove_diacritics(str(c)).lower() for k in ["moment", "ora"]
+        )
+    ),
+    None,
+)
 
 # ==========================================
 # ORGANIZARE TAB-URI PE BAZĂ DE ROL
@@ -325,15 +302,20 @@ tab_dict = {title: tabs[i] for i, title in enumerate(tab_titles)}
 with tab_dict["📊 Jurnal & Grafice"]:
   st.markdown("### 📊 Tablou de Bord Medical")
 
-  if not df.empty and date_col in df.columns:
+  if not df.empty and "Data_Display" in df.columns:
     kpi1, kpi2, kpi3, kpi4 = st.columns(4)
 
+    # Calculare ultimele valori reale (din ultima linie de jos)
     with kpi1:
       val_glic = "N/A"
-      if col_glic and col_glic in df.columns:
-        s_glic = pd.to_numeric(df[col_glic], errors="coerce").dropna()
+      glic_target_col = (
+          col_glic_inainte
+          or col_glic_dupa
+          or col_glic_gen
+      )
+      if glic_target_col and glic_target_col in df.columns:
+        s_glic = pd.to_numeric(df[glic_target_col], errors="coerce").dropna()
         if not s_glic.empty:
-          # Ultima valoare adăugată (cea de la final)
           val_glic = f"{int(s_glic.iloc[-1])} mg/dL"
       st.markdown(
           f'<div class="metric-card"><div class="metric-label">🩸 ULTIMA'
@@ -380,81 +362,149 @@ with tab_dict["📊 Jurnal & Grafice"]:
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # Grafice
-    st.markdown("#### 📈 Grafice Evoluție")
+    # GRAFICE OPTIMIZATE VIZUAL (FĂRĂ ORE PE AXA X)
+    st.markdown("#### 📈 Grafice Evoluție Medicală")
     g1, g2 = st.columns(2)
-    x_data = df[date_col]
 
+    # Pregătire etichete axa X (Dată + Momentul Zilei)
+    if col_moment and col_moment in df.columns:
+      x_labels = (
+          df["Data_Display"] + " (" + df[col_moment].fillna("").astype(str) + ")"
+      )
+    else:
+      x_labels = df["Data_Display"]
+
+    # GRAFIC 1: GLICEMIE
     with g1:
       fig_g = go.Figure()
-      if col_glic and col_glic in df.columns:
+
+      if col_glic_inainte and col_glic_inainte in df.columns:
         fig_g.add_trace(
             go.Scatter(
-                x=x_data,
-                y=pd.to_numeric(df[col_glic], errors="coerce"),
+                x=x_labels,
+                y=pd.to_numeric(df[col_glic_inainte], errors="coerce"),
+                mode="lines+markers",
+                name="Glicemie Înainte Masă",
+                line=dict(color="#38bdf8", width=3),
+                marker=dict(size=8),
+            )
+        )
+
+      if col_glic_dupa and col_glic_dupa in df.columns:
+        fig_g.add_trace(
+            go.Scatter(
+                x=x_labels,
+                y=pd.to_numeric(df[col_glic_dupa], errors="coerce"),
+                mode="lines+markers",
+                name="Glicemie După Masă",
+                line=dict(color="#fb923c", width=3, dash="dot"),
+                marker=dict(size=8),
+            )
+        )
+
+      if (
+          not col_glic_inainte
+          and not col_glic_dupa
+          and col_glic_gen
+          and col_glic_gen in df.columns
+      ):
+        fig_g.add_trace(
+            go.Scatter(
+                x=x_labels,
+                y=pd.to_numeric(df[col_glic_gen], errors="coerce"),
                 mode="lines+markers",
                 name="Glicemie",
                 line=dict(color="#38bdf8", width=3),
                 marker=dict(size=8),
             )
         )
+
+      # Linia țintă recomandată
+      fig_g.add_hline(
+          y=120,
+          line_dash="dash",
+          line_color="#10b981",
+          annotation_text="Țintă Max (120)",
+      )
+
       fig_g.update_layout(
           title="Evoluție Glicemie (mg/dL)",
           template="plotly_dark",
           paper_bgcolor="rgba(0,0,0,0)",
           plot_bgcolor="rgba(0,0,0,0)",
+          xaxis=dict(type="category", tickangle=-45),
           margin=dict(l=20, r=20, t=40, b=20),
+          hovermode="x unified",
       )
       st.plotly_chart(fig_g, use_container_width=True)
 
+    # GRAFIC 2: TENSIUNE ARTERIALĂ & PULS
     with g2:
       fig_ta = go.Figure()
+
       if col_sis and col_sis in df.columns:
         fig_ta.add_trace(
             go.Scatter(
-                x=x_data,
+                x=x_labels,
                 y=pd.to_numeric(df[col_sis], errors="coerce"),
                 mode="lines+markers",
                 name="Sistolică",
-                line=dict(color="#ef4444", width=2),
+                line=dict(color="#ef4444", width=3),
+                marker=dict(size=8),
             )
         )
+
       if col_dia and col_dia in df.columns:
         fig_ta.add_trace(
             go.Scatter(
-                x=x_data,
+                x=x_labels,
                 y=pd.to_numeric(df[col_dia], errors="coerce"),
                 mode="lines+markers",
                 name="Diastolică",
-                line=dict(color="#f59e0b", width=2),
+                line=dict(color="#f59e0b", width=3),
+                marker=dict(size=8),
             )
         )
+
       if col_puls and col_puls in df.columns:
-        fig_ta.add_trace(
-            go.Scatter(
-                x=x_data,
-                y=pd.to_numeric(df[col_puls], errors="coerce"),
-                mode="lines+markers",
-                name="Puls",
-                line=dict(color="#10b981", width=2),
-            )
-        )
+        s_puls_vals = pd.to_numeric(df[col_puls], errors="coerce")
+        if not s_puls_vals.isna().all():
+          fig_ta.add_trace(
+              go.Scatter(
+                  x=x_labels,
+                  y=s_puls_vals,
+                  mode="lines+markers",
+                  name="Puls (bpm)",
+                  line=dict(color="#10b981", width=2, dash="dash"),
+                  marker=dict(size=6),
+              )
+          )
+
       fig_ta.update_layout(
           title="Evoluție Tensiune & Puls",
           template="plotly_dark",
           paper_bgcolor="rgba(0,0,0,0)",
           plot_bgcolor="rgba(0,0,0,0)",
+          xaxis=dict(type="category", tickangle=-45),
           margin=dict(l=20, r=20, t=40, b=20),
+          hovermode="x unified",
       )
       st.plotly_chart(fig_ta, use_container_width=True)
 
     st.markdown("---")
 
-    # Tabel Afișare Date
-    st.markdown("#### 📋 Tabelul Măsurătorilor (Cronologic)")
+    # TABEL DATE CRONOLOGIC (DE SUS ÎN JOS)
+    st.markdown("#### 📋 Tabelul Măsurătorilor (Cronologic: 12.09.2026 ➔ Prezent)")
     df_display = df.copy()
-    df_display[date_col] = df_display[date_col].dt.strftime("%d.%m.%Y")
+    if "_temp_date" in df_display.columns:
+      df_display = df_display.drop(columns=["_temp_date"])
+    if "Data_Display" in df_display.columns and date_col in df_display.columns:
+      df_display[date_col] = df_display["Data_Display"]
+      df_display = df_display.drop(columns=["Data_Display"])
+
     st.dataframe(df_display, use_container_width=True, height=450)
+  else:
+    st.warning("Nu s-au găsit date valide în fișierul Google Sheet.")
 
 # ----------------- TAB: ADAUGĂ ÎNREGISTRARE (EXCLUSIV ADMIN) -----------------
 if is_admin and "➕ Adaugă Înregistrare" in tab_dict:
@@ -462,8 +512,6 @@ if is_admin and "➕ Adaugă Înregistrare" in tab_dict:
     st.markdown("### 📝 Formular Introducere Măsurători (Admin)")
     with st.container(border=True):
       selected_date = st.date_input("📅 Data Măsurătorii", value=date.today())
-
-      # Verificare dacă ziua e weekend (5 = Sâmbătă, 6 = Duminică)
       is_weekend = selected_date.weekday() in [5, 6]
 
       if is_weekend:

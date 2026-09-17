@@ -2,12 +2,15 @@ import io
 import re
 import unicodedata
 from datetime import date, datetime
+import matplotlib
+matplotlib.use("Agg")  # Necesar pentru generarea graficelor în fundal fără GUI
+import matplotlib.pyplot as plt
 import pandas as pd
 import plotly.graph_objects as go
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 import streamlit as st
 
 try:
@@ -366,6 +369,54 @@ def format_table_column(series):
 
 
 # ==========================================
+# FUNCȚII EVALUARE MEDICALĂ
+# ==========================================
+def evaluate_glic(val):
+  try:
+    v = float(val)
+    if v == 0 or pd.isna(v):
+      return "Nemăsurat"
+    t_min = st.session_state.settings["target_glic_min"]
+    t_max = st.session_state.settings["target_glic_max"]
+    return "🟢 Bună (În țintă)" if t_min <= v <= t_max else "🔴 Ridicată/Scăzută"
+  except:
+    return "Nemăsurat"
+
+
+def evaluate_ta(sis_val, dia_val):
+  try:
+    s = float(sis_val)
+    d = float(dia_val)
+    if s == 0 or d == 0 or pd.isna(s) or pd.isna(d):
+      return "Nemăsurat"
+    max_s = st.session_state.settings["target_ta_sis"]
+    max_d = st.session_state.settings["target_ta_dia"]
+    return "🟢 Bună (Normală)" if s <= max_s and d <= max_d else "🔴 Crescută"
+  except:
+    return "Nemăsurat"
+
+
+def evaluate_puls(val):
+  try:
+    v = float(val)
+    if v == 0 or pd.isna(v):
+      return "Nemăsurat"
+    return "🟢 Normal (60-100)" if 60 <= v <= 100 else "🔴 Anormal"
+  except:
+    return "Nemăsurat"
+
+
+def color_status(val):
+  if not isinstance(val, str):
+    return ""
+  if "🟢" in val:
+    return "background-color: #064e3b; color: #34d399; font-weight: bold;"
+  elif "🔴" in val:
+    return "background-color: #7f1d1d; color: #f87171; font-weight: bold;"
+  return ""
+
+
+# ==========================================
 # ORGANIZARE TAB-URI
 # ==========================================
 tab_titles = ["📊 Jurnal & Grafice"]
@@ -462,7 +513,6 @@ with tab_dict["📊 Jurnal & Grafice"]:
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # Sub-taburi separate pentru GLICEMIE, TENSIUNE, PULS și TOATE DATELE
     sub_tab_glic, sub_tab_ta, sub_tab_puls, sub_tab_all = st.tabs(
         ["🩸 Glicemie", "🫀 Tensiune Arterială", "💓 Puls", "📋 Toate Datele"]
     )
@@ -513,8 +563,16 @@ with tab_dict["📊 Jurnal & Grafice"]:
 
         df_g_tab = df[cols_g].copy()
         df_g_tab[date_col] = df_g_tab[date_col].dt.strftime("%d.%m.%Y")
+        df_g_tab["Status Glicemie"] = df_g_tab[col_glic].apply(evaluate_glic)
         df_g_tab[col_glic] = format_table_column(df_g_tab[col_glic])
-        st.dataframe(df_g_tab, use_container_width=True, height=350)
+
+        st.dataframe(
+            df_g_tab.style.applymap(
+                color_status, subset=["Status Glicemie"]
+            ),
+            use_container_width=True,
+            height=350,
+        )
 
     # 2. TAB TENSIUNE ARTERIALĂ
     with sub_tab_ta:
@@ -567,9 +625,17 @@ with tab_dict["📊 Jurnal & Grafice"]:
 
         df_t_tab = df[cols_t].copy()
         df_t_tab[date_col] = df_t_tab[date_col].dt.strftime("%d.%m.%Y")
+        df_t_tab["Status Tensiune"] = df_t_tab.apply(
+            lambda r: evaluate_ta(r[col_sis], r[col_dia]), axis=1
+        )
         df_t_tab[col_sis] = format_table_column(df_t_tab[col_sis])
         df_t_tab[col_dia] = format_table_column(df_t_tab[col_dia])
-        st.dataframe(df_t_tab, use_container_width=True, height=350)
+
+        st.dataframe(
+            df_t_tab.style.applymap(color_status, subset=["Status Tensiune"]),
+            use_container_width=True,
+            height=350,
+        )
 
     # 3. TAB PULS
     with sub_tab_puls:
@@ -607,17 +673,34 @@ with tab_dict["📊 Jurnal & Grafice"]:
 
         df_p_tab = df[cols_p].copy()
         df_p_tab[date_col] = df_p_tab[date_col].dt.strftime("%d.%m.%Y")
+        df_p_tab["Status Puls"] = df_p_tab[col_puls].apply(evaluate_puls)
         df_p_tab[col_puls] = format_table_column(df_p_tab[col_puls])
-        st.dataframe(df_p_tab, use_container_width=True, height=350)
+
+        st.dataframe(
+            df_p_tab.style.applymap(color_status, subset=["Status Puls"]),
+            use_container_width=True,
+            height=350,
+        )
 
     # 4. TAB TOATE DATELE
     with sub_tab_all:
-      st.markdown("#### 📋 Tabel General Complet")
+      st.markdown("#### 📋 Tabel General Complet cu Statusuri")
       df_all = df.copy()
       df_all[date_col] = df_all[date_col].dt.strftime("%d.%m.%Y")
-      for c in [col_glic, col_sis, col_dia, col_puls]:
-        if c and c in df_all.columns:
-          df_all[c] = format_table_column(df_all[c])
+
+      if col_glic in df_all.columns:
+        df_all["St. Glicemie"] = df_all[col_glic].apply(evaluate_glic)
+        df_all[col_glic] = format_table_column(df_all[col_glic])
+      if col_sis in df_all.columns and col_dia in df_all.columns:
+        df_all["St. Tensiune"] = df_all.apply(
+            lambda r: evaluate_ta(r[col_sis], r[col_dia]), axis=1
+        )
+        df_all[col_sis] = format_table_column(df_all[col_sis])
+        df_all[col_dia] = format_table_column(df_all[col_dia])
+      if col_puls in df_all.columns:
+        df_all["St. Puls"] = df_all[col_puls].apply(evaluate_puls)
+        df_all[col_puls] = format_table_column(df_all[col_puls])
+
       st.dataframe(df_all, use_container_width=True, height=450)
 
 # ----------------- TAB: ADAUGĂ / SUPRASCRIE (ADMIN) -----------------
@@ -780,19 +863,59 @@ if is_admin and "📅 Programări" in tab_dict:
     ])
     st.dataframe(prog_df, use_container_width=True)
 
-# ----------------- TAB: RAPORT PDF -----------------
+# ----------------- TAB: RAPORT PDF CU SELECȚIE GRAFICE -----------------
 with tab_dict["📄 Raport PDF"]:
-  st.markdown("### 📄 Generare Raport PDF")
+  st.markdown("### 📄 Generare Raport PDF Personalizat")
+  st.markdown(
+      "Alege opțiunile pentru graficele care dorești să fie incluse în raportul"
+      " PDF:"
+  )
 
-  def make_pdf(data_frame):
+  col_opt1, col_opt2 = st.columns(2)
+  with col_opt1:
+    opt_glic = st.checkbox("Include Grafic Glicemie 🩸", value=True)
+    opt_ta = st.checkbox("Include Grafic Tensiune Arterială 🫀", value=True)
+  with col_opt2:
+    opt_puls = st.checkbox("Include Grafic Puls 💓", value=True)
+    opt_tabele = st.checkbox("Include Tabelul Complet de Date 📋", value=True)
+
+
+  def generate_chart_image(x_vals, y_vals, title, ylabel, color_hex):
+    plt.figure(figsize=(7, 2.5))
+    plt.plot(
+        x_vals,
+        y_vals,
+        marker="o",
+        linestyle="-",
+        color=color_hex,
+        linewidth=2,
+        markersize=5,
+    )
+    plt.title(title, fontsize=10, fontweight="bold", color="#1e3a8a")
+    plt.ylabel(ylabel, fontsize=9)
+    plt.xticks(rotation=30, fontsize=8)
+    plt.yticks(fontsize=8)
+    plt.grid(True, linestyle="--", alpha=0.5)
+    plt.tight_layout()
+
+    img_buffer = io.BytesIO()
+    plt.savefig(img_buffer, format="png", dpi=150)
+    plt.close()
+    img_buffer.seek(0)
+    return img_buffer
+
+
+  def make_pdf_report(
+      data_frame, include_glic, include_ta, include_puls, include_tables
+  ):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer,
         pagesize=A4,
-        rightMargin=25,
-        leftMargin=25,
-        topMargin=25,
-        bottomMargin=25,
+        rightMargin=30,
+        leftMargin=30,
+        topMargin=30,
+        bottomMargin=30,
     )
     story = []
     styles = getSampleStyleSheet()
@@ -806,12 +929,104 @@ with tab_dict["📄 Raport PDF"]:
     story.append(Paragraph(date_text, styles["Normal"]))
     story.append(Spacer(1, 15))
 
-    if not data_frame.empty:
-      clean_cols = [remove_diacritics(c) for c in data_frame.columns]
+    x_labels = data_frame[date_col].dt.strftime("%d.%m.%Y").tolist()
+    if moment_col and moment_col in data_frame.columns:
+      x_labels = [
+          f"{d} ({m})"
+          for d, m in zip(
+              x_labels, data_frame[moment_col].fillna("").astype(str)
+          )
+      ]
+
+    # Generare Grafic Glicemie
+    if (
+        include_glic
+        and col_glic
+        and col_glic in data_frame.columns
+        and not data_frame[col_glic].isna().all()
+    ):
+      y_g = pd.to_numeric(data_frame[col_glic], errors="coerce").fillna(0)
+      img_g = generate_chart_image(
+          x_labels, y_g, "Evolutie Glicemie (mg/dL)", "mg/dL", "#0284c7"
+      )
+      story.append(Image(img_g, width=480, height=170))
+      story.append(Spacer(1, 10))
+
+    # Generare Grafic Tensiune
+    if (
+        include_ta
+        and col_sis
+        and col_sis in data_frame.columns
+        and col_dia
+        and col_dia in data_frame.columns
+    ):
+      plt.figure(figsize=(7, 2.5))
+      y_s = pd.to_numeric(data_frame[col_sis], errors="coerce").fillna(0)
+      y_d = pd.to_numeric(data_frame[col_dia], errors="coerce").fillna(0)
+      plt.plot(
+          x_labels,
+          y_s,
+          marker="o",
+          color="#ef4444",
+          linewidth=2,
+          label="Sistol.",
+      )
+      plt.plot(
+          x_labels,
+          y_d,
+          marker="s",
+          color="#f59e0b",
+          linewidth=2,
+          label="Diastol.",
+      )
+      plt.title(
+          "Evolutie Tensiune Arteriala (mmHg)",
+          fontsize=10,
+          fontweight="bold",
+          color="#1e3a8a",
+      )
+      plt.ylabel("mmHg", fontsize=9)
+      plt.xticks(rotation=30, fontsize=8)
+      plt.yticks(fontsize=8)
+      plt.legend(loc="upper left", fontsize=8)
+      plt.grid(True, linestyle="--", alpha=0.5)
+      plt.tight_layout()
+
+      img_ta_buf = io.BytesIO()
+      plt.savefig(img_ta_buf, format="png", dpi=150)
+      plt.close()
+      img_ta_buf.seek(0)
+
+      story.append(Image(img_ta_buf, width=480, height=170))
+      story.append(Spacer(1, 10))
+
+    # Generare Grafic Puls
+    if (
+        include_puls
+        and col_puls
+        and col_puls in data_frame.columns
+        and not data_frame[col_puls].isna().all()
+    ):
+      y_p = pd.to_numeric(data_frame[col_puls], errors="coerce").fillna(0)
+      img_p = generate_chart_image(
+          x_labels, y_p, "Evolutie Puls (bpm)", "bpm", "#10b981"
+      )
+      story.append(Image(img_p, width=480, height=170))
+      story.append(Spacer(1, 10))
+
+    # Includere Tabel Date
+    if include_tables and not data_frame.empty:
+      story.append(Spacer(1, 10))
+      story.append(Paragraph("<b>Tabel Centralizator Date</b>", styles["Heading2"]))
+      story.append(Spacer(1, 5))
+
+      df_pdf = data_frame.copy()
+      df_pdf[date_col] = df_pdf[date_col].dt.strftime("%d.%m.%Y")
+      clean_cols = [remove_diacritics(c) for c in df_pdf.columns]
       table_data = [clean_cols]
 
-      for _, row in data_frame.iterrows():
-        clean_row = [remove_diacritics(v) for v in row.values]
+      for _, row in df_pdf.iterrows():
+        clean_row = [remove_diacritics(str(v)) for v in row.values]
         table_data.append(clean_row)
 
       t = Table(table_data)
@@ -821,7 +1036,7 @@ with tab_dict["📄 Raport PDF"]:
               ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
               ("ALIGN", (0, 0), (-1, -1), "CENTER"),
               ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-              ("FONTSIZE", (0, 0), (-1, -1), 8),
+              ("FONTSIZE", (0, 0), (-1, -1), 7),
               ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
           ])
       )
@@ -831,12 +1046,14 @@ with tab_dict["📄 Raport PDF"]:
     buffer.seek(0)
     return buffer.getvalue()
 
-  if st.button("🚀 Generează Raport PDF", type="primary"):
-    pdf_out = make_pdf(df)
+  if st.button("🚀 Generează și Descarcă Raportul PDF", type="primary"):
+    pdf_bytes = make_pdf_report(
+        df, opt_glic, opt_ta, opt_puls, opt_tabele
+    )
     st.download_button(
-        label="📥 Descarcă Raportul PDF",
-        data=pdf_out,
-        file_name=f"Raport_Medical_{date.today()}.pdf",
+        label="📥 Descarcă Fișierul PDF",
+        data=pdf_bytes,
+        file_name=f"Raport_Medical_Personalizat_{date.today()}.pdf",
         mime="application/pdf",
     )
 
@@ -906,22 +1123,22 @@ with tab_dict["⚙️ Setări"]:
   with s2:
     with st.container(border=True):
       st.markdown("#### 🎯 Valori Țintă Medicale")
-      st.number_input(
+      st.session_state.settings["target_glic_min"] = st.number_input(
           "Glicemie Minimă Țintă (mg/dL)",
           value=st.session_state.settings["target_glic_min"],
           disabled=not is_admin,
       )
-      st.number_input(
+      st.session_state.settings["target_glic_max"] = st.number_input(
           "Glicemie Maximă Țintă (mg/dL)",
           value=st.session_state.settings["target_glic_max"],
           disabled=not is_admin,
       )
-      st.number_input(
+      st.session_state.settings["target_ta_sis"] = st.number_input(
           "Tensiune Sistolică Max Țintă",
           value=st.session_state.settings["target_ta_sis"],
           disabled=not is_admin,
       )
-      st.number_input(
+      st.session_state.settings["target_ta_dia"] = st.number_input(
           "Tensiune Diastolică Max Țintă",
           value=st.session_state.settings["target_ta_dia"],
           disabled=not is_admin,

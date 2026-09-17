@@ -48,12 +48,12 @@ st.markdown(
         margin-bottom: 12px;
     }
     .metric-value { 
-        font-size: 26px; 
+        font-size: 24px; 
         font-weight: 700; 
         color: #38bdf8; 
     }
     .metric-label { 
-        font-size: 13px; 
+        font-size: 12px; 
         color: #94a3b8; 
         font-weight: 600; 
         text-transform: uppercase;
@@ -420,7 +420,6 @@ def evaluate_puls(val):
     return "Nemăsurat"
 
 
-# Stil text alb pronunțat și fundal saturat curat (fără blur)
 def color_status(val):
   if not isinstance(val, str):
     return ""
@@ -456,7 +455,19 @@ with tab_dict["📊 Jurnal & Grafice"]:
   st.markdown("### 📊 Tablou de Bord Medical")
 
   if not df.empty and date_col in df.columns:
-    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+    # Calcul media glicemiei pentru KPI
+    avg_glic_str = "Nemăsurat"
+    if col_glic and col_glic in df.columns:
+      s_glic_all = (
+          pd.to_numeric(df[col_glic], errors="coerce")
+          .fillna(0)
+          .replace(0, None)
+          .dropna()
+      )
+      if not s_glic_all.empty:
+        avg_glic_str = f"{int(s_glic_all.mean())} mg/dL"
+
+    kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
 
     with kpi1:
       val_glic = "Nemăsurat"
@@ -476,6 +487,14 @@ with tab_dict["📊 Jurnal & Grafice"]:
       )
 
     with kpi2:
+      st.markdown(
+          f'<div class="metric-card"><div class="metric-label">📊 MEDIE'
+          f' GLICEMIE</div><div'
+          f' class="metric-value">{avg_glic_str}</div></div>',
+          unsafe_allow_html=True,
+      )
+
+    with kpi3:
       val_sis, val_dia = "-", "-"
       if col_sis and col_sis in df.columns:
         s_sis = (
@@ -507,7 +526,7 @@ with tab_dict["📊 Jurnal & Grafice"]:
           unsafe_allow_html=True,
       )
 
-    with kpi3:
+    with kpi4:
       val_puls = "Nemăsurat"
       if col_puls and col_puls in df.columns:
         s_puls = (
@@ -524,7 +543,7 @@ with tab_dict["📊 Jurnal & Grafice"]:
           unsafe_allow_html=True,
       )
 
-    with kpi4:
+    with kpi5:
       st.markdown(
           f'<div class="metric-card"><div class="metric-label">📅 TOTAL'
           f' ÎNREGISTRĂRI</div><div'
@@ -538,7 +557,6 @@ with tab_dict["📊 Jurnal & Grafice"]:
         ["🩸 Glicemie", "🫀 Tensiune Arterială", "💓 Puls", "📋 Toate Datele"]
     )
 
-    # Axa X strict cu data (fără moment, fără paranteze)
     x_data_strict = df[date_col].dt.strftime("%d.%m.%Y")
 
     # 1. TAB GLICEMIE

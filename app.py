@@ -20,25 +20,25 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Custom CSS optimizat pentru DARK MODE și contrast ridicat
+# Custom CSS optimizat pentru DARK MODE (Contrast ridicat)
 st.markdown(
     """
     <style>
     /* Styling general Dark Theme */
     .stApp {
-        background-color: #0e1117;
-        color: #ffffff;
+        background-color: #0e1117 !important;
+        color: #f1f5f9 !important;
     }
     
     /* Carduri de date (KPI-uri) */
     .metric-card {
         background-color: #1e222d;
-        padding: 20px;
+        padding: 18px;
         border-radius: 12px;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.4);
         border: 1px solid #2e3545;
         text-align: center;
-        margin-bottom: 10px;
+        margin-bottom: 12px;
     }
     .metric-value { 
         font-size: 26px; 
@@ -53,7 +53,7 @@ st.markdown(
         letter-spacing: 0.5px;
     }
 
-    /* Ajustări pentru câmpuri de text și butoane */
+    /* Vizibilitate inputuri și butoane */
     .stTextInput > div > div > input {
         color: #ffffff !important;
         background-color: #1e222d !important;
@@ -103,8 +103,8 @@ if not st.session_state.logged_in:
         unsafe_allow_html=True,
     )
     st.markdown(
-        "<p style='text-align: center; color: #94a3b8;'>Platformă de"
-        " Monitorizare Medicală</p>",
+        "<p style='text-align: center; color: #94a3b8; font-size: 16px;'>"
+        "Platformă de Monitorizare Medicală de Familie</p>",
         unsafe_allow_html=True,
     )
 
@@ -135,37 +135,62 @@ st.sidebar.markdown("---")
 
 
 # ==========================================
-# CURĂȚARE ȘI PARSARE INTELIGENTĂ DATE
+# ÎNCĂRCARE ȘI PARSARE INTELIGENTĂ DATE
 # ==========================================
 @st.cache_data(ttl=15)
 def load_and_clean_data(url):
   try:
-    # Citiți tot fișierul fără antet
-    raw_df = pd.read_csv(url, header=None)
+    # Încărcare tabel primar (previne erorile la număr variabil de coloane)
+    raw_df = pd.read_csv(
+        url, header=None, names=[f"col_{i}" for i in range(50)]
+    )
 
-    # Caută rândul care conține capul de tabel (ex: Data, Glicemie, Tensiune)
+    # Căutăm rândul unde se află antetul real (conține 'data' și un parametru medical)
     header_idx = None
     for idx, row in raw_df.iterrows():
-      row_str = " ".join(row.astype(str)).lower()
-      if "data" in row_str or "glicem" in row_str or "tensiun" in row_str:
+      # Conversie sigură în string pentru fiecare celulă
+      row_cells = [str(x) for x in row.values if pd.notna(x)]
+      row_str = " ".join(row_cells).lower()
+
+      if ("data" in row_str or "dată" in row_str or "date" in row_str) and any(
+          k in row_str
+          for k in [
+              "glicem",
+              "tensiun",
+              "sistol",
+              "diastol",
+              "puls",
+              "moment",
+              "ora",
+          ]
+      ):
         header_idx = idx
         break
 
     if header_idx is not None:
-      # Reîncarcă datele începând de la rândul corect
-      df_clean = pd.read_csv(url, skiprows=header_idx)
+      header_row = raw_df.iloc[header_idx]
+      df_clean = raw_df.iloc[header_idx + 1 :].copy()
+
+      cols = []
+      for i, val in enumerate(header_row):
+        val_str = str(val).strip() if pd.notna(val) else ""
+        if val_str and val_str.lower() != "nan":
+          cols.append(val_str)
+        else:
+          cols.append(f"Unnamed_{i}")
+      df_clean.columns = cols
     else:
-      df_clean = raw_df
+      df_clean = raw_df.copy()
 
-    # Curățare nume coloane
-    df_clean.columns = [
-        str(c).strip() for c in df_clean.columns if "Unnamed" not in str(c)
+    # Elimină coloanele goale/nefolosite
+    valid_cols = [
+        c for c in df_clean.columns if not str(c).startswith("Unnamed_")
     ]
-
-    # Elimină rândurile complet goale
+    df_clean = df_clean[valid_cols]
     df_clean = df_clean.dropna(how="all")
 
     return df_clean
+
   except Exception as e:
     st.error(f"Eroare la preluarea datelor: {e}")
     return pd.DataFrame()
@@ -177,12 +202,12 @@ df = load_and_clean_data(GOOGLE_SHEET_URL)
 date_col = None
 if not df.empty:
   for c in df.columns:
-    if "dat" in c.lower() or "date" in c.lower():
+    if "dat" in str(c).lower() or "date" in str(c).lower():
       date_col = c
       break
 
   if date_col:
-    df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
+    df[date_col] = pd.to_datetime(df[date_col], errors="coerce", dayfirst=True)
     df = df.dropna(subset=[date_col])
     df = df.sort_values(by=date_col, ascending=False)
 
@@ -203,21 +228,22 @@ with tab_jurnal:
   st.markdown("### 📊 Tablou de Bord Medical")
 
   if not df.empty:
-    # 1. KPI-uri
+    # 1. Calculare KPI-uri
     kpi1, kpi2, kpi3, kpi4 = st.columns(4)
 
     cols = df.columns
-    col_glic = next((c for c in cols if "glic" in c.lower()), None)
-    col_sis = next((c for c in cols if "sist" in c.lower()), None)
-    col_dia = next((c for c in cols if "diast" in c.lower()), None)
-    col_puls = next((c for c in cols if "puls" in c.lower()), None)
+    col_glic = next((c for c in cols if "glic" in str(c).lower()), None)
+    col_sis = next((c for c in cols if "sist" in str(c).lower()), None)
+    col_dia = next((c for c in cols if "diast" in str(c).lower()), None)
+    col_puls = next((c for c in cols if "puls" in str(c).lower()), None)
 
     with kpi1:
-      val_glic = (
-          f"{int(pd.to_numeric(df[col_glic], errors='coerce').dropna().iloc[0])} mg/dL"
-          if col_glic and not df[col_glic].dropna().empty
-          else "N/A"
-      )
+      val_glic = "N/A"
+      if col_glic:
+        s_glic = pd.to_numeric(df[col_glic], errors="coerce").dropna()
+        if not s_glic.empty:
+          val_glic = f"{int(s_glic.iloc[0])} mg/dL"
+
       st.markdown(
           f'<div class="metric-card"><div class="metric-label">🩸 ULTIMA'
           f' GLICEMIE</div><div class="metric-value">{val_glic}</div></div>',
@@ -225,16 +251,16 @@ with tab_jurnal:
       )
 
     with kpi2:
-      val_sis = (
-          int(pd.to_numeric(df[col_sis], errors="coerce").dropna().iloc[0])
-          if col_sis and not df[col_sis].dropna().empty
-          else "-"
-      )
-      val_dia = (
-          int(pd.to_numeric(df[col_dia], errors="coerce").dropna().iloc[0])
-          if col_dia and not df[col_dia].dropna().empty
-          else "-"
-      )
+      val_sis, val_dia = "-", "-"
+      if col_sis:
+        s_sis = pd.to_numeric(df[col_sis], errors="coerce").dropna()
+        if not s_sis.empty:
+          val_sis = int(s_sis.iloc[0])
+      if col_dia:
+        s_dia = pd.to_numeric(df[col_dia], errors="coerce").dropna()
+        if not s_dia.empty:
+          val_dia = int(s_dia.iloc[0])
+
       st.markdown(
           f'<div class="metric-card"><div class="metric-label">🫀 ULTIMA'
           f' TENSIUNE</div><div'
@@ -243,11 +269,12 @@ with tab_jurnal:
       )
 
     with kpi3:
-      val_puls = (
-          f"{int(pd.to_numeric(df[col_puls], errors='coerce').dropna().iloc[0])} bpm"
-          if col_puls and not df[col_puls].dropna().empty
-          else "N/A"
-      )
+      val_puls = "N/A"
+      if col_puls:
+        s_puls = pd.to_numeric(df[col_puls], errors="coerce").dropna()
+        if not s_puls.empty:
+          val_puls = f"{int(s_puls.iloc[0])} bpm"
+
       st.markdown(
           f'<div class="metric-card"><div class="metric-label">💓 PULS'
           f' MEDIU</div><div class="metric-value">{val_puls}</div></div>',
@@ -270,7 +297,7 @@ with tab_jurnal:
 
     with g1:
       fig_g = go.Figure()
-      glic_cols = [c for c in cols if "glic" in c.lower()]
+      glic_cols = [c for c in cols if "glic" in str(c).lower()]
       for gc in glic_cols:
         fig_g.add_trace(
             go.Scatter(
@@ -295,7 +322,7 @@ with tab_jurnal:
       ta_cols = [
           c
           for c in cols
-          if "sist" in c.lower() or "diast" in c.lower() or "puls" in c.lower()
+          if any(k in str(c).lower() for k in ["sist", "diast", "puls"])
       ]
       for tc in ta_cols:
         fig_ta.add_trace(
@@ -324,16 +351,13 @@ with tab_jurnal:
     if date_col:
       df_display[date_col] = df_display[date_col].dt.strftime("%Y-%m-%d")
 
-    st.dataframe(df_display, use_container_width=True, height=400)
+    st.dataframe(df_display, use_container_width=True, height=420)
   else:
-    st.warning(
-        "Nu s-au putut extrage date din tabel. Verifică structura fișierului"
-        " Google Sheet."
-    )
+    st.warning("Nu s-au găsit date valide în fișierul Google Sheet.")
 
 # ----------------- TAB 2: ADAUGĂ -----------------
 with tab_add:
-  st.markdown("### 📝 Formular Adăugare Măsurătoare")
+  st.markdown("### 📝 Formular Introducere Măsurători")
   with st.container(border=True):
     with st.form("form_add"):
       c1, c2 = st.columns(2)
@@ -348,7 +372,124 @@ with tab_add:
       if st.form_submit_button(
           "💾 Salvează Înregistrarea", type="primary", use_container_width=True
       ):
-        st.success("Datele au fost salvate local!")
+        st.success("Măsurătoarea a fost înregistrată!")
+
+# ----------------- TAB 3: MEDICAMENTE -----------------
+with tab_med:
+  st.markdown("### 💊 Schemă Tratament Medical")
+  meds_df = pd.DataFrame([
+      {
+          "Medicament": "Glucophage",
+          "Doză": "1000 mg",
+          "Orar": "Dimineața / Seara",
+          "Administrare": "După masă",
+      },
+      {
+          "Medicament": "Lagosa",
+          "Doză": "150 mg",
+          "Orar": "Dimineața / Seara",
+          "Administrare": "După masă",
+      },
+      {
+          "Medicament": "Diaprel MR",
+          "Doză": "60 mg (1/2)",
+          "Orar": "Dimineața",
+          "Administrare": "Înainte de masă",
+      },
+      {
+          "Medicament": "Atacand",
+          "Doză": "8 mg",
+          "Orar": "Seara",
+          "Administrare": "După masă",
+      },
+      {
+          "Medicament": "Nebilet",
+          "Doză": "5 mg",
+          "Orar": "Dimineața",
+          "Administrare": "După masă",
+      },
+  ])
+  st.dataframe(meds_df, use_container_width=True)
+
+# ----------------- TAB 4: PROGRAMĂRI -----------------
+with tab_prog:
+  st.markdown("### 📅 Programări Medicale")
+  prog_df = pd.DataFrame([
+      {
+          "Dată": "2026-09-25",
+          "Tip": "Analize de laborator",
+          "Clinică": "Regina Maria",
+          "Observații": "Repetare analize Diabet",
+      },
+      {
+          "Dată": "2026-10-05",
+          "Tip": "Consult Diabet",
+          "Clinică": "Dr. Clenciu Craiova",
+          "Observații": "Rețetă 3 luni",
+      },
+  ])
+  st.dataframe(prog_df, use_container_width=True)
+
+# ----------------- TAB 5: RAPORT PDF -----------------
+with tab_pdf:
+  st.markdown("### 📄 Generare Raport PDF")
+
+  def make_pdf(data_frame):
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=25,
+        leftMargin=25,
+        topMargin=25,
+        bottomMargin=25,
+    )
+    story = []
+    styles = getSampleStyleSheet()
+
+    story.append(
+        Paragraph(
+            "<b>RAPORT MEDICAL MONITORIZARE SĂNĂTATE</b>", styles["Heading1"]
+        )
+    )
+    story.append(
+        Paragraph(
+            f"Data generării: {datetime.now().strftime('%d.%m.%Y %H:%M')}",
+            styles["Normal"],
+        )
+    )
+    story.append(Spacer(1, 15))
+
+    if not data_frame.empty:
+      table_data = [list(data_frame.columns)]
+      for _, row in data_frame.head(20).iterrows():
+        table_data.append([str(v) for v in row.values])
+
+      t = Table(table_data)
+      t.setStyle(
+          TableStyle([
+              ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e3a8a")),
+              ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+              ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+              ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+              ("FONTSIZE", (0, 0), (-1, -1), 8),
+              ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
+          ])
+      )
+      story.append(t)
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+  if st.button("🚀 Generează Raport PDF", type="primary"):
+    pdf_out = make_pdf(df)
+    st.download_button(
+        label="📥 Descarcă Raportul PDF",
+        data=pdf_out,
+        file_name=f"Raport_Medical_{date.today()}.pdf",
+        mime="application/pdf",
+    )
 
 # ----------------- TAB 6: SETĂRI APLICAȚIE -----------------
 with tab_settings:

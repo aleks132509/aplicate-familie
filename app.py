@@ -20,17 +20,17 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Custom CSS optimizat pentru DARK MODE (Contrast ridicat)
+# Custom CSS optimizat pentru DARK MODE (Contrast ridicat pe text și butoane)
 st.markdown(
     """
     <style>
-    /* Styling general Dark Theme */
+    /* Fundal general Dark Mode */
     .stApp {
         background-color: #0e1117 !important;
         color: #f1f5f9 !important;
     }
     
-    /* Carduri de date (KPI-uri) */
+    /* Styling pentru Carduri KPI */
     .metric-card {
         background-color: #1e222d;
         padding: 18px;
@@ -53,7 +53,7 @@ st.markdown(
         letter-spacing: 0.5px;
     }
 
-    /* Vizibilitate inputuri și butoane */
+    /* Vizibilitate și contrast pentru câmpuri de text */
     .stTextInput > div > div > input {
         color: #ffffff !important;
         background-color: #1e222d !important;
@@ -90,7 +90,7 @@ if "settings" not in st.session_state:
 GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRs6o_ryWI3jCSZ_EpNyv6lDvQakwdEb0RoeuhXXXCdv9lzwCkkEXMorkk2W3ZBvg/pub?output=csv"
 
 # ==========================================
-# ECRAN AUTENTIFICARE (OPTIMIZAT VIZUAL)
+# ECRAN AUTENTIFICARE
 # ==========================================
 if not st.session_state.logged_in:
   st.markdown("<br><br><br>", unsafe_allow_html=True)
@@ -135,25 +135,25 @@ st.sidebar.markdown("---")
 
 
 # ==========================================
-# ÎNCĂRCARE ȘI PARSARE INTELIGENTĂ DATE
+# ÎNCĂRCARE ȘI PARSARE ROBUSTĂ A DATELOR
 # ==========================================
 @st.cache_data(ttl=15)
 def load_and_clean_data(url):
   try:
-    # Încărcare tabel primar (previne erorile la număr variabil de coloane)
+    # 1. Încărcăm tot fișierul brut
     raw_df = pd.read_csv(
         url, header=None, names=[f"col_{i}" for i in range(50)]
     )
 
-    # Căutăm rândul unde se află antetul real (conține 'data' și un parametru medical)
+    # 2. Căutăm rândul unde se află antetul real al tabelului
     header_idx = None
     for idx, row in raw_df.iterrows():
-      # Conversie sigură în string pentru fiecare celulă
-      row_cells = [str(x) for x in row.values if pd.notna(x)]
-      row_str = " ".join(row_cells).lower()
+      # Conversie sigură în string (previne erorile de tip float/NaN)
+      row_cells = [str(val) for val in row.values if pd.notna(val)]
+      row_text = " ".join(row_cells).lower()
 
-      if ("data" in row_str or "dată" in row_str or "date" in row_str) and any(
-          k in row_str
+      if ("data" in row_text or "dată" in row_text or "date" in row_text) and any(
+          k in row_text
           for k in [
               "glicem",
               "tensiun",
@@ -180,19 +180,30 @@ def load_and_clean_data(url):
           cols.append(f"Unnamed_{i}")
       df_clean.columns = cols
     else:
-      df_clean = raw_df.copy()
+      # Fallback: Sare direct peste primele 5 rânduri introductive
+      df_clean = pd.read_csv(url, skiprows=5)
+      df_clean.columns = [str(col).strip() for col in df_clean.columns]
 
-    # Elimină coloanele goale/nefolosite
+    # 3. Curățare coloane invalide
     valid_cols = [
-        c for c in df_clean.columns if not str(c).startswith("Unnamed_")
+        c
+        for c in df_clean.columns
+        if not str(c).startswith("Unnamed_")
+        and "Unnamed" not in str(c)
+        and str(c) != "nan"
+        and str(c) != ""
     ]
-    df_clean = df_clean[valid_cols]
+
+    if valid_cols:
+      df_clean = df_clean[valid_cols]
+
+    # Elimină rândurile complet goale
     df_clean = df_clean.dropna(how="all")
 
     return df_clean
 
   except Exception as e:
-    st.error(f"Eroare la preluarea datelor: {e}")
+    st.error(f"Eroare la procesarea fișierului: {e}")
     return pd.DataFrame()
 
 
@@ -228,7 +239,7 @@ with tab_jurnal:
   st.markdown("### 📊 Tablou de Bord Medical")
 
   if not df.empty:
-    # 1. Calculare KPI-uri
+    # 1. Indicatoare KPI
     kpi1, kpi2, kpi3, kpi4 = st.columns(4)
 
     cols = df.columns
@@ -291,7 +302,7 @@ with tab_jurnal:
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # 2. Grafice Plotly optimizate Dark Mode
+    # 2. Grafice Plotly optimizate Dark Theme
     st.markdown("#### 📈 Grafice Evoluție")
     g1, g2 = st.columns(2)
 
@@ -345,7 +356,7 @@ with tab_jurnal:
 
     st.markdown("---")
 
-    # 3. Tabelul Curat
+    # 3. Tabelul de Date Curat
     st.markdown("#### 📋 Tabelul Măsurătorilor")
     df_display = df.copy()
     if date_col:
@@ -372,7 +383,7 @@ with tab_add:
       if st.form_submit_button(
           "💾 Salvează Înregistrarea", type="primary", use_container_width=True
       ):
-        st.success("Măsurătoarea a fost înregistrată!")
+        st.success("Măsurătoarea a fost salvată!")
 
 # ----------------- TAB 3: MEDICAMENTE -----------------
 with tab_med:
@@ -491,7 +502,7 @@ with tab_pdf:
         mime="application/pdf",
     )
 
-# ----------------- TAB 6: SETĂRI APLICAȚIE -----------------
+# ----------------- TAB 6: SETĂRI -----------------
 with tab_settings:
   st.markdown("### ⚙️ Setări Cont & Sistem")
   s1, s2 = st.columns(2)

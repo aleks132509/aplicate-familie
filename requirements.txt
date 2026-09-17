@@ -1,5 +1,7 @@
 streamlit
 pandas
-numpy
 plotly
 reportlab
+matplotlib
+gspread
+google-auth

@@ -3,7 +3,8 @@ import re
 import unicodedata
 from datetime import date, datetime
 import matplotlib
-matplotlib.use("Agg")  # Necesar pentru generarea graficelor în fundal fără GUI
+
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
 import plotly.graph_objects as go
@@ -567,9 +568,7 @@ with tab_dict["📊 Jurnal & Grafice"]:
         df_g_tab[col_glic] = format_table_column(df_g_tab[col_glic])
 
         st.dataframe(
-            df_g_tab.style.applymap(
-                color_status, subset=["Status Glicemie"]
-            ),
+            df_g_tab.style.map(color_status, subset=["Status Glicemie"]),
             use_container_width=True,
             height=350,
         )
@@ -632,7 +631,7 @@ with tab_dict["📊 Jurnal & Grafice"]:
         df_t_tab[col_dia] = format_table_column(df_t_tab[col_dia])
 
         st.dataframe(
-            df_t_tab.style.applymap(color_status, subset=["Status Tensiune"]),
+            df_t_tab.style.map(color_status, subset=["Status Tensiune"]),
             use_container_width=True,
             height=350,
         )
@@ -677,7 +676,7 @@ with tab_dict["📊 Jurnal & Grafice"]:
         df_p_tab[col_puls] = format_table_column(df_p_tab[col_puls])
 
         st.dataframe(
-            df_p_tab.style.applymap(color_status, subset=["Status Puls"]),
+            df_p_tab.style.map(color_status, subset=["Status Puls"]),
             use_container_width=True,
             height=350,
         )

@@ -15,9 +15,9 @@ st.set_page_config(page_title="Monitorizare Sănătate - Linie de familie", layo
 
 # Utilizatori
 USERS = {
-    "tata": "parola123",
-    "mama": "parola456",
-    "copil": "parola789"
+    "Alex": "Aleks132509",
+    "Ionut": "Ionut061191",
+    "Doctor": "Alex2026"
 }
 
 # Verificare conectare
@@ -60,7 +60,7 @@ def fix_google_sheet_url(url):
         return f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv"
     return url
 
-default_url = st.sidebar.text_input("Link Google Sheet CSV:", "")
+default_url = st.sidebar.text_input("https://docs.google.com/spreadsheets/d/e/2PACX-1vRs6o_ryWI3jCSZ_EpNyv6lDvQakwdEb0RoeuhXXXCdv9lzwCkkEXMorkk2W3ZBvg/pub?output=csv:", "")
 
 # Titlu Principal
 st.title("🩺 Registru Personal de Sănătate")

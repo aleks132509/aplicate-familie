@@ -1,13 +1,11 @@
 import io
-import re
 import unicodedata
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 import streamlit as st
 
@@ -21,7 +19,6 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Custom CSS Dark Mode
 st.markdown(
     """
     <style>
@@ -80,11 +77,9 @@ if "settings" not in st.session_state:
       "target_ta_dia": 80,
   }
 
-# LINK GOOGLE SHEET
 GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRs6o_ryWI3jCSZ_EpNyv6lDvQakwdEb0RoeuhXXXCdv9lzwCkkEXMorkk2W3ZBvg/pub?output=csv"
 
 
-# Funcție eliminare diacritice (pentru PDF)
 def remove_diacritics(text):
   if not isinstance(text, str):
     text = str(text)
@@ -96,11 +91,11 @@ def remove_diacritics(text):
 
 
 # ==========================================
-# ECRAN AUTENTIFICARE
+# AUTENTIFICARE
 # ==========================================
 if not st.session_state.logged_in:
   st.markdown("<br><br><br>", unsafe_allow_html=True)
-  col_a, col_b, col_c = st.columns([1, 1.2, 1])
+  _, col_b, _ = st.columns([1, 1.2, 1])
 
   with col_b:
     st.markdown(
@@ -142,16 +137,15 @@ st.sidebar.markdown("---")
 
 
 # ==========================================
-# ÎNCĂRCARE ȘI PARSARE DIRECTĂ A DATELOR
+# PARSARE SECURE A DATELOR (FIX KEYERROR)
 # ==========================================
 @st.cache_data(ttl=15)
 def load_and_clean_data(url):
   try:
-    # 1. Citiți tot fișierul brut fără antet
     raw_df = pd.read_csv(url, header=None)
 
-    # 2. Caută rândul în care începe tabelul cu date
-    header_idx = None
+    # Identificăm rândul care conține capul de tabel
+    header_idx = 0
     for idx, row in raw_df.iterrows():
       row_str = " ".join([str(v) for v in row.values if pd.notna(v)]).lower()
       if any(
@@ -161,16 +155,10 @@ def load_and_clean_data(url):
         header_idx = idx
         break
 
-    if header_idx is not None:
-      df_clean = pd.read_csv(url, skiprows=header_idx)
-    else:
-      # Daca nu găsește automat, sare peste primele 9 rânduri introductive
-      df_clean = pd.read_csv(url, skiprows=9)
-
-    # Curățare denumiri coloane
+    df_clean = pd.read_csv(url, skiprows=header_idx)
     df_clean.columns = [str(c).strip() for c in df_clean.columns]
 
-    # Elimină coloanele nespecificate/goale (ex: Unnamed)
+    # Elimină coloanele nespecificate/Unammed
     valid_cols = [
         c
         for c in df_clean.columns
@@ -179,10 +167,7 @@ def load_and_clean_data(url):
     if valid_cols:
       df_clean = df_clean[valid_cols]
 
-    # Elimină rândurile goale
-    df_clean = df_clean.dropna(how="all")
-
-    return df_clean
+    return df_clean.dropna(how="all")
   except Exception as e:
     st.error(f"Eroare la preluarea datelor: {e}")
     return pd.DataFrame()
@@ -190,21 +175,23 @@ def load_and_clean_data(url):
 
 df = load_and_clean_data(GOOGLE_SHEET_URL)
 
-# Identificare automatizată coloană Dată
+# Identificare sigură a coloanei de Dată
 date_col = None
 if not df.empty:
   for c in df.columns:
-    if "dat" in str(c).lower() or "date" in str(c).lower():
+    if any(k in str(c).lower() for k in ["dat", "date"]):
       date_col = c
       break
 
-  if date_col:
+  if date_col and date_col in df.columns:
     df[date_col] = pd.to_datetime(df[date_col], errors="coerce", dayfirst=True)
     df = df.dropna(subset=[date_col])
     df = df.sort_values(by=date_col, ascending=False)
+  else:
+    date_col = None
 
 # ==========================================
-# INTERFAȚĂ PRINCIPALĂ (TAB-URI)
+# INTERFAȚĂ PRINCIPALĂ
 # ==========================================
 tab_jurnal, tab_add, tab_med, tab_prog, tab_pdf, tab_settings = st.tabs([
     "📊 Jurnal & Grafice",
@@ -219,7 +206,7 @@ tab_jurnal, tab_add, tab_med, tab_prog, tab_pdf, tab_settings = st.tabs([
 with tab_jurnal:
   st.markdown("### 📊 Tablou de Bord Medical")
 
-  if not df.empty:
+  if not df.empty and date_col is not None:
     kpi1, kpi2, kpi3, kpi4 = st.columns(4)
 
     cols = df.columns
@@ -279,9 +266,11 @@ with tab_jurnal:
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # Grafice Plotly
+    # Grafice cu protecție KeyError
     st.markdown("#### 📈 Grafice Evoluție")
     g1, g2 = st.columns(2)
+
+    x_axis_data = df[date_col] if date_col in df.columns else df.index
 
     with g1:
       fig_g = go.Figure()
@@ -289,7 +278,7 @@ with tab_jurnal:
       for gc in glic_cols:
         fig_g.add_trace(
             go.Scatter(
-                x=df[date_col],
+                x=x_axis_data,
                 y=pd.to_numeric(df[gc], errors="coerce"),
                 mode="lines+markers",
                 name=gc,
@@ -314,7 +303,7 @@ with tab_jurnal:
       for tc in ta_cols:
         fig_ta.add_trace(
             go.Scatter(
-                x=df[date_col],
+                x=x_axis_data,
                 y=pd.to_numeric(df[tc], errors="coerce"),
                 mode="lines+markers",
                 name=tc,
@@ -334,14 +323,17 @@ with tab_jurnal:
     # Tabel
     st.markdown("#### 📋 Tabelul Măsurătorilor")
     df_display = df.copy()
-    if date_col:
+    if date_col and date_col in df_display.columns:
       df_display[date_col] = df_display[date_col].dt.strftime("%Y-%m-%d")
 
     st.dataframe(df_display, use_container_width=True, height=420)
   else:
-    st.warning("Nu s-au găsit date valide în fișierul Google Sheet.")
+    st.warning(
+        "Nu s-au găsit date valide sau coloana de dată nu a putut fi detectată"
+        " în fișierul Google Sheet."
+    )
 
-# ----------------- TAB 2: ADAUGĂ Înregistrare -----------------
+# ----------------- TAB 2: ADAUGĂ ÎNREGISTRARE -----------------
 with tab_add:
   st.markdown("### 📝 Formular Introducere Măsurători")
   with st.container(border=True):
@@ -353,8 +345,8 @@ with tab_add:
         st.selectbox(
             "🍽️ Momentul Măsurătorii",
             [
-                "Înainte de masă (Ajeun / Pe nemâncate)",
-                "După masă (2 ore postprandial)",
+                "Înainte de masă (Ajeun)",
+                "După masă (2 ore)",
                 "Dimineața (La trezire)",
                 "Seara (Înainte de culcare)",
             ],
@@ -365,12 +357,12 @@ with tab_add:
         st.number_input("🫀 Tensiune Diastolică", value=80)
         st.number_input("💓 Puls (bpm)", value=72)
 
-      st.text_area("✍️ Observații / Stare generală")
+      st.text_area("✍️ Observații")
 
       if st.form_submit_button(
           "💾 Salvează Înregistrarea", type="primary", use_container_width=True
       ):
-        st.success("Măsurătoarea a fost salvată local!")
+        st.success("Măsurătoarea a fost salvată!")
 
 # ----------------- TAB 3: MEDICAMENTE -----------------
 with tab_med:
@@ -455,7 +447,6 @@ with tab_pdf:
     story.append(Spacer(1, 15))
 
     if not data_frame.empty:
-      # Curățare diacritice din antet și din celule
       clean_cols = [remove_diacritics(c) for c in data_frame.columns]
       table_data = [clean_cols]
 

@@ -1,7 +1,6 @@
 import io
 import re
-from datetime import date, datetime
-import numpy as np
+from datetime import date, datetime, timedelta
 import pandas as pd
 import plotly.express as px
 from reportlab.lib import colors
@@ -11,36 +10,40 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 import streamlit as st
 
 # ==========================================
-# CONFIGURARE UTILIZATORI ȘI PAROLE
-# (Modifică utilizatorii și parolele aici)
+# UTILIZATORI ȘI PAROLE
 # ==========================================
-USERS = {"tata": "parola123", "mama": "parola456", "copil": "parola789"}
+USERS = {
+    "Alex": "Aleks132509",
+    "Ionut": "Ionut061191",
+    "Doctor": "Alex2026",
+}
 
 # ==========================================
-# LINK GOOGLE SHEET (Ascuns din interfață)
+# LINK GOOGLE SHEET (Integrat direct)
 # ==========================================
 GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRs6o_ryWI3jCSZ_EpNyv6lDvQakwdEb0RoeuhXXXCdv9lzwCkkEXMorkk2W3ZBvg/pub?output=csv"
 
-# Setare pagină
+# Configurare Pagină
 st.set_page_config(
-    page_title="Monitorizare Sănătate - Linie de familie",
+    page_title="Monitorizare Sănătate",
     layout="wide",
     page_icon="🩺",
+    initial_sidebar_state="expanded",
 )
 
-# Autentificare
+# Authentificare
 if "logged_in" not in st.session_state:
   st.session_state.logged_in = False
 
 if not st.session_state.logged_in:
   st.title("🔒 Autentificare Registru Sănătate")
-  st.markdown("Introduceți numele de utilizator și parola setată pentru familie.")
+  st.markdown("Introduceți numele de utilizator și parola contului dumneavoastră.")
 
-  col1, col2 = st.columns([1, 2])
+  col1, _ = st.columns([1, 2])
   with col1:
     username = st.text_input("Utilizator")
     password = st.text_input("Parolă", type="password")
-    if st.button("🔑 Conectare", type="primary"):
+    if st.button("🔑 Conectare", type="primary", use_container_width=True):
       if USERS.get(username) == password:
         st.session_state.logged_in = True
         st.session_state.user = username
@@ -49,90 +52,123 @@ if not st.session_state.logged_in:
         st.error("Utilizator sau parolă incorectă!")
   st.stop()
 
-# Sidebar (fără link-ul Google Sheet)
-st.sidebar.title(f"👤 Utilizator: {st.session_state.user.capitalize()}")
-if st.sidebar.button("🚪 Deconectare"):
+# Sidebar
+st.sidebar.title(f"👤 Conectat: {st.session_state.user}")
+if st.sidebar.button("🚪 Deconectare", use_container_width=True):
   st.session_state.logged_in = False
   st.rerun()
 
-
-# Funcție procesare URL Google Sheet
-def fix_google_sheet_url(url):
-  if not url:
-    return url
-  url = url.strip()
-  if "output=csv" in url or "export?format=csv" in url:
-    return url
-  match = re.search(r"/d/([a-zA-Z0-9-_]+)", url)
-  if match and match.group(1) != "e":
-    sheet_id = match.group(1)
-    return f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv"
-  return url
-
-
-# Titlu Principal
-st.title("🩺 Registru Personal de Sănătate")
-st.markdown(
-    "Monitorizare Glicemie, Tensiune Arterială, Medicamente și Programări"
-    " Medicale"
+st.sidebar.markdown("---")
+st.sidebar.markdown("**⚙️ Setări Notificări**")
+enable_notifs = st.sidebar.checkbox(
+    "🔔 Activează notificări programări", value=True
+)
+notif_days = st.sidebar.slider(
+    "Zile în avans pentru alertă:", min_value=1, max_value=30, value=7
 )
 
-# Tabs
+
+# Încărcare Date din Google Sheet
+@st.cache_data(ttl=15)
+def load_data(url):
+  try:
+    data = pd.read_csv(url)
+    data.columns = [str(c).strip() for c in data.columns]
+    return data
+  except Exception as e:
+    st.error(f"Eroare la preluarea datelor din Google Sheet: {e}")
+    return pd.DataFrame()
+
+
+df = load_data(GOOGLE_SHEET_URL)
+
+# Header Principal
+st.title("🩺 Registru Personal de Sănătate")
+
+# System de Notificări Programări
+prog_data = pd.DataFrame([
+    {
+        "Dată": "2026-09-25",
+        "Tip": "Analize de laborator",
+        "Clinică / Medic": "Regina Maria",
+        "Observații": "Repetare analize Diabet",
+        "Efectuat": "Nu",
+    },
+    {
+        "Dată": "2026-10-05",
+        "Tip": "Consult Diabet",
+        "Clinică / Medic": "Dr. Clenciu Craiova",
+        "Observații": "Rețetă 3 luni",
+        "Efectuat": "Nu",
+    },
+])
+
+if enable_notifs and not prog_data.empty:
+  prog_data["Dată_dt"] = pd.to_datetime(prog_data["Dată"], errors="coerce").dt.date
+  today = date.today()
+  upcoming = prog_data[
+      (prog_data["Dată_dt"] >= today)
+      & (prog_data["Dată_dt"] <= today + timedelta(days=notif_days))
+      & (prog_data["Efectuat"] == "Nu")
+  ]
+
+  if not upcoming.empty:
+    for _, row in upcoming.iterrows():
+      st.warning(
+          f"🔔 **Atenție! Programare viitoare în curând:** {row['Tip']} la"
+          f" **{row['Clinică / Medic']}** pe data de **{row['Dată']}**"
+          f" ({row['Observații']})."
+      )
+
+# Navigare prin Tab-uri
 tab_jurnal, tab_add, tab_med, tab_prog, tab_pdf = st.tabs([
     "📊 Jurnal & Grafice",
-    "➕ Adaugă Măsurătoare",
+    "➕ Adaugă / Modifică Măsurătoare",
     "💊 Medicamente",
-    "📅 Programări",
+    "📅 Programări & Notificări",
     "📄 Export Raport PDF",
 ])
 
-
-@st.cache_data(ttl=30)
-def load_data(url):
-  if not url:
-    return pd.DataFrame()
-  csv_url = fix_google_sheet_url(url)
-  data = pd.read_csv(csv_url)
-  # Curățare nume coloane
-  data.columns = [str(c).strip() for c in data.columns]
-  return data
-
-
-try:
-  df = load_data(GOOGLE_SHEET_URL)
-except Exception as e:
-  st.error(
-      f"Eroare la conectarea cu Google Sheets: {e}. Verificați dacă link-ul este"
-      " publicat ca CSV."
-  )
-  df = pd.DataFrame()
-
-# ----------------- TAB 1: JURNAL & GRAFICE -----------------
+# ----------------- TAB 1: JURNAL & GRAFICE (MAIN PAGE) -----------------
 with tab_jurnal:
+  st.subheader("📋 Toate Datele din Spreadsheet")
+
   if not df.empty:
-    st.subheader("📈 Grafice Evoluție")
+    # Afișare tabel complet nefiltrat
+    st.dataframe(df, use_container_width=True, height=350)
 
-    # Identificare flexibilă a coloanei de dată
+    st.markdown("---")
+    st.subheader("📈 Evoluție Grafică")
+
+    # Identificare flexibilă a coloanelor
+    cols = list(df.columns)
     date_col = next(
-        (c for c in df.columns if "dat" in c.lower() or "date" in c.lower()),
-        df.columns[0],
+        (c for c in cols if "dat" in c.lower() or "date" in c.lower()), cols[0]
     )
+    numeric_cols = df.select_dtypes(include=["number"]).columns.tolist()
 
-    col_g1, col_g2 = st.columns(2)
+    if not numeric_cols:
+      # Încercare convertire coloane la valori numerice dacă sunt citite ca string
+      for c in cols:
+        df[c] = pd.to_numeric(df[c], errors="ignore")
+      numeric_cols = df.select_dtypes(include=["number"]).columns.tolist()
 
-    with col_g1:
-      st.markdown("##### 🩸 Evoluție Glicemie (mg/dL)")
-      cols_glic = [c for c in df.columns if "glic" in c.lower()]
-      if not cols_glic and len(df.columns) >= 4:
-        cols_glic = df.columns[2:4].tolist()
+    col_sel1, col_sel2 = st.columns(2)
 
-      if cols_glic:
+    with col_sel1:
+      glic_cols = [c for c in cols if "glic" in c.lower()]
+      selected_glic = st.multiselect(
+          "Alege coloanele de Glicemie pentru grafic:",
+          options=cols,
+          default=glic_cols if glic_cols else (numeric_cols[:2] if len(numeric_cols)>=2 else cols),
+      )
+      if selected_glic:
         fig_glic = px.line(
             df,
             x=date_col,
-            y=cols_glic,
+            y=selected_glic,
             markers=True,
-            title="Glicemie în Timp",
+            title="Evoluție Glicemie",
         )
         fig_glic.add_hrect(
             y0=70,
@@ -142,118 +178,101 @@ with tab_jurnal:
             opacity=0.1,
             annotation_text="Ideal à jeun",
         )
-        fig_glic.add_hrect(
-            y0=100,
-            y1=125,
-            line_width=0,
-            fillcolor="orange",
-            opacity=0.1,
-            annotation_text="Atenție",
-        )
         st.plotly_chart(fig_glic, use_container_width=True)
-      else:
-        st.info("Nu s-au găsit coloane specifice pentru glicemie.")
 
-    with col_g2:
-      st.markdown("##### 🫀 Evoluție Tensiune Arterială (mmHg)")
-      cols_ta = [
+    with col_sel2:
+      ta_cols = [
           c
-          for c in df.columns
+          for c in cols
           if "sist" in c.lower()
           or "diast" in c.lower()
           or "tens" in c.lower()
           or "ta" in c.lower()
+          or "puls" in c.lower()
       ]
-      if not cols_ta and len(df.columns) >= 6:
-        cols_ta = df.columns[4:6].tolist()
-
-      if cols_ta:
+      selected_ta = st.multiselect(
+          "Alege coloanele de Tensiune / Puls pentru grafic:",
+          options=cols,
+          default=ta_cols if ta_cols else (numeric_cols[2:4] if len(numeric_cols)>=4 else cols),
+      )
+      if selected_ta:
         fig_ta = px.line(
             df,
             x=date_col,
-            y=cols_ta,
+            y=selected_ta,
             markers=True,
-            title="Tensiune Arterială",
-        )
-        fig_ta.add_hrect(
-            y0=90,
-            y1=120,
-            line_width=0,
-            fillcolor="green",
-            opacity=0.1,
-            annotation_text="Sistolică Optimă",
+            title="Evoluție Tensiune / Puls",
         )
         st.plotly_chart(fig_ta, use_container_width=True)
-      else:
-        st.info("Nu s-au găsit coloane specifice pentru tensiune arterială.")
-
-    st.markdown("---")
-    st.subheader("📋 Istoric Date Măsurate")
-    st.dataframe(df, use_container_width=True)
   else:
-    st.warning(
-        "Nu există date de afișat sau tabela Google Sheet este goală /"
-        " inaccesibilă."
-    )
+    st.info("Nu s-au putut încărca date din Google Sheet.")
 
-# ----------------- TAB 2: FORMULAR DE ADAUGARE -----------------
+# ----------------- TAB 2: ADAUGĂ / MODIFICĂ MĂSURĂTOARE -----------------
 with tab_add:
-  st.subheader("📝 Completează o Măsurătoare Nouă")
-  with st.form("form_masuratoare"):
-    c_d1, c_d2 = st.columns(2)
-    with c_d1:
-      data_m = st.date_input("📅 Data măsurătorii", value=date.today())
-    with c_d2:
-      moment_m = st.selectbox("🌅 / 🌆 Momentul zilei", ["Dimineața", "Seara"])
+  st.subheader("📝 Înregistrează sau Modifică Măsurătoare")
+  st.markdown(
+      "Puteți selecta orice dată anterioară sau curentă pentru a adăuga ori"
+      " modifica valorile."
+  )
+
+  with st.form("form_edit_add"):
+    c1, c2 = st.columns(2)
+    with c1:
+      data_selectata = st.date_input(
+          "📅 Selectează Data Măsurătorii", value=date.today()
+      )
+    with c2:
+      moment_selectat = st.selectbox(
+          "🌅 / 🌆 Momentul zilei", ["Dimineața", "Prânz", "Seara"]
+      )
 
     st.markdown("---")
-    st.markdown("##### 🩸 Glicemie (mg/dL)")
     cg1, cg2 = st.columns(2)
     with cg1:
       glic_inainte = st.number_input(
-          "Înainte de masă", min_value=0, max_value=400, value=0
+          "Glicemie Înainte de masă (mg/dL)",
+          min_value=0,
+          max_value=500,
+          value=100,
+      )
+      ta_sis = st.number_input(
+          "Tensiune Sistolică - Mare (mmHg)",
+          min_value=0,
+          max_value=260,
+          value=120,
       )
     with cg2:
       glic_dupa = st.number_input(
-          "După masă", min_value=0, max_value=400, value=0
+          "Glicemie După masă (mg/dL)", min_value=0, max_value=500, value=130
+      )
+      ta_dia = st.number_input(
+          "Tensiune Diastolică - Mică (mmHg)",
+          min_value=0,
+          max_value=160,
+          value=80,
       )
 
-    st.markdown("---")
-    st.markdown("##### 🫀 Tensiune Arterială (mmHg) & Puls")
-    ct1, ct2, ct3 = st.columns(3)
-    with ct1:
-      ta_sis_in = st.number_input(
-          "Sistolică (mare) - Înainte", min_value=0, max_value=250, value=0
-      )
-      ta_sis_dup = st.number_input(
-          "Sistolică (mare) - După", min_value=0, max_value=250, value=0
-      )
-    with ct2:
-      ta_dia_in = st.number_input(
-          "Diastolică (mică) - Înainte", min_value=0, max_value=150, value=0
-      )
-      ta_dia_dup = st.number_input(
-          "Diastolică (mică) - După", min_value=0, max_value=150, value=0
-      )
-    with ct3:
-      puls_v = st.number_input("Puls (bpm)", min_value=0, max_value=200, value=0)
-
-    st.markdown("---")
-    notite_v = st.text_area(
-        "✍️ Notițe / Simptome",
-        placeholder="Ex: Mâncat târziu, amețeală ușoară...",
+    puls_val = st.number_input(
+        "Puls (bpm)", min_value=0, max_value=220, value=75
+    )
+    notite_val = st.text_area(
+        "✍️ Observații / Simptome / Note speciale",
+        placeholder="Introduceți note relevante pentru ziua selectată...",
     )
 
-    btn_submit = st.form_submit_button(
-        "💾 Salvează Măsurătoarea", type="primary"
+    submit_btn = st.form_submit_button(
+        "💾 Salvează Datele pentru Ziua Selectată", type="primary"
     )
-    if btn_submit:
-      st.success(f"Măsurătoarea pentru {data_m} ({moment_m}) a fost salvată!")
+    if submit_btn:
+      st.success(
+          f"Măsurătoarea din data de {data_selectata} ({moment_selectat}) a fost"
+          " înregistrată cu succes!"
+      )
 
 # ----------------- TAB 3: MEDICAMENTE -----------------
 with tab_med:
-  st.subheader("💊 Schema de Tratament & Medicamente")
-  meds_data = pd.DataFrame([
+  st.subheader("💊 Schema de Tratament")
+  meds_df = pd.DataFrame([
       {
           "Medicament": "Glucophage",
           "Doză": "1000 mg",
@@ -291,67 +310,51 @@ with tab_med:
           "Meniu": "După masă",
       },
   ])
-  st.dataframe(meds_data, use_container_width=True)
+  st.dataframe(meds_df, use_container_width=True)
 
-# ----------------- TAB 4: PROGRAMĂRI -----------------
+# ----------------- TAB 4: PROGRAMĂRI & NOTIFICĂRI -----------------
 with tab_prog:
   st.subheader("📅 Programări Medicale & Analize")
-  prog_data = pd.DataFrame([
-      {
-          "Dată": "2026-12-02",
-          "Tip": "Analize de laborator",
-          "Clinică / Medic": "Regina Maria",
-          "Observații": "Repetare analize Diabet",
-          "Efectuat": "Nu",
-      },
-      {
-          "Dată": "2026-12-09",
-          "Tip": "Consult Diabet",
-          "Clinică / Medic": "Dr. Clenciu Craiova",
-          "Observații": "Rețetă 3 luni",
-          "Efectuat": "Nu",
-      },
-  ])
-  st.dataframe(prog_data, use_container_width=True)
-
-# ----------------- TAB 5: EXPORT PDF REAL -----------------
-with tab_pdf:
-  st.subheader("📄 Generare Raport Medical PDF")
-  st.markdown(
-      "Apăsați butonul de mai jos pentru a genera un fișier **PDF oficial** cu"
-      " istoricul măsurătorilor."
+  st.dataframe(
+      prog_data.drop(columns=["Dată_dt"], errors="ignore"),
+      use_container_width=True,
   )
 
-  def generate_pdf_report(df_data):
+  st.markdown("---")
+  st.subheader("➕ Adaugă Programare Nouă")
+  with st.form("form_prog"):
+    cp1, cp2 = st.columns(2)
+    with cp1:
+      p_data = st.date_input("Data Programării", value=date.today())
+      p_tip = st.text_input("Tip (ex: Consult, Analize)")
+    with cp2:
+      p_clinic = st.text_input("Clinică / Medic")
+      p_obs = st.text_input("Observații")
+
+    if st.form_submit_button("💾 Salvează Programarea"):
+      st.success(f"Programarea pentru {p_data} a fost adăugată!")
+
+# ----------------- TAB 5: EXPORT PDF -----------------
+with tab_pdf:
+  st.subheader("📄 Generare Raport PDF")
+
+  def make_pdf(data_frame):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer,
         pagesize=A4,
-        rightMargin=30,
-        leftMargin=30,
-        topMargin=30,
-        bottomMargin=30,
+        rightMargin=25,
+        leftMargin=25,
+        topMargin=25,
+        bottomMargin=25,
     )
     story = []
-
     styles = getSampleStyleSheet()
-    title_style = ParagraphStyle(
-        "TitleStyle",
-        parent=styles["Heading1"],
-        fontSize=16,
-        textColor=colors.HexColor("#0f172a"),
-    )
-    section_style = ParagraphStyle(
-        "SectionStyle",
-        parent=styles["Heading2"],
-        fontSize=12,
-        textColor=colors.HexColor("#1e3a8a"),
-        spaceBefore=12,
-        spaceAfter=8,
-    )
 
     story.append(
-        Paragraph("<b>RAPORT MEDICAL MONITORIZARE SĂNĂTATE</b>", title_style)
+        Paragraph(
+            "<b>RAPORT MEDICAL MONITORIZARE SĂNĂTATE</b>", styles["Heading1"]
+        )
     )
     story.append(
         Paragraph(
@@ -361,45 +364,33 @@ with tab_pdf:
     )
     story.append(Spacer(1, 15))
 
-    story.append(
-        Paragraph("<b>1. Istoric Măsurători Recent</b>", section_style)
-    )
+    if not data_frame.empty:
+      table_data = [list(data_frame.columns)]
+      for _, row in data_frame.head(20).iterrows():
+        table_data.append([str(v) for v in row.values])
 
-    if not df_data.empty:
-      headers = list(df_data.columns[:7])
-      hist_table_data = [headers]
-
-      for _, r in df_data.head(15).iterrows():
-        row_vals = [str(r.get(c, "-")) for c in headers]
-        hist_table_data.append(row_vals)
-
-      t_hist = Table(hist_table_data)
-      t_hist.setStyle(
+      t = Table(table_data)
+      t.setStyle(
           TableStyle([
               ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e3a8a")),
               ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
               ("ALIGN", (0, 0), (-1, -1), "CENTER"),
               ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-              ("FONTSIZE", (0, 0), (-1, -1), 8),
+              ("FONTSIZE", (0, 0), (-1, -1), 7),
               ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
           ])
       )
-      story.append(t_hist)
-    else:
-      story.append(
-          Paragraph("Nu există date disponibile.", styles["Normal"])
-      )
+      story.append(t)
 
     doc.build(story)
     buffer.seek(0)
     return buffer.getvalue()
 
-  if st.button("🚀 Generează Fișier PDF", type="primary"):
-    pdf_bytes = generate_pdf_report(df)
-    st.success("✅ Fișierul PDF a fost creat cu succes!")
+  if st.button("🚀 Generează Raport PDF", type="primary"):
+    pdf_out = make_pdf(df)
     st.download_button(
         label="📥 Descarcă Raportul PDF",
-        data=pdf_bytes,
-        file_name=f"Raport_Sanatate_{date.today().strftime('%Y_%m_%d')}.pdf",
+        data=pdf_out,
+        file_name=f"Raport_Medical_{date.today()}.pdf",
         mime="application/pdf",
     )

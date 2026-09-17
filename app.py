@@ -10,7 +10,6 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 import streamlit as st
 
-# Încercare import gspread pentru scriere directă în Google Sheet
 try:
   import gspread
   from google.oauth2.service_account import Credentials
@@ -108,7 +107,6 @@ if "settings" not in st.session_state:
       "target_ta_dia": 80,
   }
 
-# URL Preluat securizat din st.secrets
 GOOGLE_SHEET_URL = st.secrets.get(
     "GOOGLE_SHEET_URL",
     "https://docs.google.com/spreadsheets/d/e/2PACX-1vRs6o_ryWI3jCSZ_EpNyv6lDvQakwdEb0RoeuhXXXCdv9lzwCkkEXMorkk2W3ZBvg/pub?output=csv",
@@ -174,21 +172,16 @@ st.sidebar.markdown("---")
 
 
 # ==========================================
-# ÎNCĂRCARE & CURĂȚARE DATE ROBUSTĂ
+# ÎNCĂRCARE & CURĂȚARE DATE DIRECTĂ
 # ==========================================
 @st.cache_data(ttl=5)
 def load_and_clean_data(url):
   if not url:
     return pd.DataFrame()
 
-  target_url = url
-  match = re.search(r"/d/([a-zA-Z0-9-_]+)", url)
-  if match:
-    doc_id = match.group(1)
-    target_url = f"https://docs.google.com/spreadsheets/d/{doc_id}/export?format=csv"
-
   try:
-    df_raw = pd.read_csv(target_url, dtype=str, header=None)
+    # Folosim direct link-ul primit, fără modificări de format
+    df_raw = pd.read_csv(url, dtype=str, header=None)
     if df_raw.empty:
       return pd.DataFrame()
 
@@ -202,9 +195,9 @@ def load_and_clean_data(url):
         break
 
     if header_row_idx is not None:
-      df_clean = pd.read_csv(target_url, skiprows=header_row_idx)
+      df_clean = pd.read_csv(url, skiprows=header_row_idx)
     else:
-      df_clean = pd.read_csv(target_url)
+      df_clean = pd.read_csv(url)
 
     df_clean.columns = [str(c).strip() for c in df_clean.columns]
     valid_cols = [

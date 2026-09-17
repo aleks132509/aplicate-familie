@@ -60,8 +60,7 @@ def fix_google_sheet_url(url):
         return f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv"
     return url
 
-default_url = st.sidebar.text_input("default_url = st.sidebar.text_input("Link Google Sheet CSV:", "https://docs.google.com/spreadsheets/d/e/2PACX-1vRs6o_ryWI3jCSZ_EpNyv6lDvQakwdEb0RoeuhXXXCdv9lzwCkkEXMorkk2W3ZBvg/pub?output=csv")
-
+default_url = st.sidebar.text_input("Link Google Sheet CSV:", "https://docs.google.com/spreadsheets/d/e/2PACX-1vRs6o_ryWI3jCSZ_EpNyv6lDvQakwdEb0RoeuhXXXCdv9lzwCkkEXMorkk2W3ZBvg/pub?output=csv")
 # Titlu Principal
 st.title("🩺 Registru Personal de Sănătate")
 st.markdown("Monitorizare Glicemie, Tensiune Arterială, Medicamente și Programări Medicale")

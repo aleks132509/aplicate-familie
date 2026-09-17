@@ -10,7 +10,7 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 import streamlit as st
 
-# Încercare import gspread pentru integrare scriere directă în Google Sheet
+# Încercare import gspread pentru scriere directă în Google Sheet
 try:
   import gspread
   from google.oauth2.service_account import Credentials
@@ -108,6 +108,7 @@ if "settings" not in st.session_state:
       "target_ta_dia": 80,
   }
 
+# URL Preluat securizat din st.secrets
 GOOGLE_SHEET_URL = st.secrets.get(
     "GOOGLE_SHEET_URL",
     "https://docs.google.com/spreadsheets/d/e/2PACX-1vRs6o_ryWI3jCSZ_EpNyv6lDvQakwdEb0RoeuhXXXCdv9lzwCkkEXMorkk2W3ZBvg/pub?output=csv",
@@ -173,7 +174,7 @@ st.sidebar.markdown("---")
 
 
 # ==========================================
-# ÎNCĂRCARE & CURĂȚARE DATE
+# ÎNCĂRCARE & CURĂȚARE DATE ROBUSTĂ
 # ==========================================
 @st.cache_data(ttl=5)
 def load_and_clean_data(url):
@@ -211,8 +212,71 @@ def load_and_clean_data(url):
 
     return df_clean
 
-  except Exception:
+  except Exception as e:
+    st.error(f"Eroare citire date: {e}")
     return pd.DataFrame()
+
+
+# Căutare / Salvare directă în Google Sheet via API (dacă e configurat gcp_service_account)
+def save_to_google_sheet(
+    date_str, moment_str, glic_v, sis_v, dia_v, puls_v, obs_v
+):
+  if not HAS_GSPREAD or "gcp_service_account" not in st.secrets:
+    st.warning(
+        "⚠️ Modulul de scriere automată în Google Sheet necesită configurarea"
+        " 'gcp_service_account' în Streamlit Secrets."
+    )
+    return False
+
+  try:
+    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+    creds = Credentials.from_service_account_info(
+        dict(st.secrets["gcp_service_account"]), scopes=scopes
+    )
+    client = gspread.authorize(creds)
+
+    sheet_url = st.secrets["GOOGLE_SHEET_URL"]
+    sh = client.open_by_url(sheet_url)
+    ws = sh.get_worksheet(0)
+
+    records = ws.get_all_values()
+    if not records:
+      return False
+
+    # Căutăm rândul existent pentru suprascriere
+    row_to_update = None
+    for idx, row in enumerate(records[1:], start=2):
+      if len(row) >= 2 and row[0].strip() == date_str and row[1].strip() == moment_str:
+        row_to_update = idx
+        break
+
+    new_row = [
+        date_str,
+        moment_str,
+        str(glic_v) if glic_v > 0 else "0",
+        str(sis_v) if sis_v > 0 else "0",
+        str(dia_v) if dia_v > 0 else "0",
+        str(puls_v) if puls_v > 0 else "0",
+        obs_v,
+    ]
+
+    if row_to_update:
+      ws.update(f"A{row_to_update}:G{row_to_update}", [new_row])
+      st.success(
+          f"✅ Rândul de la data {date_str} ({moment_str}) a fost SUPRASCRIS"
+          " direct în Google Sheet!"
+      )
+    else:
+      ws.append_row(new_row)
+      st.success(
+          f"✅ Rând nou adăugat pentru {date_str} ({moment_str}) în Google"
+          " Sheet!"
+      )
+
+    return True
+  except Exception as e:
+    st.error(f"Eroare la salvarea în Google Sheet: {e}")
+    return False
 
 
 df = load_and_clean_data(GOOGLE_SHEET_URL)
@@ -232,7 +296,7 @@ if not date_col and len(df.columns) > 0:
 if not moment_col and len(df.columns) > 1:
   moment_col = df.columns[1]
 
-# Sortare Cronologică
+# Sortare Cronologică (12.09.2026 sus -> prezent jos)
 if date_col and date_col in df.columns:
   df[date_col] = pd.to_datetime(
       df[date_col].astype(str).str.strip(), format="%d.%m.%Y", errors="coerce"
@@ -241,7 +305,7 @@ if date_col and date_col in df.columns:
     df[date_col] = pd.to_datetime(df[date_col], dayfirst=True, errors="coerce")
   df = df.dropna(subset=[date_col]).sort_values(by=date_col, ascending=True)
 
-# Identificare Coloane de Măsurători
+# Identificare Coloane Măsurători
 cols = list(df.columns)
 col_glic = next(
     (
@@ -273,7 +337,7 @@ if not col_dia and len(cols) > 4:
 if not col_puls and len(cols) > 5:
   col_puls = cols[5]
 
-# Funcție ajutătoare pentru curățarea valorilor (0/NaN -> "Nemăsurat")
+
 def format_table_column(series):
   return (
       series.astype(str)
@@ -301,7 +365,6 @@ with tab_dict["📊 Jurnal & Grafice"]:
   st.markdown("### 📊 Tablou de Bord Medical")
 
   if not df.empty and date_col in df.columns:
-    # 1. Carduri KPI
     kpi1, kpi2, kpi3, kpi4 = st.columns(4)
 
     with kpi1:
@@ -380,7 +443,6 @@ with tab_dict["📊 Jurnal & Grafice"]:
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # 2. Sub-taburi separate pentru fiecare parametru
     sub_tab_glic, sub_tab_ta, sub_tab_puls, sub_tab_all = st.tabs(
         ["🩸 Glicemie", "🫀 Tensiune Arterială", "💓 Puls", "📋 Toate Datele"]
     )
@@ -424,7 +486,6 @@ with tab_dict["📊 Jurnal & Grafice"]:
         )
         st.plotly_chart(fig_g, use_container_width=True)
 
-        # Tabel separat Glicemie
         cols_to_show = [date_col]
         if moment_col:
           cols_to_show.append(moment_col)
@@ -479,7 +540,6 @@ with tab_dict["📊 Jurnal & Grafice"]:
         )
         st.plotly_chart(fig_ta, use_container_width=True)
 
-        # Tabel separat Tensiune
         cols_to_show = [date_col]
         if moment_col:
           cols_to_show.append(moment_col)
@@ -520,7 +580,6 @@ with tab_dict["📊 Jurnal & Grafice"]:
         )
         st.plotly_chart(fig_p, use_container_width=True)
 
-        # Tabel separat Puls
         cols_to_show = [date_col]
         if moment_col:
           cols_to_show.append(moment_col)
@@ -542,6 +601,11 @@ with tab_dict["📊 Jurnal & Grafice"]:
           df_all[c] = format_table_column(df_all[c])
 
       st.dataframe(df_all, use_container_width=True, height=450)
+  else:
+    st.warning(
+        "Nu s-au putut încărca datele din Google Sheet. Verificați legătura de"
+        " conectare în st.secrets."
+    )
 
 # ----------------- TAB: ADAUGĂ / SUPRASCRIE (ADMIN) -----------------
 if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
@@ -575,7 +639,6 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
 
       selected_moment = st.selectbox("🍽️ Momentul Măsurătorii", momente_opțiuni)
 
-      # Verificăm dacă există deja valori pentru această dată + moment
       existing_row = pd.DataFrame()
       if not df.empty and date_col in df.columns and moment_col in df.columns:
         date_str = selected_date.strftime("%d.%m.%Y")
@@ -632,12 +695,19 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
             type="primary",
             use_container_width=True,
         ):
-          st.success(
-              f"Înregistrarea pentru {selected_date.strftime('%d.%m.%Y')} a"
-              " fost salvată/actualizată cu succes!"
+          d_str = selected_date.strftime("%d.%m.%Y")
+          saved = save_to_google_sheet(
+              d_str,
+              selected_moment,
+              glic_input,
+              sis_input,
+              dia_input,
+              puls_input,
+              obs_input,
           )
-          st.cache_data.clear()
-          st.rerun()
+          if saved:
+            st.cache_data.clear()
+            st.rerun()
 
 # ----------------- TAB: TRATAMENT -----------------
 with tab_dict["💊 Tratament"]:

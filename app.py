@@ -98,6 +98,7 @@ if "settings" not in st.session_state:
       "target_ta_dia": 80,
   }
 
+# ÎNLOCUIEȘTE AICI CU LINKUL SCHIMBAT DIN GOOGLE SHEETS (care conține gid=...)
 GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRs6o_ryWI3jCSZ_EpNyv6lDvQakwdEb0RoeuhXXXCdv9lzwCkkEXMorkk2W3ZBvg/pub?output=csv"
 
 # ==========================================
@@ -156,26 +157,26 @@ if st.sidebar.button("🚪 Deconectare", use_container_width=True):
 st.sidebar.markdown("---")
 
 # ==========================================
-# PARSARE DIRECTĂ GOOGLE SHEET
+# PARSARE DIRECTĂ ȘI CURĂȚARE CSV
 # ==========================================
 @st.cache_data(ttl=5)
 def load_and_clean_data(url):
   try:
-    # 1. Citiți tot fișierul fără antet rigid
-    raw_df = pd.read_csv(url, dtype=str, header=None)
+    # 1. Încărcare brută a conținutului
+    df_raw = pd.read_csv(url, dtype=str, header=None)
+    if df_raw.empty:
+      return pd.DataFrame()
 
-    # 2. Găsiți primul rând care conține o dată validă de tip DD.MM.YYYY
-    date_pattern = re.compile(r"\b\d{1,2}\.\d{1,2}\.\d{4}\b")
-    start_row = None
-
-    for idx, row in raw_df.iterrows():
-      row_str = " ".join([str(v) for v in row.dropna() if str(v) != "nan"])
-      if date_pattern.search(row_str):
-        start_row = max(0, idx - 1)
+    # 2. Identificare linie cu antet
+    header_idx = None
+    for idx, row in df_raw.iterrows():
+      row_text = remove_diacritics(" ".join([str(v) for v in row.dropna() if str(v) != "nan"])).lower()
+      if "data" in row_text or "date" in row_text:
+        header_idx = idx
         break
 
-    if start_row is not None:
-      df_clean = pd.read_csv(url, skiprows=start_row)
+    if header_idx is not None:
+      df_clean = pd.read_csv(url, skiprows=header_idx)
     else:
       df_clean = pd.read_csv(url)
 
@@ -184,7 +185,7 @@ def load_and_clean_data(url):
     return df_clean[valid_cols].dropna(how="all")
 
   except Exception as e:
-    st.error(f"Eroare la procesare: {e}")
+    st.error(f"Eroare la procesarea fișierului: {e}")
     return pd.DataFrame()
 
 df = load_and_clean_data(GOOGLE_SHEET_URL)
@@ -244,7 +245,7 @@ with tab_dict["📊 Jurnal & Grafice"]:
   if not df.empty and "Data_Display" in df.columns:
     kpi1, kpi2, kpi3, kpi4 = st.columns(4)
 
-    # Ultimele valori (de la finalul tabelului)
+    # Ultimele valori reale (de la finalul tabelului)
     with kpi1:
       val_glic = "N/A"
       glic_col = col_glic_in or col_glic_dp or col_glic_gen
@@ -339,7 +340,7 @@ with tab_dict["📊 Jurnal & Grafice"]:
 
     st.dataframe(df_display, use_container_width=True, height=450)
   else:
-    st.warning("Nu s-au găsit date valide în fișierul Google Sheet.")
+    st.warning("Nu s-au găsit date valide în fișierul Google Sheet. Verificați legătura fișierului.")
 
 # ----------------- TAB: ADAUGĂ ÎNREGISTRARE (EXCLUSIV ADMIN) -----------------
 if is_admin and "➕ Adaugă Înregistrare" in tab_dict:

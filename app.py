@@ -40,7 +40,7 @@ st.markdown(
     }
     .metric-card {
         background-color: #1e222d;
-        padding: 18px;
+        padding: 16px;
         border-radius: 12px;
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.4);
         border: 1px solid #2e3545;
@@ -53,7 +53,7 @@ st.markdown(
         color: #38bdf8; 
     }
     .metric-label { 
-        font-size: 12px; 
+        font-size: 11px; 
         color: #94a3b8; 
         font-weight: 600; 
         text-transform: uppercase;
@@ -370,7 +370,7 @@ def format_table_column(series):
 
 
 # ==========================================
-# FUNCȚII EVALUARE MEDICALĂ (EXACT & CLAR)
+# FUNCȚII EVALUARE MEDICALĂ (FOLOSIND "NORMALĂ")
 # ==========================================
 def evaluate_glic(val):
   try:
@@ -380,7 +380,7 @@ def evaluate_glic(val):
     t_min = st.session_state.settings["target_glic_min"]
     t_max = st.session_state.settings["target_glic_max"]
     if t_min <= v <= t_max:
-      return "🟢 Glicemie în Țintă"
+      return "🟢 Glicemie Normală"
     elif v < t_min:
       return "🔴 Glicemie Prea Mică"
     else:
@@ -455,7 +455,7 @@ with tab_dict["📊 Jurnal & Grafice"]:
   st.markdown("### 📊 Tablou de Bord Medical")
 
   if not df.empty and date_col in df.columns:
-    # Calcul media glicemiei pentru KPI
+    # Calcul media glicemiei
     avg_glic_str = "Nemăsurat"
     if col_glic and col_glic in df.columns:
       s_glic_all = (
@@ -575,9 +575,10 @@ with tab_dict["📊 Jurnal & Grafice"]:
                 mode="lines+markers+text",
                 name="Glicemie",
                 line=dict(color="#38bdf8", width=3),
-                marker=dict(size=8),
+                marker=dict(size=9, color="#38bdf8"),
                 text=glic_vals,
                 textposition="top center",
+                textfont=dict(size=11, color="#ffffff"),
                 connectgaps=True,
             )
         )
@@ -591,8 +592,9 @@ with tab_dict["📊 Jurnal & Grafice"]:
             template="plotly_dark",
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(0,0,0,0)",
-            margin=dict(l=20, r=20, t=20, b=20),
-            xaxis=dict(type="category", tickangle=-45),
+            margin=dict(l=30, r=30, t=30, b=30),
+            xaxis=dict(type="category", tickangle=-30),
+            yaxis=dict(rangemode="tozero"),
         )
         st.plotly_chart(fig_g, use_container_width=True)
 
@@ -632,9 +634,10 @@ with tab_dict["📊 Jurnal & Grafice"]:
                 mode="lines+markers+text",
                 name="Sistolică",
                 line=dict(color="#ef4444", width=3),
-                marker=dict(size=8),
+                marker=dict(size=9),
                 text=sis_vals,
                 textposition="top center",
+                textfont=dict(size=11, color="#ffffff"),
                 connectgaps=True,
             )
         )
@@ -645,9 +648,10 @@ with tab_dict["📊 Jurnal & Grafice"]:
                 mode="lines+markers+text",
                 name="Diastolică",
                 line=dict(color="#f59e0b", width=3),
-                marker=dict(size=8),
+                marker=dict(size=9),
                 text=dia_vals,
                 textposition="bottom center",
+                textfont=dict(size=11, color="#ffffff"),
                 connectgaps=True,
             )
         )
@@ -655,8 +659,8 @@ with tab_dict["📊 Jurnal & Grafice"]:
             template="plotly_dark",
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(0,0,0,0)",
-            margin=dict(l=20, r=20, t=20, b=20),
-            xaxis=dict(type="category", tickangle=-45),
+            margin=dict(l=30, r=30, t=30, b=30),
+            xaxis=dict(type="category", tickangle=-30),
         )
         st.plotly_chart(fig_ta, use_container_width=True)
 
@@ -695,9 +699,10 @@ with tab_dict["📊 Jurnal & Grafice"]:
                 mode="lines+markers+text",
                 name="Puls (bpm)",
                 line=dict(color="#10b981", width=3),
-                marker=dict(size=8),
+                marker=dict(size=9),
                 text=puls_vals,
                 textposition="top center",
+                textfont=dict(size=11, color="#ffffff"),
                 connectgaps=True,
             )
         )
@@ -705,8 +710,8 @@ with tab_dict["📊 Jurnal & Grafice"]:
             template="plotly_dark",
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(0,0,0,0)",
-            margin=dict(l=20, r=20, t=20, b=20),
-            xaxis=dict(type="category", tickangle=-45),
+            margin=dict(l=30, r=30, t=30, b=30),
+            xaxis=dict(type="category", tickangle=-30),
         )
         st.plotly_chart(fig_p, use_container_width=True)
 
@@ -907,12 +912,11 @@ if is_admin and "📅 Programări" in tab_dict:
     ])
     st.dataframe(prog_df, use_container_width=True)
 
-# ----------------- TAB: RAPORT PDF CU SELECȚIE GRAFICE -----------------
+# ----------------- TAB: RAPORT PDF PROFESIONAL -----------------
 with tab_dict["📄 Raport PDF"]:
-  st.markdown("### 📄 Generare Raport PDF Personalizat")
+  st.markdown("### 📄 Generare Raport PDF Personalizat și Profesional")
   st.markdown(
-      "Alege opțiunile pentru graficele care dorești să fie incluse în raportul"
-      " PDF:"
+      "Alege opțiunile pentru conținutul grafic și tabelar din raportul PDF:"
   )
 
   col_opt1, col_opt2 = st.columns(2)
@@ -921,19 +925,21 @@ with tab_dict["📄 Raport PDF"]:
     opt_ta = st.checkbox("Include Grafic Tensiune Arterială 🫀", value=True)
   with col_opt2:
     opt_puls = st.checkbox("Include Grafic Puls 💓", value=True)
-    opt_tabele = st.checkbox("Include Tabelul Complet de Date 📋", value=True)
+    opt_tabele = st.checkbox(
+        "Include Tabelul Centralizator cu Culori 📋", value=True
+    )
 
 
-  def generate_chart_image(x_vals, y_vals, title, ylabel, color_hex):
-    plt.figure(figsize=(7, 2.3))
+  def generate_pdf_chart(x_vals, y_vals, title, ylabel, color_hex):
+    plt.figure(figsize=(7.5, 2.2))
     plt.plot(
         x_vals,
         y_vals,
         marker="o",
         linestyle="-",
         color=color_hex,
-        linewidth=2,
-        markersize=5,
+        linewidth=2.2,
+        markersize=5.5,
     )
     for xi, yi in zip(x_vals, y_vals):
       if yi > 0:
@@ -943,18 +949,18 @@ with tab_dict["📄 Raport PDF"]:
             textcoords="offset points",
             xytext=(0, 6),
             ha="center",
-            fontsize=7,
+            fontsize=7.5,
             fontweight="bold",
         )
-    plt.title(title, fontsize=10, fontweight="bold", color="#1e3a8a")
-    plt.ylabel(ylabel, fontsize=9)
-    plt.xticks(rotation=25, fontsize=8)
+    plt.title(title, fontsize=10, fontweight="bold", color="#1e3a8a", pad=10)
+    plt.ylabel(ylabel, fontsize=9, fontweight="bold")
+    plt.xticks(rotation=20, fontsize=8)
     plt.yticks(fontsize=8)
-    plt.grid(True, linestyle="--", alpha=0.5)
+    plt.grid(True, linestyle=":", alpha=0.6)
     plt.tight_layout()
 
     img_buffer = io.BytesIO()
-    plt.savefig(img_buffer, format="png", dpi=150)
+    plt.savefig(img_buffer, format="png", dpi=200)
     plt.close()
     img_buffer.seek(0)
     return img_buffer
@@ -967,27 +973,37 @@ with tab_dict["📄 Raport PDF"]:
     doc = SimpleDocTemplate(
         buffer,
         pagesize=A4,
-        rightMargin=30,
-        leftMargin=30,
-        topMargin=30,
-        bottomMargin=30,
+        rightMargin=25,
+        leftMargin=25,
+        topMargin=25,
+        bottomMargin=25,
     )
     story = []
     styles = getSampleStyleSheet()
 
-    title_text = remove_diacritics("RAPORT MEDICAL MONITORIZARE SANATATE")
+    title_text = remove_diacritics("RAPORT MEDICAL DE MONITORIZARE - HEALTHTRACK PRO")
     date_text = remove_diacritics(
-        f"Data generarii: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
+        f"Generat la: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
     )
 
-    story.append(Paragraph(f"<b>{title_text}</b>", styles["Heading1"]))
+    story.append(
+        Paragraph(
+            f"<b>{title_text}</b>",
+            ParagraphStyle(
+                "TitleStyle",
+                parent=styles["Heading1"],
+                fontSize=14,
+                textColor=colors.HexColor("#1e3a8a"),
+                spaceAfter=4,
+            ),
+        )
+    )
     story.append(Paragraph(date_text, styles["Normal"]))
-    story.append(Spacer(1, 12))
+    story.append(Spacer(1, 10))
 
-    # Axa X strict cu data și în PDF
     x_labels = data_frame[date_col].dt.strftime("%d.%m.%Y").tolist()
 
-    # Generare Grafic Glicemie PDF
+    # Grafic Glicemie PDF
     if (
         include_glic
         and col_glic
@@ -995,13 +1011,13 @@ with tab_dict["📄 Raport PDF"]:
         and not data_frame[col_glic].isna().all()
     ):
       y_g = pd.to_numeric(data_frame[col_glic], errors="coerce").fillna(0)
-      img_g = generate_chart_image(
+      img_g = generate_pdf_chart(
           x_labels, y_g, "Evolutie Glicemie (mg/dL)", "mg/dL", "#0284c7"
       )
-      story.append(Image(img_g, width=480, height=160))
+      story.append(Image(img_g, width=500, height=150))
       story.append(Spacer(1, 8))
 
-    # Generare Grafic Tensiune PDF
+    # Grafic Tensiune PDF
     if (
         include_ta
         and col_sis
@@ -1009,7 +1025,7 @@ with tab_dict["📄 Raport PDF"]:
         and col_dia
         and col_dia in data_frame.columns
     ):
-      plt.figure(figsize=(7, 2.3))
+      plt.figure(figsize=(7.5, 2.2))
       y_s = pd.to_numeric(data_frame[col_sis], errors="coerce").fillna(0)
       y_d = pd.to_numeric(data_frame[col_dia], errors="coerce").fillna(0)
       plt.plot(
@@ -1017,7 +1033,7 @@ with tab_dict["📄 Raport PDF"]:
           y_s,
           marker="o",
           color="#ef4444",
-          linewidth=2,
+          linewidth=2.2,
           label="Sistol.",
       )
       plt.plot(
@@ -1025,7 +1041,7 @@ with tab_dict["📄 Raport PDF"]:
           y_d,
           marker="s",
           color="#f59e0b",
-          linewidth=2,
+          linewidth=2.2,
           label="Diastol.",
       )
       for xi, ys, yd in zip(x_labels, y_s, y_d):
@@ -1036,7 +1052,7 @@ with tab_dict["📄 Raport PDF"]:
               textcoords="offset points",
               xytext=(0, 6),
               ha="center",
-              fontsize=7,
+              fontsize=7.5,
               fontweight="bold",
           )
         if yd > 0:
@@ -1046,7 +1062,7 @@ with tab_dict["📄 Raport PDF"]:
               textcoords="offset points",
               xytext=(0, -10),
               ha="center",
-              fontsize=7,
+              fontsize=7.5,
               fontweight="bold",
           )
       plt.title(
@@ -1054,23 +1070,24 @@ with tab_dict["📄 Raport PDF"]:
           fontsize=10,
           fontweight="bold",
           color="#1e3a8a",
+          pad=10,
       )
-      plt.ylabel("mmHg", fontsize=9)
-      plt.xticks(rotation=25, fontsize=8)
+      plt.ylabel("mmHg", fontsize=9, fontweight="bold")
+      plt.xticks(rotation=20, fontsize=8)
       plt.yticks(fontsize=8)
       plt.legend(loc="upper left", fontsize=8)
-      plt.grid(True, linestyle="--", alpha=0.5)
+      plt.grid(True, linestyle=":", alpha=0.6)
       plt.tight_layout()
 
       img_ta_buf = io.BytesIO()
-      plt.savefig(img_ta_buf, format="png", dpi=150)
+      plt.savefig(img_ta_buf, format="png", dpi=200)
       plt.close()
       img_ta_buf.seek(0)
 
-      story.append(Image(img_ta_buf, width=480, height=160))
+      story.append(Image(img_ta_buf, width=500, height=150))
       story.append(Spacer(1, 8))
 
-    # Generare Grafic Puls PDF
+    # Grafic Puls PDF
     if (
         include_puls
         and col_puls
@@ -1078,17 +1095,17 @@ with tab_dict["📄 Raport PDF"]:
         and not data_frame[col_puls].isna().all()
     ):
       y_p = pd.to_numeric(data_frame[col_puls], errors="coerce").fillna(0)
-      img_p = generate_chart_image(
+      img_p = generate_pdf_chart(
           x_labels, y_p, "Evolutie Puls (bpm)", "bpm", "#10b981"
       )
-      story.append(Image(img_p, width=480, height=160))
+      story.append(Image(img_p, width=500, height=150))
       story.append(Spacer(1, 8))
 
-    # Includere Tabel Date PDF cu Statusuri
+    # Tabel Centralizator cu Culori în PDF
     if include_tables and not data_frame.empty:
-      story.append(Spacer(1, 8))
+      story.append(Spacer(1, 6))
       story.append(Paragraph("<b>Tabel Centralizator Date</b>", styles["Heading2"]))
-      story.append(Spacer(1, 5))
+      story.append(Spacer(1, 4))
 
       df_pdf = data_frame.copy()
       df_pdf[date_col] = df_pdf[date_col].dt.strftime("%d.%m.%Y")
@@ -1109,21 +1126,41 @@ with tab_dict["📄 Raport PDF"]:
       clean_cols = [remove_diacritics(c) for c in df_pdf.columns]
       table_data = [clean_cols]
 
-      for _, row in df_pdf.iterrows():
+      # Stiluri celule pentru tabelul PDF
+      t_style = [
+          ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e3a8a")),
+          ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+          ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+          ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+          ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+          ("FONTSIZE", (0, 0), (-1, -1), 6.5),
+          ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
+      ]
+
+      for r_idx, (_, row) in enumerate(df_pdf.iterrows(), start=1):
         clean_row = [remove_diacritics(str(v)) for v in row.values]
         table_data.append(clean_row)
 
+        # Verificăm dacă rândul are statusuri de colorat în PDF
+        for c_idx, val in enumerate(row.values):
+          val_str = str(val)
+          if "🟢" in val_str:
+            t_style.append(
+                ("BACKGROUND", (c_idx, r_idx), (c_idx, r_idx), colors.HexColor("#d1fae5"))
+            )
+            t_style.append(
+                ("TEXTCOLOR", (c_idx, r_idx), (c_idx, r_idx), colors.HexColor("#065f46"))
+            )
+          elif "🔴" in val_str:
+            t_style.append(
+                ("BACKGROUND", (c_idx, r_idx), (c_idx, r_idx), colors.HexColor("#fee2e2"))
+            )
+            t_style.append(
+                ("TEXTCOLOR", (c_idx, r_idx), (c_idx, r_idx), colors.HexColor("#991b1b"))
+            )
+
       t = Table(table_data)
-      t.setStyle(
-          TableStyle([
-              ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e3a8a")),
-              ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
-              ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-              ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-              ("FONTSIZE", (0, 0), (-1, -1), 6.5),
-              ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
-          ])
-      )
+      t.setStyle(TableStyle(t_style))
       story.append(t)
 
     doc.build(story)

@@ -1,5 +1,4 @@
 import io
-import re
 import unicodedata
 from datetime import date, datetime
 import pandas as pd
@@ -76,7 +75,7 @@ def remove_diacritics(text):
   )
 
 
-# Initialize Session State (Roluri & Utilizatori)
+# Initialize Session State
 if "users" not in st.session_state:
   st.session_state.users = {
       "Alex": {"pass": "Aleks132509", "role": "Administrator"},
@@ -161,50 +160,35 @@ st.sidebar.markdown("---")
 
 
 # ==========================================
-# CĂUTARE & DETECȚIE ULTRA-ROBUSTĂ SHEET
+# CITIRE & CURĂȚARE GOOGLE SHEET
 # ==========================================
-@st.cache_data(ttl=10)
+@st.cache_data(ttl=5)
 def load_and_clean_data(url):
   try:
-    df_raw = pd.read_csv(url, header=None)
-
-    # Identificăm rândul exact unde apare "Dată"
-    data_row_idx = None
-    for idx, row in df_raw.iterrows():
-      val = remove_diacritics(str(row.iloc[0])).lower().strip()
-      if "data" in val or "date" in val:
-        data_row_idx = idx
-        break
-
-    if data_row_idx is not None:
-      # Comasare antet superior (Glicemie/Tensiune) cu sub-coloanele (Inainte/Dupa masa)
-      top_header = (
-          df_raw.iloc[data_row_idx - 1].fillna("").astype(str).str.strip()
-          if data_row_idx > 0
-          else pd.Series([""] * len(df_raw.columns))
-      )
-      sub_header = df_raw.iloc[data_row_idx].fillna("").astype(str).str.strip()
-
-      combined_cols = []
-      current_main = ""
-      for top, sub in zip(top_header, sub_header):
-        if top != "" and "unnamed" not in top.lower():
-          current_main = top
-        name = f"{current_main} - {sub}".strip() if current_main else sub
-        combined_cols.append(name if name else "Coloana")
-
-      df_clean = pd.read_csv(url, skiprows=data_row_idx + 1, header=None)
-      df_clean.columns = combined_cols[: len(df_clean.columns)]
-    else:
+    # 1. Încercăm citirea cu comasare a primelor 2 rânduri (pentru antetul dublu din Sheet)
+    try:
+      df_temp = pd.read_csv(url, header=[0, 1])
+      # Aplatizăm nivelurile de antet: Ex: ("GLICEMIE", "Înainte masă") -> "GLICEMIE Înainte masă"
+      new_cols = []
+      for col in df_temp.columns:
+        c0 = "" if "Unnamed" in str(col[0]) else str(col[0]).strip()
+        c1 = "" if "Unnamed" in str(col[1]) else str(col[1]).strip()
+        full_name = f"{c0} {c1}".strip()
+        new_cols.append(full_name if full_name else "Coloană")
+      df_temp.columns = new_cols
+      df_clean = df_temp
+    except Exception:
       df_clean = pd.read_csv(url)
 
-    df_clean = df_clean.dropna(how="all")
+    # 2. Curățare generală de coloane goale
     valid_cols = [
         c
         for c in df_clean.columns
         if "Unnamed" not in str(c) and str(c).strip() != ""
     ]
-    return df_clean[valid_cols]
+    df_clean = df_clean[valid_cols].dropna(how="all")
+
+    return df_clean
   except Exception as e:
     st.error(f"Eroare la citirea datelor din Google Sheets: {e}")
     return pd.DataFrame()
@@ -212,21 +196,30 @@ def load_and_clean_data(url):
 
 df = load_and_clean_data(GOOGLE_SHEET_URL)
 
-# Identificare & conversie coloană de dată
+# Detectare & conversie coloană de Dată
 date_col = None
 if not df.empty:
   for c in df.columns:
-    if "data" in remove_diacritics(str(c)).lower():
+    c_norm = remove_diacritics(str(c)).lower()
+    if "data" in c_norm or "date" in c_norm:
       date_col = c
       break
 
   if not date_col and len(df.columns) > 0:
     date_col = df.columns[0]
 
-  if date_col:
+  if date_col and date_col in df.columns:
+    # Conversie strictă pentru formatul DD.MM.YYYY (ex: 12.09.2026)
     df[date_col] = pd.to_datetime(
         df[date_col].astype(str).str.strip(), format="%d.%m.%Y", errors="coerce"
     )
+
+    # Daca eșuează formatul fix, încercăm parsare flexibilă
+    if df[date_col].isna().all():
+      df[date_col] = pd.to_datetime(
+          df[date_col], dayfirst=True, errors="coerce"
+      )
+
     df = df.dropna(subset=[date_col])
     df = df.sort_values(by=date_col, ascending=False)
 
@@ -248,19 +241,34 @@ with tab_jurnal:
 
   if not df.empty and date_col is not None and date_col in df.columns:
     kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+    cols = df.columns
+
+    # Căutare inteligentă a coloanelor
+    col_glic = next(
+        (
+            c
+            for c in cols
+            if any(
+                k in remove_diacritics(str(c)).lower()
+                for k in ["glic", "inainte", "dupa"]
+            )
+        ),
+        None,
+    )
+    col_sis = next(
+        (c for c in cols if "sist" in remove_diacritics(str(c)).lower()), None
+    )
+    col_dia = next(
+        (c for c in cols if "diast" in remove_diacritics(str(c)).lower()), None
+    )
+    col_puls = next(
+        (c for c in cols if "puls" in remove_diacritics(str(c)).lower()), None
+    )
 
     with kpi1:
       val_glic = "N/A"
-      glic_cols = [
-          c
-          for c in df.columns
-          if any(
-              k in remove_diacritics(str(c)).lower()
-              for k in ["glic", "inainte", "dupa"]
-          )
-      ]
-      if glic_cols:
-        s_glic = pd.to_numeric(df[glic_cols[0]], errors="coerce").dropna()
+      if col_glic:
+        s_glic = pd.to_numeric(df[col_glic], errors="coerce").dropna()
         if not s_glic.empty:
           val_glic = f"{int(s_glic.iloc[0])} mg/dL"
       st.markdown(
@@ -271,18 +279,12 @@ with tab_jurnal:
 
     with kpi2:
       val_sis, val_dia = "-", "-"
-      sis_cols = [
-          c for c in df.columns if "sist" in remove_diacritics(str(c)).lower()
-      ]
-      dia_cols = [
-          c for c in df.columns if "diast" in remove_diacritics(str(c)).lower()
-      ]
-      if sis_cols:
-        s_sis = pd.to_numeric(df[sis_cols[0]], errors="coerce").dropna()
+      if col_sis:
+        s_sis = pd.to_numeric(df[col_sis], errors="coerce").dropna()
         if not s_sis.empty:
           val_sis = int(s_sis.iloc[0])
-      if dia_cols:
-        s_dia = pd.to_numeric(df[dia_cols[0]], errors="coerce").dropna()
+      if col_dia:
+        s_dia = pd.to_numeric(df[col_dia], errors="coerce").dropna()
         if not s_dia.empty:
           val_dia = int(s_dia.iloc[0])
       st.markdown(
@@ -294,11 +296,8 @@ with tab_jurnal:
 
     with kpi3:
       val_puls = "N/A"
-      puls_cols = [
-          c for c in df.columns if "puls" in remove_diacritics(str(c)).lower()
-      ]
-      if puls_cols:
-        s_puls = pd.to_numeric(df[puls_cols[0]], errors="coerce").dropna()
+      if col_puls:
+        s_puls = pd.to_numeric(df[col_puls], errors="coerce").dropna()
         if not s_puls.empty:
           val_puls = f"{int(s_puls.iloc[0])} bpm"
       st.markdown(
@@ -324,6 +323,14 @@ with tab_jurnal:
 
     with g1:
       fig_g = go.Figure()
+      glic_cols = [
+          c
+          for c in cols
+          if any(
+              k in remove_diacritics(str(c)).lower()
+              for k in ["glic", "inainte", "dupa"]
+          )
+      ]
       for gc in glic_cols[:2]:
         fig_g.add_trace(
             go.Scatter(
@@ -346,7 +353,7 @@ with tab_jurnal:
       fig_ta = go.Figure()
       ta_cols = [
           c
-          for c in df.columns
+          for c in cols
           if any(
               k in remove_diacritics(str(c)).lower()
               for k in ["sist", "diast", "puls"]

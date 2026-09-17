@@ -1,5 +1,6 @@
 import io
 import re
+import unicodedata
 from datetime import date, datetime, timedelta
 import pandas as pd
 import plotly.express as px
@@ -20,17 +21,14 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Custom CSS optimizat pentru DARK MODE (Contrast ridicat pe text și butoane)
+# Custom CSS Dark Mode
 st.markdown(
     """
     <style>
-    /* Fundal general Dark Mode */
     .stApp {
         background-color: #0e1117 !important;
         color: #f1f5f9 !important;
     }
-    
-    /* Styling pentru Carduri KPI */
     .metric-card {
         background-color: #1e222d;
         padding: 18px;
@@ -52,8 +50,6 @@ st.markdown(
         text-transform: uppercase;
         letter-spacing: 0.5px;
     }
-
-    /* Vizibilitate și contrast pentru câmpuri de text */
     .stTextInput > div > div > input {
         color: #ffffff !important;
         background-color: #1e222d !important;
@@ -66,9 +62,9 @@ st.markdown(
 # Initialize Session State
 if "users" not in st.session_state:
   st.session_state.users = {
-      "Alex": "Aleks132509",
-      "Ionut": "Ionut061191",
-      "Doctor": "Alex2026",
+      "Alex": {"pass": "Aleks132509", "role": "Administrator"},
+      "Ionut": {"pass": "Ionut061191", "role": "Membru"},
+      "Doctor": {"pass": "Alex2026", "role": "Doctor"},
   }
 
 if "logged_in" not in st.session_state:
@@ -84,10 +80,20 @@ if "settings" not in st.session_state:
       "target_ta_dia": 80,
   }
 
-# ==========================================
 # LINK GOOGLE SHEET
-# ==========================================
 GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRs6o_ryWI3jCSZ_EpNyv6lDvQakwdEb0RoeuhXXXCdv9lzwCkkEXMorkk2W3ZBvg/pub?output=csv"
+
+
+# Funcție eliminare diacritice (pentru PDF)
+def remove_diacritics(text):
+  if not isinstance(text, str):
+    text = str(text)
+  return "".join(
+      c
+      for c in unicodedata.normalize("NFD", text)
+      if unicodedata.category(c) != "Mn"
+  )
+
 
 # ==========================================
 # ECRAN AUTENTIFICARE
@@ -115,7 +121,8 @@ if not st.session_state.logged_in:
       if st.button(
           "🔓 Autentificare", type="primary", use_container_width=True
       ):
-        if st.session_state.users.get(username) == password:
+        user_data = st.session_state.users.get(username)
+        if user_data and user_data["pass"] == password:
           st.session_state.logged_in = True
           st.session_state.user = username
           st.rerun()
@@ -135,75 +142,49 @@ st.sidebar.markdown("---")
 
 
 # ==========================================
-# ÎNCĂRCARE ȘI PARSARE ROBUSTĂ A DATELOR
+# ÎNCĂRCARE ȘI PARSARE DIRECTĂ A DATELOR
 # ==========================================
 @st.cache_data(ttl=15)
 def load_and_clean_data(url):
   try:
-    # 1. Încărcăm tot fișierul brut
-    raw_df = pd.read_csv(
-        url, header=None, names=[f"col_{i}" for i in range(50)]
-    )
+    # 1. Citiți tot fișierul brut fără antet
+    raw_df = pd.read_csv(url, header=None)
 
-    # 2. Căutăm rândul unde se află antetul real al tabelului
+    # 2. Caută rândul în care începe tabelul cu date
     header_idx = None
     for idx, row in raw_df.iterrows():
-      # Conversie sigură în string (previne erorile de tip float/NaN)
-      row_cells = [str(val) for val in row.values if pd.notna(val)]
-      row_text = " ".join(row_cells).lower()
-
-      if ("data" in row_text or "dată" in row_text or "date" in row_text) and any(
-          k in row_text
-          for k in [
-              "glicem",
-              "tensiun",
-              "sistol",
-              "diastol",
-              "puls",
-              "moment",
-              "ora",
-          ]
+      row_str = " ".join([str(v) for v in row.values if pd.notna(v)]).lower()
+      if any(
+          k in row_str
+          for k in ["data", "glicem", "tensiun", "sistol", "diastol"]
       ):
         header_idx = idx
         break
 
     if header_idx is not None:
-      header_row = raw_df.iloc[header_idx]
-      df_clean = raw_df.iloc[header_idx + 1 :].copy()
-
-      cols = []
-      for i, val in enumerate(header_row):
-        val_str = str(val).strip() if pd.notna(val) else ""
-        if val_str and val_str.lower() != "nan":
-          cols.append(val_str)
-        else:
-          cols.append(f"Unnamed_{i}")
-      df_clean.columns = cols
+      df_clean = pd.read_csv(url, skiprows=header_idx)
     else:
-      # Fallback: Sare direct peste primele 5 rânduri introductive
-      df_clean = pd.read_csv(url, skiprows=5)
-      df_clean.columns = [str(col).strip() for col in df_clean.columns]
+      # Daca nu găsește automat, sare peste primele 9 rânduri introductive
+      df_clean = pd.read_csv(url, skiprows=9)
 
-    # 3. Curățare coloane invalide
+    # Curățare denumiri coloane
+    df_clean.columns = [str(c).strip() for c in df_clean.columns]
+
+    # Elimină coloanele nespecificate/goale (ex: Unnamed)
     valid_cols = [
         c
         for c in df_clean.columns
-        if not str(c).startswith("Unnamed_")
-        and "Unnamed" not in str(c)
-        and str(c) != "nan"
-        and str(c) != ""
+        if "Unnamed" not in c and c.lower() != "nan" and c != ""
     ]
-
     if valid_cols:
       df_clean = df_clean[valid_cols]
 
-    # Elimină rândurile complet goale
+    # Elimină rândurile goale
     df_clean = df_clean.dropna(how="all")
 
     return df_clean
-
   except Exception as e:
-    st.error(f"Eroare la procesarea fișierului: {e}")
+    st.error(f"Eroare la preluarea datelor: {e}")
     return pd.DataFrame()
 
 
@@ -239,7 +220,6 @@ with tab_jurnal:
   st.markdown("### 📊 Tablou de Bord Medical")
 
   if not df.empty:
-    # 1. Indicatoare KPI
     kpi1, kpi2, kpi3, kpi4 = st.columns(4)
 
     cols = df.columns
@@ -254,7 +234,6 @@ with tab_jurnal:
         s_glic = pd.to_numeric(df[col_glic], errors="coerce").dropna()
         if not s_glic.empty:
           val_glic = f"{int(s_glic.iloc[0])} mg/dL"
-
       st.markdown(
           f'<div class="metric-card"><div class="metric-label">🩸 ULTIMA'
           f' GLICEMIE</div><div class="metric-value">{val_glic}</div></div>',
@@ -271,7 +250,6 @@ with tab_jurnal:
         s_dia = pd.to_numeric(df[col_dia], errors="coerce").dropna()
         if not s_dia.empty:
           val_dia = int(s_dia.iloc[0])
-
       st.markdown(
           f'<div class="metric-card"><div class="metric-label">🫀 ULTIMA'
           f' TENSIUNE</div><div'
@@ -285,7 +263,6 @@ with tab_jurnal:
         s_puls = pd.to_numeric(df[col_puls], errors="coerce").dropna()
         if not s_puls.empty:
           val_puls = f"{int(s_puls.iloc[0])} bpm"
-
       st.markdown(
           f'<div class="metric-card"><div class="metric-label">💓 PULS'
           f' MEDIU</div><div class="metric-value">{val_puls}</div></div>',
@@ -302,7 +279,7 @@ with tab_jurnal:
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # 2. Grafice Plotly optimizate Dark Theme
+    # Grafice Plotly
     st.markdown("#### 📈 Grafice Evoluție")
     g1, g2 = st.columns(2)
 
@@ -318,9 +295,8 @@ with tab_jurnal:
                 name=gc,
             )
         )
-
       fig_g.update_layout(
-          title="Evoluție Glicemie (mg/dL)",
+          title="Evoluție Glicemie",
           template="plotly_dark",
           paper_bgcolor="rgba(0,0,0,0)",
           plot_bgcolor="rgba(0,0,0,0)",
@@ -344,7 +320,6 @@ with tab_jurnal:
                 name=tc,
             )
         )
-
       fig_ta.update_layout(
           title="Evoluție Tensiune & Puls",
           template="plotly_dark",
@@ -356,7 +331,7 @@ with tab_jurnal:
 
     st.markdown("---")
 
-    # 3. Tabelul de Date Curat
+    # Tabel
     st.markdown("#### 📋 Tabelul Măsurătorilor")
     df_display = df.copy()
     if date_col:
@@ -366,7 +341,7 @@ with tab_jurnal:
   else:
     st.warning("Nu s-au găsit date valide în fișierul Google Sheet.")
 
-# ----------------- TAB 2: ADAUGĂ -----------------
+# ----------------- TAB 2: ADAUGĂ Înregistrare -----------------
 with tab_add:
   st.markdown("### 📝 Formular Introducere Măsurători")
   with st.container(border=True):
@@ -374,16 +349,28 @@ with tab_add:
       c1, c2 = st.columns(2)
       with c1:
         st.date_input("📅 Data Măsurătorii", value=date.today())
-        st.number_input("🩸 Glicemie (mg/dL)", value=100)
+        st.time_input("🕒 Ora Măsurătorii")
+        st.selectbox(
+            "🍽️ Momentul Măsurătorii",
+            [
+                "Înainte de masă (Ajeun / Pe nemâncate)",
+                "După masă (2 ore postprandial)",
+                "Dimineața (La trezire)",
+                "Seara (Înainte de culcare)",
+            ],
+        )
       with c2:
+        st.number_input("🩸 Glicemie (mg/dL)", value=100)
         st.number_input("🫀 Tensiune Sistolică", value=120)
         st.number_input("🫀 Tensiune Diastolică", value=80)
-      st.text_area("✍️ Observații")
+        st.number_input("💓 Puls (bpm)", value=72)
+
+      st.text_area("✍️ Observații / Stare generală")
 
       if st.form_submit_button(
           "💾 Salvează Înregistrarea", type="primary", use_container_width=True
       ):
-        st.success("Măsurătoarea a fost salvată!")
+        st.success("Măsurătoarea a fost salvată local!")
 
 # ----------------- TAB 3: MEDICAMENTE -----------------
 with tab_med:
@@ -441,7 +428,7 @@ with tab_prog:
   ])
   st.dataframe(prog_df, use_container_width=True)
 
-# ----------------- TAB 5: RAPORT PDF -----------------
+# ----------------- TAB 5: RAPORT PDF (FĂRĂ DIACRITICE) -----------------
 with tab_pdf:
   st.markdown("### 📄 Generare Raport PDF")
 
@@ -458,23 +445,23 @@ with tab_pdf:
     story = []
     styles = getSampleStyleSheet()
 
-    story.append(
-        Paragraph(
-            "<b>RAPORT MEDICAL MONITORIZARE SĂNĂTATE</b>", styles["Heading1"]
-        )
+    title_text = remove_diacritics("RAPORT MEDICAL MONITORIZARE SANATATE")
+    date_text = remove_diacritics(
+        f"Data generarii: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
     )
-    story.append(
-        Paragraph(
-            f"Data generării: {datetime.now().strftime('%d.%m.%Y %H:%M')}",
-            styles["Normal"],
-        )
-    )
+
+    story.append(Paragraph(f"<b>{title_text}</b>", styles["Heading1"]))
+    story.append(Paragraph(date_text, styles["Normal"]))
     story.append(Spacer(1, 15))
 
     if not data_frame.empty:
-      table_data = [list(data_frame.columns)]
-      for _, row in data_frame.head(20).iterrows():
-        table_data.append([str(v) for v in row.values])
+      # Curățare diacritice din antet și din celule
+      clean_cols = [remove_diacritics(c) for c in data_frame.columns]
+      table_data = [clean_cols]
+
+      for _, row in data_frame.head(25).iterrows():
+        clean_row = [remove_diacritics(v) for v in row.values]
+        table_data.append(clean_row)
 
       t = Table(table_data)
       t.setStyle(
@@ -502,32 +489,73 @@ with tab_pdf:
         mime="application/pdf",
     )
 
-# ----------------- TAB 6: SETĂRI -----------------
+# ----------------- TAB 6: SETĂRI (CU ADAUGARE USER NOU) -----------------
 with tab_settings:
-  st.markdown("### ⚙️ Setări Cont & Sistem")
+  st.markdown("### ⚙️ Setări Aplicație & Utilizatori")
+
   s1, s2 = st.columns(2)
 
   with s1:
     with st.container(border=True):
-      st.markdown("#### 🔒 Schimbare Parolă Utilizator")
+      st.markdown("#### ➕ Adaugă Utilizator Nou")
+      new_username = st.text_input("Nume Utilizator Nou")
+      new_password = st.text_input("Parolă Utilizator", type="password")
+      new_role = st.selectbox(
+          "Rol Utilizator", ["Membru", "Doctor", "Administrator"]
+      )
+
+      if st.button("➕ Creează Cont", type="primary"):
+        if new_username and new_password:
+          if new_username in st.session_state.users:
+            st.error("Utilizatorul există deja!")
+          else:
+            st.session_state.users[new_username] = {
+                "pass": new_password,
+                "role": new_role,
+            }
+            st.success(f"Contul pentru {new_username} a fost creat!")
+        else:
+          st.warning("Completează numele și parola.")
+
+    with st.container(border=True):
+      st.markdown("#### 🔒 Schimbare Parolă Existentă")
       selected_user = st.selectbox(
           "Selectează utilizator", list(st.session_state.users.keys())
       )
-      new_pass = st.text_input("Parolă nouă", type="password")
+      update_pass = st.text_input("Parolă Nouă", type="password")
       if st.button("💾 Actualizează Parola"):
-        if new_pass:
-          st.session_state.users[selected_user] = new_pass
+        if update_pass:
+          st.session_state.users[selected_user]["pass"] = update_pass
           st.success(f"Parola pentru {selected_user} a fost modificată!")
 
   with s2:
     with st.container(border=True):
-      st.markdown("#### 🔔 Configurare Notificări")
+      st.markdown("#### 🎯 Valori Țintă Medicale")
+      st.number_input(
+          "Glicemie Minimă Țintă (mg/dL)",
+          value=st.session_state.settings["target_glic_min"],
+      )
+      st.number_input(
+          "Glicemie Maximă Țintă (mg/dL)",
+          value=st.session_state.settings["target_glic_max"],
+      )
+      st.number_input(
+          "Tensiune Sistolică Max Țintă",
+          value=st.session_state.settings["target_ta_sis"],
+      )
+      st.number_input(
+          "Tensiune Diastolică Max Țintă",
+          value=st.session_state.settings["target_ta_dia"],
+      )
+
+    with st.container(border=True):
+      st.markdown("#### 🔔 Configurare Alerte")
       st.toggle(
           "Activează notificările",
           value=st.session_state.settings["notif_enabled"],
       )
       st.slider(
-          "Zile înainte de alertă programare",
+          "Alertă programări (zile înainte)",
           1,
           14,
           st.session_state.settings["notif_days"],

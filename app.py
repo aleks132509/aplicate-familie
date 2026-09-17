@@ -169,22 +169,31 @@ st.sidebar.markdown("---")
 
 
 # ==========================================
-# DATE DEMO (FALLBACK DACĂ LIPSEȘTE LINK-UL)
+# DATE DEMO (FALLBACK SIGURANȚĂ)
 # ==========================================
 def get_mock_data():
   return pd.DataFrame({
-      "Dată": ["12.09.2026", "12.09.2026", "13.09.2026", "13.09.2026"],
+      "Dată": [
+          "12.09.2026",
+          "12.09.2026",
+          "12.09.2026",
+          "13.09.2026",
+          "13.09.2026",
+          "13.09.2026",
+      ],
       "Moment Zi": [
           "Dimineața - Înainte de masă",
+          "Prânz - Înainte de masă",
           "Seara - După masă",
           "Dimineața - Înainte de masă",
-          "Seara - După masă",
+          "Prânz - După masă",
+          "Seara - Înainte de masă",
       ],
-      "Glicemie": [105, 135, 98, 130],
-      "Sistolică": [122, 124, 118, 123],
-      "Diastolică": [78, 81, 75, 80],
-      "Puls": [72, 74, 70, 74],
-      "Observații": ["Stare bună", "Postprandial", "Ajeun", "OK"],
+      "Glicemie": [105, 115, 135, 98, 140, 108],
+      "Sistolică": [122, 121, 124, 118, 126, 119],
+      "Diastolică": [78, 77, 81, 75, 82, 76],
+      "Puls": [72, 72, 74, 70, 76, 71],
+      "Observații": ["Ajeun", "Prânz OK", "Cină", "Ajeun", "Prânz", "Seară"],
   })
 
 
@@ -234,7 +243,7 @@ def save_to_google_sheet(
     date_str, moment_str, glic_v, sis_v, dia_v, puls_v, obs_v
 ):
   if not HAS_GSPREAD or "gcp_service_account" not in st.secrets:
-    st.info("ℹ️ Salvat local în sesiune (Mod Demo/Fără Service Account activ).")
+    st.info("ℹ️ Salvat în sesiunea curentă (Mod local / Fără Service Account).")
     return True
 
   try:
@@ -273,14 +282,14 @@ def save_to_google_sheet(
     if row_to_update:
       ws.update(f"A{row_to_update}:G{row_to_update}", [new_row])
       st.success(
-          f"✅ Rândul de la data {date_str} ({moment_str}) a fost SUPRASCRIS în"
-          " Google Sheet!"
+          f"✅ Înregistrarea pentru {date_str} ({moment_str}) a fost SUPRASCRISĂ"
+          " în Google Sheet!"
       )
     else:
       ws.append_row(new_row)
       st.success(
-          f"✅ Rând nou adăugat pentru {date_str} ({moment_str}) în Google"
-          " Sheet!"
+          f"✅ Înregistrare nouă adăugată pentru {date_str} ({moment_str}) în"
+          " Google Sheet!"
       )
 
     return True
@@ -453,6 +462,7 @@ with tab_dict["📊 Jurnal & Grafice"]:
 
     st.markdown("<br>", unsafe_allow_html=True)
 
+    # Sub-taburi separate pentru GLICEMIE, TENSIUNE, PULS și TOATE DATELE
     sub_tab_glic, sub_tab_ta, sub_tab_puls, sub_tab_all = st.tabs(
         ["🩸 Glicemie", "🫀 Tensiune Arterială", "💓 Puls", "📋 Toate Datele"]
     )
@@ -461,9 +471,9 @@ with tab_dict["📊 Jurnal & Grafice"]:
     if moment_col and moment_col in df.columns:
       x_data = x_data + " (" + df[moment_col].fillna("").astype(str) + ")"
 
-    # SUB-TAB GLICEMIE
+    # 1. TAB GLICEMIE
     with sub_tab_glic:
-      st.markdown("#### 🩸 Evoluție și Tabel Glicemie")
+      st.markdown("#### 🩸 Evoluție și Tabel Dedicat - Glicemie")
       if col_glic and col_glic in df.columns:
         glic_vals = pd.to_numeric(df[col_glic], errors="coerce").replace(
             0, None
@@ -496,19 +506,19 @@ with tab_dict["📊 Jurnal & Grafice"]:
         )
         st.plotly_chart(fig_g, use_container_width=True)
 
-        cols_to_show = [date_col]
+        cols_g = [date_col]
         if moment_col:
-          cols_to_show.append(moment_col)
-        cols_to_show.append(col_glic)
+          cols_g.append(moment_col)
+        cols_g.append(col_glic)
 
-        df_glic_tab = df[cols_to_show].copy()
-        df_glic_tab[date_col] = df_glic_tab[date_col].dt.strftime("%d.%m.%Y")
-        df_glic_tab[col_glic] = format_table_column(df_glic_tab[col_glic])
-        st.dataframe(df_glic_tab, use_container_width=True, height=350)
+        df_g_tab = df[cols_g].copy()
+        df_g_tab[date_col] = df_g_tab[date_col].dt.strftime("%d.%m.%Y")
+        df_g_tab[col_glic] = format_table_column(df_g_tab[col_glic])
+        st.dataframe(df_g_tab, use_container_width=True, height=350)
 
-    # SUB-TAB TENSIUNE
+    # 2. TAB TENSIUNE ARTERIALĂ
     with sub_tab_ta:
-      st.markdown("#### 🫀 Evoluție și Tabel Tensiune Arterială")
+      st.markdown("#### 🫀 Evoluție și Tabel Dedicat - Tensiune Arterială")
       if (
           col_sis
           and col_sis in df.columns
@@ -550,20 +560,20 @@ with tab_dict["📊 Jurnal & Grafice"]:
         )
         st.plotly_chart(fig_ta, use_container_width=True)
 
-        cols_to_show = [date_col]
+        cols_t = [date_col]
         if moment_col:
-          cols_to_show.append(moment_col)
-        cols_to_show.extend([col_sis, col_dia])
+          cols_t.append(moment_col)
+        cols_t.extend([col_sis, col_dia])
 
-        df_ta_tab = df[cols_to_show].copy()
-        df_ta_tab[date_col] = df_ta_tab[date_col].dt.strftime("%d.%m.%Y")
-        df_ta_tab[col_sis] = format_table_column(df_ta_tab[col_sis])
-        df_ta_tab[col_dia] = format_table_column(df_ta_tab[col_dia])
-        st.dataframe(df_ta_tab, use_container_width=True, height=350)
+        df_t_tab = df[cols_t].copy()
+        df_t_tab[date_col] = df_t_tab[date_col].dt.strftime("%d.%m.%Y")
+        df_t_tab[col_sis] = format_table_column(df_t_tab[col_sis])
+        df_t_tab[col_dia] = format_table_column(df_t_tab[col_dia])
+        st.dataframe(df_t_tab, use_container_width=True, height=350)
 
-    # SUB-TAB PULS
+    # 3. TAB PULS
     with sub_tab_puls:
-      st.markdown("#### 💓 Evoluție și Tabel Puls")
+      st.markdown("#### 💓 Evoluție și Tabel Dedicat - Puls")
       if col_puls and col_puls in df.columns:
         puls_vals = pd.to_numeric(df[col_puls], errors="coerce").replace(
             0, None
@@ -590,35 +600,34 @@ with tab_dict["📊 Jurnal & Grafice"]:
         )
         st.plotly_chart(fig_p, use_container_width=True)
 
-        cols_to_show = [date_col]
+        cols_p = [date_col]
         if moment_col:
-          cols_to_show.append(moment_col)
-        cols_to_show.append(col_puls)
+          cols_p.append(moment_col)
+        cols_p.append(col_puls)
 
-        df_puls_tab = df[cols_to_show].copy()
-        df_puls_tab[date_col] = df_puls_tab[date_col].dt.strftime("%d.%m.%Y")
-        df_puls_tab[col_puls] = format_table_column(df_puls_tab[col_puls])
-        st.dataframe(df_puls_tab, use_container_width=True, height=350)
+        df_p_tab = df[cols_p].copy()
+        df_p_tab[date_col] = df_p_tab[date_col].dt.strftime("%d.%m.%Y")
+        df_p_tab[col_puls] = format_table_column(df_p_tab[col_puls])
+        st.dataframe(df_p_tab, use_container_width=True, height=350)
 
-    # SUB-TAB TOATE DATELE
+    # 4. TAB TOATE DATELE
     with sub_tab_all:
-      st.markdown("#### 📋 Tabelul General Complet")
+      st.markdown("#### 📋 Tabel General Complet")
       df_all = df.copy()
       df_all[date_col] = df_all[date_col].dt.strftime("%d.%m.%Y")
-
       for c in [col_glic, col_sis, col_dia, col_puls]:
         if c and c in df_all.columns:
           df_all[c] = format_table_column(df_all[c])
-
       st.dataframe(df_all, use_container_width=True, height=450)
 
 # ----------------- TAB: ADAUGĂ / SUPRASCRIE (ADMIN) -----------------
 if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
   with tab_dict["➕ Adaugă / Suprascrie"]:
-    st.markdown("### 📝 Formular Introducere / Editare Măsurători (Admin)")
+    st.markdown("### 📝 Formular Introducere / Suprascriere Măsurători")
     st.info(
-        "💡 **Suprascriere date:** Dacă selectezi o dată și un moment din"
-        " trecut care există deja, datele vechi vor fi actualizate instant!"
+        "💡 **Weekend vs Săptămână:** Dacă selectezi o zi de sâmbătă sau"
+        " duminică, apar automat opțiunile pentru **Prânz** la mijloc (6"
+        " momente). În timpul săptămânii sunt 4 momente."
     )
 
     with st.container(border=True):
@@ -654,9 +663,9 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
         if not match.empty:
           existing_row = match.iloc[0]
           st.warning(
-              f"⚠️ Atenție: Există deja o înregistrare pentru {date_str} -"
+              f"⚠️ Există deja o înregistrare pentru {date_str} -"
               f" {selected_moment}. Trimiterea formularului va SUPRASCRIE"
-              " valorile existente."
+              " valorile."
           )
 
       def get_val(col_name):
@@ -754,7 +763,7 @@ with tab_dict["💊 Tratament"]:
 # ----------------- TAB: PROGRAMĂRI -----------------
 if is_admin and "📅 Programări" in tab_dict:
   with tab_dict["📅 Programări"]:
-    st.markdown("### 📅 Programări Medicale (Admin)")
+    st.markdown("### 📅 Programări Medicale")
     prog_df = pd.DataFrame([
         {
             "Dată": "2026-09-25",
@@ -839,7 +848,7 @@ with tab_dict["⚙️ Setări"]:
   with s1:
     if is_admin:
       with st.container(border=True):
-        st.markdown("#### ➕ Adaugă Utilizator Nou (Admin)")
+        st.markdown("#### ➕ Adaugă Utilizator Nou")
         new_username = st.text_input("Nume Utilizator Nou")
         new_password = st.text_input("Parolă Utilizator", type="password")
         new_role = st.selectbox(
@@ -862,7 +871,7 @@ with tab_dict["⚙️ Setări"]:
             st.warning("Completează numele și parola.")
 
       with st.container(border=True):
-        st.markdown("#### 👥 Gestionare Utilizatori Existenți")
+        st.markdown("#### 👥 Gestionare Utilizatori")
         user_list = list(st.session_state.users.keys())
         target_user = st.selectbox(
             "Selectează utilizator pentru editare", user_list
@@ -879,14 +888,14 @@ with tab_dict["⚙️ Setări"]:
             "Parolă Nouă (lasă gol dacă nu schimbi)", type="password"
         )
 
-        if st.button("💾 Salvează Modificările Contului"):
+        if st.button("💾 Salvează Modificările"):
           st.session_state.users[target_user]["role"] = updated_role
           if updated_pass:
             st.session_state.users[target_user]["pass"] = updated_pass
           st.success(f"Detaliile pentru {target_user} au fost actualizate!")
     else:
       with st.container(border=True):
-        st.markdown("#### 🔒 Schimbare Parolă Cont Curent")
+        st.markdown("#### 🔒 Schimbare Parolă Curentă")
         st.info(f"Conectat ca: **{st.session_state.user}** ({current_role})")
         own_pass = st.text_input("Parolă Nouă", type="password")
         if st.button("💾 Schimbă Parola Mea"):

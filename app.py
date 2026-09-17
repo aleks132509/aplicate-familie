@@ -20,7 +20,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Custom CSS pentru aspect profesional
+# Custom CSS pentru aspect profesional (Corectat: unsafe_allow_html=True)
 st.markdown(
     """
     <style>
@@ -37,7 +37,7 @@ st.markdown(
     .metric-label { font-size: 13px; color: #64748b; font-weight: 600; }
     </style>
 """,
-    unsafe_text_inline=True,
+    unsafe_allow_html=True,
 )
 
 # Initialize Session State pentru setări și securitate
@@ -81,9 +81,7 @@ if not st.session_state.logged_in:
     with st.container(border=True):
       username = st.text_input("👤 Utilizator")
       password = st.text_input("🔑 Parolă", type="password")
-      if st.button(
-          "Autentificare", type="primary", use_container_width=True
-      ):
+      if st.button("Autentificare", type="primary", use_container_width=True):
         if st.session_state.users.get(username) == password:
           st.session_state.logged_in = True
           st.session_state.user = username
@@ -183,10 +181,8 @@ with tab_jurnal:
   st.markdown("### 📊 Panou General de Monitorizare")
 
   if not df.empty:
-    # 1. Carduri sintetice sus (KPIs)
     kpi1, kpi2, kpi3, kpi4 = st.columns(4)
 
-    # Căutare inteligentă coloane pentru KPI
     cols = df.columns
     col_glic = next((c for c in cols if "glic" in c.lower()), None)
     col_sis = next((c for c in cols if "sist" in c.lower()), None)
@@ -245,7 +241,6 @@ with tab_jurnal:
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # 2. Grafice Profesionale Plotly
     st.markdown("#### 📈 Evoluție Parametri Medicali")
     g1, g2 = st.columns(2)
 
@@ -257,7 +252,6 @@ with tab_jurnal:
             go.Scatter(x=df[date_col], y=df[gc], mode="lines+markers", name=gc)
         )
 
-      # Interval Țintă din Setări
       fig_g.add_hrect(
           y0=st.session_state.settings["target_glic_min"],
           y1=st.session_state.settings["target_glic_max"],
@@ -299,7 +293,6 @@ with tab_jurnal:
 
     st.markdown("---")
 
-    # 3. Tabelul de Date Structurat
     st.markdown("#### 📋 Istoric Detaliat Măsurători")
     df_display = df.copy()
     df_display[date_col] = df_display[date_col].dt.strftime("%Y-%m-%d")
@@ -330,7 +323,9 @@ with tab_add:
             "🌅 Moment", ["Dimineața", "Prânz", "Seara"]
         )
       with c3:
-        user_input = st.selectbox("👤 Utilizator", list(st.session_state.users.keys()))
+        user_input = st.selectbox(
+            "👤 Utilizator", list(st.session_state.users.keys())
+        )
 
       st.markdown("---")
       g1, g2, g3, g4 = st.columns(4)

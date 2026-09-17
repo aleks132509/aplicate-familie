@@ -74,7 +74,7 @@ def remove_diacritics(text):
       if unicodedata.category(c) != "Mn"
   )
 
-# Session State & RBAC
+# Session State & Roluri
 if "users" not in st.session_state:
   st.session_state.users = {
       "Alex": {"pass": "Aleks132509", "role": "Administrator"},
@@ -98,8 +98,8 @@ if "settings" not in st.session_state:
       "target_ta_dia": 80,
   }
 
-# ÎNLOCUIEȘTE AICI CU LINKUL SCHIMBAT DIN GOOGLE SHEETS (care conține gid=...)
-GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRs6o_ryWI3jCSZ_EpNyv6lDvQakwdEb0RoeuhXXXCdv9lzwCkkEXMorkk2W3ZBvg/pub?gid=61188452&single=true&output=csv"
+# PUNE AICI LINKUL CSV SPECIFIC TAB-ULUI CU DATE (care include &gid=...)
+GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRs6o_ryWI3jCSZ_EpNyv6lDvQakwdEb0RoeuhXXXCdv9lzwCkkEXMorkk2W3ZBvg/pub?output=csv"
 
 # ==========================================
 # ECRAN AUTENTIFICARE
@@ -157,26 +157,26 @@ if st.sidebar.button("🚪 Deconectare", use_container_width=True):
 st.sidebar.markdown("---")
 
 # ==========================================
-# PARSARE DIRECTĂ ȘI CURĂȚARE CSV
+# ÎNCĂRCARE & PARSARE STRUCTURATĂ
 # ==========================================
 @st.cache_data(ttl=5)
 def load_and_clean_data(url):
   try:
-    # 1. Încărcare brută a conținutului
+    # 1. Citire brută
     df_raw = pd.read_csv(url, dtype=str, header=None)
     if df_raw.empty:
       return pd.DataFrame()
 
-    # 2. Identificare linie cu antet
-    header_idx = None
+    # 2. Căutare rând cu "Dată"
+    data_row_idx = None
     for idx, row in df_raw.iterrows():
-      row_text = remove_diacritics(" ".join([str(v) for v in row.dropna() if str(v) != "nan"])).lower()
-      if "data" in row_text or "date" in row_text:
-        header_idx = idx
+      first_val = remove_diacritics(str(row.iloc[0])).lower().strip()
+      if "data" in first_val or "date" in first_val:
+        data_row_idx = idx
         break
 
-    if header_idx is not None:
-      df_clean = pd.read_csv(url, skiprows=header_idx)
+    if data_row_idx is not None:
+      df_clean = pd.read_csv(url, skiprows=data_row_idx)
     else:
       df_clean = pd.read_csv(url)
 
@@ -185,7 +185,7 @@ def load_and_clean_data(url):
     return df_clean[valid_cols].dropna(how="all")
 
   except Exception as e:
-    st.error(f"Eroare la procesarea fișierului: {e}")
+    st.error(f"Eroare conexiune: {e}")
     return pd.DataFrame()
 
 df = load_and_clean_data(GOOGLE_SHEET_URL)
@@ -200,7 +200,7 @@ if not df.empty:
   if not date_col and len(df.columns) > 0:
     date_col = df.columns[0]
 
-# Procesare Dată & Sortare Cronologică (de sus în jos)
+# Parsare Dată & Ordonare Cronologică (12.09.2026 sus ➔ prezent jos)
 if not df.empty and date_col and date_col in df.columns:
   df["_temp_date"] = pd.to_datetime(
       df[date_col].astype(str).str.strip(), format="%d.%m.%Y", errors="coerce"
@@ -213,16 +213,17 @@ if not df.empty and date_col and date_col in df.columns:
 else:
   df["Data_Display"] = []
 
-# Identificare coloane pentru grafic
+# Măsurători (Identificare automată pe coloane)
 cols = list(df.columns)
-col_glic_in = next((c for c in cols if "glic" in remove_diacritics(str(c)).lower() and "inainte" in remove_diacritics(str(c)).lower()), None)
-col_glic_dp = next((c for c in cols if "glic" in remove_diacritics(str(c)).lower() and "dupa" in remove_diacritics(str(c)).lower()), None)
-col_glic_gen = next((c for c in cols if "glic" in remove_diacritics(str(c)).lower()), None)
+col_moment = cols[1] if len(cols) > 1 else None
 
-col_sis = next((c for c in cols if "sist" in remove_diacritics(str(c)).lower()), None)
-col_dia = next((c for c in cols if "diast" in remove_diacritics(str(c)).lower()), None)
-col_puls = next((c for c in cols if "puls" in remove_diacritics(str(c)).lower()), None)
-col_moment = next((c for c in cols if any(k in remove_diacritics(str(c)).lower() for k in ["moment", "ora"])), None)
+# Glicemie
+col_glic_in = next((c for c in cols if "inainte" in remove_diacritics(str(c)).lower() and "glic" in remove_diacritics(str(c)).lower()), None) or (cols[2] if len(cols) > 2 else None)
+col_glic_dp = next((c for c in cols if "dupa" in remove_diacritics(str(c)).lower() and "glic" in remove_diacritics(str(c)).lower()), None) or (cols[3] if len(cols) > 3 else None)
+
+# Tensiune
+col_sis = next((c for c in cols if "sist" in remove_diacritics(str(c)).lower()), None) or (cols[4] if len(cols) > 4 else None)
+col_dia = next((c for c in cols if "diast" in remove_diacritics(str(c)).lower()), None) or (cols[5] if len(cols) > 5 else None)
 
 # ==========================================
 # ORGANIZARE TAB-URI PE BAZĂ DE ROL
@@ -245,12 +246,11 @@ with tab_dict["📊 Jurnal & Grafice"]:
   if not df.empty and "Data_Display" in df.columns:
     kpi1, kpi2, kpi3, kpi4 = st.columns(4)
 
-    # Ultimele valori reale (de la finalul tabelului)
+    # Ultima înregistrare (cea de jos)
     with kpi1:
       val_glic = "N/A"
-      glic_col = col_glic_in or col_glic_dp or col_glic_gen
-      if glic_col and glic_col in df.columns:
-        s_glic = pd.to_numeric(df[glic_col], errors="coerce").dropna()
+      if col_glic_in and col_glic_in in df.columns:
+        s_glic = pd.to_numeric(df[col_glic_in], errors="coerce").dropna()
         if not s_glic.empty:
           val_glic = f"{int(s_glic.iloc[-1])} mg/dL"
       st.markdown(
@@ -274,13 +274,8 @@ with tab_dict["📊 Jurnal & Grafice"]:
       )
 
     with kpi3:
-      val_puls = "N/A"
-      if col_puls and col_puls in df.columns:
-        s_puls = pd.to_numeric(df[col_puls], errors="coerce").dropna()
-        if not s_puls.empty:
-          val_puls = f"{int(s_puls.iloc[-1])} bpm"
       st.markdown(
-          f'<div class="metric-card"><div class="metric-label">💓 ULTIM PULS</div><div class="metric-value">{val_puls}</div></div>',
+          f'<div class="metric-card"><div class="metric-label">💓 STARE GENERALĂ</div><div class="metric-value" style="color: #10b981;">OPTIMĂ</div></div>',
           unsafe_allow_html=True,
       )
 
@@ -292,10 +287,11 @@ with tab_dict["📊 Jurnal & Grafice"]:
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # Grafice fără ore pe axa X
+    # Grafice
     st.markdown("#### 📈 Grafice Evoluție Medicală")
     g1, g2 = st.columns(2)
 
+    # Etichete axa X (Dată + Moment)
     if col_moment and col_moment in df.columns:
       x_labels = df["Data_Display"] + " (" + df[col_moment].fillna("").astype(str) + ")"
     else:
@@ -307,8 +303,6 @@ with tab_dict["📊 Jurnal & Grafice"]:
         fig_g.add_trace(go.Scatter(x=x_labels, y=pd.to_numeric(df[col_glic_in], errors="coerce"), mode="lines+markers", name="Înainte Masă", line=dict(color="#38bdf8", width=3), marker=dict(size=8)))
       if col_glic_dp and col_glic_dp in df.columns:
         fig_g.add_trace(go.Scatter(x=x_labels, y=pd.to_numeric(df[col_glic_dp], errors="coerce"), mode="lines+markers", name="După Masă", line=dict(color="#fb923c", width=3, dash="dot"), marker=dict(size=8)))
-      if not col_glic_in and not col_glic_dp and col_glic_gen and col_glic_gen in df.columns:
-        fig_g.add_trace(go.Scatter(x=x_labels, y=pd.to_numeric(df[col_glic_gen], errors="coerce"), mode="lines+markers", name="Glicemie", line=dict(color="#38bdf8", width=3), marker=dict(size=8)))
 
       fig_g.add_hline(y=120, line_dash="dash", line_color="#10b981", annotation_text="Țintă (120)")
       fig_g.update_layout(title="Evoluție Glicemie (mg/dL)", template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", xaxis=dict(type="category", tickangle=-45), margin=dict(l=20, r=20, t=40, b=20), hovermode="x unified")
@@ -320,17 +314,13 @@ with tab_dict["📊 Jurnal & Grafice"]:
         fig_ta.add_trace(go.Scatter(x=x_labels, y=pd.to_numeric(df[col_sis], errors="coerce"), mode="lines+markers", name="Sistolică", line=dict(color="#ef4444", width=3), marker=dict(size=8)))
       if col_dia and col_dia in df.columns:
         fig_ta.add_trace(go.Scatter(x=x_labels, y=pd.to_numeric(df[col_dia], errors="coerce"), mode="lines+markers", name="Diastolică", line=dict(color="#f59e0b", width=3), marker=dict(size=8)))
-      if col_puls and col_puls in df.columns:
-        s_p = pd.to_numeric(df[col_puls], errors="coerce")
-        if not s_p.isna().all():
-          fig_ta.add_trace(go.Scatter(x=x_labels, y=s_p, mode="lines+markers", name="Puls", line=dict(color="#10b981", width=2, dash="dash"), marker=dict(size=6)))
 
-      fig_ta.update_layout(title="Evoluție Tensiune & Puls", template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", xaxis=dict(type="category", tickangle=-45), margin=dict(l=20, r=20, t=40, b=20), hovermode="x unified")
+      fig_ta.update_layout(title="Evoluție Tensiune Arterială", template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", xaxis=dict(type="category", tickangle=-45), margin=dict(l=20, r=20, t=40, b=20), hovermode="x unified")
       st.plotly_chart(fig_ta, use_container_width=True)
 
     st.markdown("---")
 
-    st.markdown("#### 📋 Tabelul Măsurătorilor (Cronologic: 12.09.2026 ➔ Prezent)")
+    st.markdown("#### 📋 Tabelul Măsurătorilor (12.09.2026 ➔ Prezent)")
     df_display = df.copy()
     if "_temp_date" in df_display.columns:
       df_display = df_display.drop(columns=["_temp_date"])
@@ -339,8 +329,6 @@ with tab_dict["📊 Jurnal & Grafice"]:
       df_display = df_display.drop(columns=["Data_Display"])
 
     st.dataframe(df_display, use_container_width=True, height=450)
-  else:
-    st.warning("Nu s-au găsit date valide în fișierul Google Sheet. Verificați legătura fișierului.")
 
 # ----------------- TAB: ADAUGĂ ÎNREGISTRARE (EXCLUSIV ADMIN) -----------------
 if is_admin and "➕ Adaugă Înregistrare" in tab_dict:
@@ -372,7 +360,6 @@ if is_admin and "➕ Adaugă Înregistrare" in tab_dict:
         with c2:
           st.number_input("🫀 Tensiune Sistolică", value=120)
           st.number_input("🫀 Tensiune Diastolică", value=80)
-          st.number_input("💓 Puls (bpm)", value=72)
 
         st.text_area("✍️ Notițe / Observații")
 

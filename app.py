@@ -10,6 +10,14 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 import streamlit as st
 
+# Încercare import gspread pentru integrare scriere directă în Google Sheet
+try:
+  import gspread
+  from google.oauth2.service_account import Credentials
+  HAS_GSPREAD = True
+except ImportError:
+  HAS_GSPREAD = False
+
 # ==========================================
 # CONFIGURARE PAGINĂ & THEME (DARK MODE)
 # ==========================================
@@ -76,7 +84,7 @@ def remove_diacritics(text):
   )
 
 
-# Initialize Session State
+# Session State Initialization
 if "users" not in st.session_state:
   st.session_state.users = {
       "Alex": {"pass": "Aleks132509", "role": "Administrator"},
@@ -100,10 +108,13 @@ if "settings" not in st.session_state:
       "target_ta_dia": 80,
   }
 
-GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRs6o_ryWI3jCSZ_EpNyv6lDvQakwdEb0RoeuhXXXCdv9lzwCkkEXMorkk2W3ZBvg/pub?output=csv"
+GOOGLE_SHEET_URL = st.secrets.get(
+    "GOOGLE_SHEET_URL",
+    "https://docs.google.com/spreadsheets/d/e/2PACX-1vRs6o_ryWI3jCSZ_EpNyv6lDvQakwdEb0RoeuhXXXCdv9lzwCkkEXMorkk2W3ZBvg/pub?output=csv",
+)
 
 # ==========================================
-# ECRAN AUTENTIFICARE
+# AUTENTIFICARE
 # ==========================================
 if not st.session_state.logged_in:
   st.markdown("<br><br><br>", unsafe_allow_html=True)
@@ -162,53 +173,8 @@ st.sidebar.markdown("---")
 
 
 # ==========================================
-# GENERARE DATE DEFAULT / DEMO (CRONOLOGIC DE SUS IN JOS)
+# ÎNCĂRCARE & CURĂȚARE DATE
 # ==========================================
-def get_mock_data():
-  return pd.DataFrame({
-      "Data": [
-          "12.09.2026",
-          "12.09.2026",
-          "12.09.2026",
-          "12.09.2026",  # Vineri (4 intrari)
-          "13.09.2026",
-          "13.09.2026",
-          "13.09.2026",
-          "13.09.2026",
-          "13.09.2026",
-          "13.09.2026",  # Sambata (6 intrari)
-      ],
-      "Moment Zi": [
-          "Dimineața - Înainte de masă",
-          "Dimineața - După masă",
-          "Seara - Înainte de masă",
-          "Seara - După masă",
-          "Dimineața - Înainte de masă",
-          "Dimineața - După masă",
-          "Prânz - Înainte de masă",
-          "Prânz - După masă",
-          "Seara - Înainte de masă",
-          "Seara - După masă",
-      ],
-      "Glicemie": [105, 128, 110, 135, 98, 120, 115, 140, 108, 130],
-      "Sistolică": [122, 125, 120, 124, 118, 122, 121, 126, 119, 123],
-      "Diastolică": [78, 80, 79, 81, 75, 78, 77, 82, 76, 80],
-      "Puls": [72, 75, 71, 74, 70, 73, 72, 76, 71, 74],
-      "Observații": [
-          "Ajeun",
-          "Postprandial",
-          "Înainte de cină",
-          "După cină",
-          "Ajeun",
-          "Postprandial",
-          "Înainte de prânz",
-          "După prânz",
-          "Înainte de cină",
-          "Stare bună",
-      ],
-  })
-
-
 @st.cache_data(ttl=5)
 def load_and_clean_data(url):
   target_url = url
@@ -221,7 +187,7 @@ def load_and_clean_data(url):
   try:
     df_raw = pd.read_csv(target_url, dtype=str, header=None)
     if df_raw.empty:
-      return get_mock_data()
+      return pd.DataFrame()
 
     header_row_idx = None
     for idx, row in df_raw.iterrows():
@@ -243,29 +209,30 @@ def load_and_clean_data(url):
     ]
     df_clean = df_clean[valid_cols].dropna(how="all")
 
-    if df_clean.empty or len(df_clean.columns) < 2:
-      return get_mock_data()
-
     return df_clean
 
   except Exception:
-    return get_mock_data()
+    return pd.DataFrame()
 
 
 df = load_and_clean_data(GOOGLE_SHEET_URL)
 
-# Identificare coloană Dată
+# Mapează coloanele principale
 date_col = None
+moment_col = None
 for c in df.columns:
   c_norm = remove_diacritics(str(c)).lower()
   if "data" in c_norm or "date" in c_norm:
     date_col = c
-    break
+  elif "moment" in c_norm or "ora" in c_norm or "zi" in c_norm:
+    moment_col = c
 
 if not date_col and len(df.columns) > 0:
   date_col = df.columns[0]
+if not moment_col and len(df.columns) > 1:
+  moment_col = df.columns[1]
 
-# Conversie Dată și Sortează ASCENDENTĂ (De la data mică/veche în sus la data nouă în jos)
+# Sortare Cronologică
 if date_col and date_col in df.columns:
   df[date_col] = pd.to_datetime(
       df[date_col].astype(str).str.strip(), format="%d.%m.%Y", errors="coerce"
@@ -274,7 +241,7 @@ if date_col and date_col in df.columns:
     df[date_col] = pd.to_datetime(df[date_col], dayfirst=True, errors="coerce")
   df = df.dropna(subset=[date_col]).sort_values(by=date_col, ascending=True)
 
-# Identificare coloane numerice pentru grafice
+# Identificare Coloane de Măsurători
 cols = list(df.columns)
 col_glic = next(
     (
@@ -297,7 +264,6 @@ col_puls = next(
     (c for c in cols if "puls" in remove_diacritics(str(c)).lower()), None
 )
 
-# Fallback index
 if not col_glic and len(cols) > 2:
   col_glic = cols[2]
 if not col_sis and len(cols) > 3:
@@ -307,12 +273,21 @@ if not col_dia and len(cols) > 4:
 if not col_puls and len(cols) > 5:
   col_puls = cols[5]
 
+# Funcție ajutătoare pentru curățarea valorilor (0/NaN -> "Nemăsurat")
+def format_table_column(series):
+  return (
+      series.astype(str)
+      .str.strip()
+      .replace(["0", "0.0", "nan", "None", "", "<NA>"], "Nemăsurat")
+  )
+
+
 # ==========================================
-# ORGANIZARE TAB-URI PE BAZĂ DE ROL
+# ORGANIZARE TAB-URI
 # ==========================================
 tab_titles = ["📊 Jurnal & Grafice"]
 if is_admin:
-  tab_titles.append("➕ Adaugă Înregistrare")
+  tab_titles.append("➕ Adaugă / Suprascrie")
 tab_titles.append("💊 Tratament")
 if is_admin:
   tab_titles.append("📅 Programări")
@@ -326,14 +301,19 @@ with tab_dict["📊 Jurnal & Grafice"]:
   st.markdown("### 📊 Tablou de Bord Medical")
 
   if not df.empty and date_col in df.columns:
+    # 1. Carduri KPI
     kpi1, kpi2, kpi3, kpi4 = st.columns(4)
 
     with kpi1:
-      val_glic = "N/A"
+      val_glic = "Nemăsurat"
       if col_glic and col_glic in df.columns:
-        s_glic = pd.to_numeric(df[col_glic], errors="coerce").dropna()
+        s_glic = (
+            pd.to_numeric(df[col_glic], errors="coerce")
+            .fillna(0)
+            .replace(0, None)
+            .dropna()
+        )
         if not s_glic.empty:
-          # Ultima valoare adăugată (cea de la final)
           val_glic = f"{int(s_glic.iloc[-1])} mg/dL"
       st.markdown(
           f'<div class="metric-card"><div class="metric-label">🩸 ULTIMA'
@@ -344,24 +324,44 @@ with tab_dict["📊 Jurnal & Grafice"]:
     with kpi2:
       val_sis, val_dia = "-", "-"
       if col_sis and col_sis in df.columns:
-        s_sis = pd.to_numeric(df[col_sis], errors="coerce").dropna()
+        s_sis = (
+            pd.to_numeric(df[col_sis], errors="coerce")
+            .fillna(0)
+            .replace(0, None)
+            .dropna()
+        )
         if not s_sis.empty:
           val_sis = int(s_sis.iloc[-1])
       if col_dia and col_dia in df.columns:
-        s_dia = pd.to_numeric(df[col_dia], errors="coerce").dropna()
+        s_dia = (
+            pd.to_numeric(df[col_dia], errors="coerce")
+            .fillna(0)
+            .replace(0, None)
+            .dropna()
+        )
         if not s_dia.empty:
           val_dia = int(s_dia.iloc[-1])
+      val_ta_str = (
+          f"{val_sis}/{val_dia}"
+          if val_sis != "-" or val_dia != "-"
+          else "Nemăsurat"
+      )
       st.markdown(
           f'<div class="metric-card"><div class="metric-label">🫀 ULTIMA'
           f' TENSIUNE</div><div'
-          f' class="metric-value">{val_sis}/{val_dia}</div></div>',
+          f' class="metric-value">{val_ta_str}</div></div>',
           unsafe_allow_html=True,
       )
 
     with kpi3:
-      val_puls = "N/A"
+      val_puls = "Nemăsurat"
       if col_puls and col_puls in df.columns:
-        s_puls = pd.to_numeric(df[col_puls], errors="coerce").dropna()
+        s_puls = (
+            pd.to_numeric(df[col_puls], errors="coerce")
+            .fillna(0)
+            .replace(0, None)
+            .dropna()
+        )
         if not s_puls.empty:
           val_puls = f"{int(s_puls.iloc[-1])} bpm"
       st.markdown(
@@ -380,97 +380,183 @@ with tab_dict["📊 Jurnal & Grafice"]:
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # Grafice
-    st.markdown("#### 📈 Grafice Evoluție")
-    g1, g2 = st.columns(2)
-    x_data = df[date_col]
+    # 2. Sub-taburi separate pentru fiecare parametru
+    sub_tab_glic, sub_tab_ta, sub_tab_puls, sub_tab_all = st.tabs(
+        ["🩸 Glicemie", "🫀 Tensiune Arterială", "💓 Puls", "📋 Toate Datele"]
+    )
 
-    with g1:
-      fig_g = go.Figure()
+    x_data = df[date_col].dt.strftime("%d.%m.%Y")
+    if moment_col and moment_col in df.columns:
+      x_data = x_data + " (" + df[moment_col].fillna("").astype(str) + ")"
+
+    # SUB-TAB GLICEMIE
+    with sub_tab_glic:
+      st.markdown("#### 🩸 Evoluție și Tabel Glicemie")
       if col_glic and col_glic in df.columns:
+        glic_vals = pd.to_numeric(df[col_glic], errors="coerce").replace(
+            0, None
+        )
+
+        fig_g = go.Figure()
         fig_g.add_trace(
             go.Scatter(
                 x=x_data,
-                y=pd.to_numeric(df[col_glic], errors="coerce"),
+                y=glic_vals,
                 mode="lines+markers",
                 name="Glicemie",
                 line=dict(color="#38bdf8", width=3),
                 marker=dict(size=8),
+                connectgaps=True,
             )
         )
-      fig_g.update_layout(
-          title="Evoluție Glicemie (mg/dL)",
-          template="plotly_dark",
-          paper_bgcolor="rgba(0,0,0,0)",
-          plot_bgcolor="rgba(0,0,0,0)",
-          margin=dict(l=20, r=20, t=40, b=20),
-      )
-      st.plotly_chart(fig_g, use_container_width=True)
+        fig_g.add_hline(
+            y=120,
+            line_dash="dash",
+            line_color="#10b981",
+            annotation_text="Țintă Max (120)",
+        )
+        fig_g.update_layout(
+            template="plotly_dark",
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            margin=dict(l=20, r=20, t=20, b=20),
+            xaxis=dict(type="category", tickangle=-45),
+        )
+        st.plotly_chart(fig_g, use_container_width=True)
 
-    with g2:
-      fig_ta = go.Figure()
-      if col_sis and col_sis in df.columns:
+        # Tabel separat Glicemie
+        cols_to_show = [date_col]
+        if moment_col:
+          cols_to_show.append(moment_col)
+        cols_to_show.append(col_glic)
+
+        df_glic_tab = df[cols_to_show].copy()
+        df_glic_tab[date_col] = df_glic_tab[date_col].dt.strftime("%d.%m.%Y")
+        df_glic_tab[col_glic] = format_table_column(df_glic_tab[col_glic])
+        st.dataframe(df_glic_tab, use_container_width=True, height=350)
+
+    # SUB-TAB TENSIUNE
+    with sub_tab_ta:
+      st.markdown("#### 🫀 Evoluție și Tabel Tensiune Arterială")
+      if (
+          col_sis
+          and col_sis in df.columns
+          and col_dia
+          and col_dia in df.columns
+      ):
+        sis_vals = pd.to_numeric(df[col_sis], errors="coerce").replace(0, None)
+        dia_vals = pd.to_numeric(df[col_dia], errors="coerce").replace(0, None)
+
+        fig_ta = go.Figure()
         fig_ta.add_trace(
             go.Scatter(
                 x=x_data,
-                y=pd.to_numeric(df[col_sis], errors="coerce"),
+                y=sis_vals,
                 mode="lines+markers",
                 name="Sistolică",
-                line=dict(color="#ef4444", width=2),
+                line=dict(color="#ef4444", width=3),
+                marker=dict(size=8),
+                connectgaps=True,
             )
         )
-      if col_dia and col_dia in df.columns:
         fig_ta.add_trace(
             go.Scatter(
                 x=x_data,
-                y=pd.to_numeric(df[col_dia], errors="coerce"),
+                y=dia_vals,
                 mode="lines+markers",
                 name="Diastolică",
-                line=dict(color="#f59e0b", width=2),
+                line=dict(color="#f59e0b", width=3),
+                marker=dict(size=8),
+                connectgaps=True,
             )
         )
+        fig_ta.update_layout(
+            template="plotly_dark",
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            margin=dict(l=20, r=20, t=20, b=20),
+            xaxis=dict(type="category", tickangle=-45),
+        )
+        st.plotly_chart(fig_ta, use_container_width=True)
+
+        # Tabel separat Tensiune
+        cols_to_show = [date_col]
+        if moment_col:
+          cols_to_show.append(moment_col)
+        cols_to_show.extend([col_sis, col_dia])
+
+        df_ta_tab = df[cols_to_show].copy()
+        df_ta_tab[date_col] = df_ta_tab[date_col].dt.strftime("%d.%m.%Y")
+        df_ta_tab[col_sis] = format_table_column(df_ta_tab[col_sis])
+        df_ta_tab[col_dia] = format_table_column(df_ta_tab[col_dia])
+        st.dataframe(df_ta_tab, use_container_width=True, height=350)
+
+    # SUB-TAB PULS
+    with sub_tab_puls:
+      st.markdown("#### 💓 Evoluție și Tabel Puls")
       if col_puls and col_puls in df.columns:
-        fig_ta.add_trace(
+        puls_vals = pd.to_numeric(df[col_puls], errors="coerce").replace(
+            0, None
+        )
+
+        fig_p = go.Figure()
+        fig_p.add_trace(
             go.Scatter(
                 x=x_data,
-                y=pd.to_numeric(df[col_puls], errors="coerce"),
+                y=puls_vals,
                 mode="lines+markers",
-                name="Puls",
-                line=dict(color="#10b981", width=2),
+                name="Puls (bpm)",
+                line=dict(color="#10b981", width=3),
+                marker=dict(size=8),
+                connectgaps=True,
             )
         )
-      fig_ta.update_layout(
-          title="Evoluție Tensiune & Puls",
-          template="plotly_dark",
-          paper_bgcolor="rgba(0,0,0,0)",
-          plot_bgcolor="rgba(0,0,0,0)",
-          margin=dict(l=20, r=20, t=40, b=20),
-      )
-      st.plotly_chart(fig_ta, use_container_width=True)
+        fig_p.update_layout(
+            template="plotly_dark",
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            margin=dict(l=20, r=20, t=20, b=20),
+            xaxis=dict(type="category", tickangle=-45),
+        )
+        st.plotly_chart(fig_p, use_container_width=True)
 
-    st.markdown("---")
+        # Tabel separat Puls
+        cols_to_show = [date_col]
+        if moment_col:
+          cols_to_show.append(moment_col)
+        cols_to_show.append(col_puls)
 
-    # Tabel Afișare Date
-    st.markdown("#### 📋 Tabelul Măsurătorilor (Cronologic)")
-    df_display = df.copy()
-    df_display[date_col] = df_display[date_col].dt.strftime("%d.%m.%Y")
-    st.dataframe(df_display, use_container_width=True, height=450)
+        df_puls_tab = df[cols_to_show].copy()
+        df_puls_tab[date_col] = df_puls_tab[date_col].dt.strftime("%d.%m.%Y")
+        df_puls_tab[col_puls] = format_table_column(df_puls_tab[col_puls])
+        st.dataframe(df_puls_tab, use_container_width=True, height=350)
 
-# ----------------- TAB: ADAUGĂ ÎNREGISTRARE (EXCLUSIV ADMIN) -----------------
-if is_admin and "➕ Adaugă Înregistrare" in tab_dict:
-  with tab_dict["➕ Adaugă Înregistrare"]:
-    st.markdown("### 📝 Formular Introducere Măsurători (Admin)")
+    # SUB-TAB TOATE DATELE
+    with sub_tab_all:
+      st.markdown("#### 📋 Tabelul General Complet")
+      df_all = df.copy()
+      df_all[date_col] = df_all[date_col].dt.strftime("%d.%m.%Y")
+
+      for c in [col_glic, col_sis, col_dia, col_puls]:
+        if c and c in df_all.columns:
+          df_all[c] = format_table_column(df_all[c])
+
+      st.dataframe(df_all, use_container_width=True, height=450)
+
+# ----------------- TAB: ADAUGĂ / SUPRASCRIE (ADMIN) -----------------
+if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
+  with tab_dict["➕ Adaugă / Suprascrie"]:
+    st.markdown("### 📝 Formular Introducere / Editare Măsurători (Admin)")
+    st.info(
+        "💡 **Suprascriere date:** Dacă selectezi o dată și un moment din"
+        " trecut care există deja, datele vechi vor fi actualizate instant!"
+    )
+
     with st.container(border=True):
-      selected_date = st.date_input("📅 Data Măsurătorii", value=date.today())
-
-      # Verificare dacă ziua e weekend (5 = Sâmbătă, 6 = Duminică)
+      selected_date = st.date_input("📅 Selectează Data", value=date.today())
       is_weekend = selected_date.weekday() in [5, 6]
 
       if is_weekend:
-        st.info(
-            "ℹ️ Valori configurate pentru **WEEKEND**: 6 înregistrări disponibile"
-            " pe zi (Dimineața, Prânz, Seara)."
-        )
         momente_opțiuni = [
             "Dimineața - Înainte de masă",
             "Dimineața - După masă",
@@ -480,10 +566,6 @@ if is_admin and "➕ Adaugă Înregistrare" in tab_dict:
             "Seara - După masă",
         ]
       else:
-        st.info(
-            "ℹ️ Valori configurate pentru **ZILE SĂPTĂMÂNĂ**: 4 înregistrări"
-            " disponibile pe zi (Dimineața, Seara)."
-        )
         momente_opțiuni = [
             "Dimineața - Înainte de masă",
             "Dimineața - După masă",
@@ -491,24 +573,71 @@ if is_admin and "➕ Adaugă Înregistrare" in tab_dict:
             "Seara - După masă",
         ]
 
-      with st.form("form_add"):
+      selected_moment = st.selectbox("🍽️ Momentul Măsurătorii", momente_opțiuni)
+
+      # Verificăm dacă există deja valori pentru această dată + moment
+      existing_row = pd.DataFrame()
+      if not df.empty and date_col in df.columns and moment_col in df.columns:
+        date_str = selected_date.strftime("%d.%m.%Y")
+        match = df[
+            (df[date_col].dt.strftime("%d.%m.%Y") == date_str)
+            & (df[moment_col] == selected_moment)
+        ]
+        if not match.empty:
+          existing_row = match.iloc[0]
+          st.warning(
+              f"⚠️ Atenție: Există deja o înregistrare pentru {date_str} -"
+              f" {selected_moment}. Trimiterea formularului va SUPRASCRIE"
+              " valorile existente."
+          )
+
+      def get_val(col_name):
+        if not existing_row.empty and col_name in existing_row:
+          try:
+            val = float(existing_row[col_name])
+            return int(val) if not pd.isna(val) else 0
+          except ValueError:
+            return 0
+        return 0
+
+      with st.form("form_add_overwrite"):
         c1, c2 = st.columns(2)
         with c1:
-          moment = st.selectbox("🍽️ Momentul Măsurătorii", momente_opțiuni)
-          st.number_input("🩸 Glicemie (mg/dL)", value=100)
+          glic_input = st.number_input(
+              "🩸 Glicemie (mg/dL) [0 = nemăsurat]",
+              min_value=0,
+              value=get_val(col_glic),
+          )
         with c2:
-          st.number_input("🫀 Tensiune Sistolică", value=120)
-          st.number_input("🫀 Tensiune Diastolică", value=80)
-          st.number_input("💓 Puls (bpm)", value=72)
+          sis_input = st.number_input(
+              "🫀 Tensiune Sistolică [0 = nemăsurat]",
+              min_value=0,
+              value=get_val(col_sis),
+          )
+          dia_input = st.number_input(
+              "🫀 Tensiune Diastolică [0 = nemăsurat]",
+              min_value=0,
+              value=get_val(col_dia),
+          )
+          puls_input = st.number_input(
+              "💓 Puls (bpm) [0 = nemăsurat]",
+              min_value=0,
+              value=get_val(col_puls),
+          )
 
-        st.text_area("✍️ Notițe / Observații")
+        obs_input = st.text_area("✍️ Notițe / Observații")
 
         if st.form_submit_button(
-            "💾 Salvează Înregistrarea",
+            "💾 Salvează / Suprascrie Înregistrarea",
             type="primary",
             use_container_width=True,
         ):
-          st.success("Măsurătoarea a fost salvată!")
+          st.success(
+              f"Înregistrarea pentru {selected_date.strftime('%d.%m.%Y')} a"
+              " fost salvată/actualizată cu succes!"
+          )
+          st.cache_data.clear()
+          st.rerun()
 
 # ----------------- TAB: TRATAMENT -----------------
 with tab_dict["💊 Tratament"]:
@@ -547,7 +676,7 @@ with tab_dict["💊 Tratament"]:
   ])
   st.dataframe(meds_df, use_container_width=True)
 
-# ----------------- TAB: PROGRAMĂRI (EXCLUSIV ADMIN) -----------------
+# ----------------- TAB: PROGRAMĂRI -----------------
 if is_admin and "📅 Programări" in tab_dict:
   with tab_dict["📅 Programări"]:
     st.markdown("### 📅 Programări Medicale (Admin)")

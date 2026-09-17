@@ -162,33 +162,48 @@ st.sidebar.markdown("---")
 
 
 # ==========================================
-# GENERARE DATE DEFAULT / DEMO
+# GENERARE DATE DEFAULT / DEMO (CRONOLOGIC DE SUS IN JOS)
 # ==========================================
 def get_mock_data():
   return pd.DataFrame({
       "Data": [
           "12.09.2026",
+          "12.09.2026",
+          "12.09.2026",
+          "12.09.2026",  # Vineri (4 intrari)
           "13.09.2026",
-          "14.09.2026",
-          "15.09.2026",
-          "16.09.2026",
+          "13.09.2026",
+          "13.09.2026",
+          "13.09.2026",
+          "13.09.2026",
+          "13.09.2026",  # Sambata (6 intrari)
       ],
-      "Moment / Ora": [
-          "08:00 Dimineața",
-          "12:30 Prânz",
-          "08:15 Dimineața",
-          "19:00 Seara",
-          "08:00 Dimineața",
+      "Moment Zi": [
+          "Dimineața - Înainte de masă",
+          "Dimineața - După masă",
+          "Seara - Înainte de masă",
+          "Seara - După masă",
+          "Dimineața - Înainte de masă",
+          "Dimineața - După masă",
+          "Prânz - Înainte de masă",
+          "Prânz - După masă",
+          "Seara - Înainte de masă",
+          "Seara - După masă",
       ],
-      "Glicemie": [105, 128, 98, 115, 110],
-      "Sistolică": [122, 130, 118, 125, 120],
-      "Diastolică": [78, 82, 75, 80, 79],
-      "Puls": [72, 76, 70, 74, 71],
+      "Glicemie": [105, 128, 110, 135, 98, 120, 115, 140, 108, 130],
+      "Sistolică": [122, 125, 120, 124, 118, 122, 121, 126, 119, 123],
+      "Diastolică": [78, 80, 79, 81, 75, 78, 77, 82, 76, 80],
+      "Puls": [72, 75, 71, 74, 70, 73, 72, 76, 71, 74],
       "Observații": [
-          "Înainte de masă",
-          "După masă",
-          "Normal",
-          "Ușoară oboseală",
+          "Ajeun",
+          "Postprandial",
+          "Înainte de cină",
+          "După cină",
+          "Ajeun",
+          "Postprandial",
+          "Înainte de prânz",
+          "După prânz",
+          "Înainte de cină",
           "Stare bună",
       ],
   })
@@ -210,7 +225,9 @@ def load_and_clean_data(url):
 
     header_row_idx = None
     for idx, row in df_raw.iterrows():
-      row_str = remove_diacritics(" ".join([str(v) for v in row.dropna() if str(v) != 'nan'])).lower()
+      row_str = remove_diacritics(
+          " ".join([str(v) for v in row.dropna() if str(v) != "nan"])
+      ).lower()
       if any(k in row_str for k in ["data", "glic", "tens", "sist", "puls"]):
         header_row_idx = idx
         break
@@ -237,7 +254,7 @@ def load_and_clean_data(url):
 
 df = load_and_clean_data(GOOGLE_SHEET_URL)
 
-# Identificare coloane cheie
+# Identificare coloană Dată
 date_col = None
 for c in df.columns:
   c_norm = remove_diacritics(str(c)).lower()
@@ -248,14 +265,14 @@ for c in df.columns:
 if not date_col and len(df.columns) > 0:
   date_col = df.columns[0]
 
-# Conversie Dată
+# Conversie Dată și Sortează ASCENDENTĂ (De la data mică/veche în sus la data nouă în jos)
 if date_col and date_col in df.columns:
   df[date_col] = pd.to_datetime(
       df[date_col].astype(str).str.strip(), format="%d.%m.%Y", errors="coerce"
   )
   if df[date_col].isna().all():
     df[date_col] = pd.to_datetime(df[date_col], dayfirst=True, errors="coerce")
-  df = df.dropna(subset=[date_col]).sort_values(by=date_col, ascending=False)
+  df = df.dropna(subset=[date_col]).sort_values(by=date_col, ascending=True)
 
 # Identificare coloane numerice pentru grafice
 cols = list(df.columns)
@@ -280,7 +297,7 @@ col_puls = next(
     (c for c in cols if "puls" in remove_diacritics(str(c)).lower()), None
 )
 
-# Dacă nu au fost găsite prin nume, asignăm fallback după index
+# Fallback index
 if not col_glic and len(cols) > 2:
   col_glic = cols[2]
 if not col_sis and len(cols) > 3:
@@ -316,7 +333,8 @@ with tab_dict["📊 Jurnal & Grafice"]:
       if col_glic and col_glic in df.columns:
         s_glic = pd.to_numeric(df[col_glic], errors="coerce").dropna()
         if not s_glic.empty:
-          val_glic = f"{int(s_glic.iloc[0])} mg/dL"
+          # Ultima valoare adăugată (cea de la final)
+          val_glic = f"{int(s_glic.iloc[-1])} mg/dL"
       st.markdown(
           f'<div class="metric-card"><div class="metric-label">🩸 ULTIMA'
           f' GLICEMIE</div><div class="metric-value">{val_glic}</div></div>',
@@ -328,11 +346,11 @@ with tab_dict["📊 Jurnal & Grafice"]:
       if col_sis and col_sis in df.columns:
         s_sis = pd.to_numeric(df[col_sis], errors="coerce").dropna()
         if not s_sis.empty:
-          val_sis = int(s_sis.iloc[0])
+          val_sis = int(s_sis.iloc[-1])
       if col_dia and col_dia in df.columns:
         s_dia = pd.to_numeric(df[col_dia], errors="coerce").dropna()
         if not s_dia.empty:
-          val_dia = int(s_dia.iloc[0])
+          val_dia = int(s_dia.iloc[-1])
       st.markdown(
           f'<div class="metric-card"><div class="metric-label">🫀 ULTIMA'
           f' TENSIUNE</div><div'
@@ -345,10 +363,10 @@ with tab_dict["📊 Jurnal & Grafice"]:
       if col_puls and col_puls in df.columns:
         s_puls = pd.to_numeric(df[col_puls], errors="coerce").dropna()
         if not s_puls.empty:
-          val_puls = f"{int(s_puls.iloc[0])} bpm"
+          val_puls = f"{int(s_puls.iloc[-1])} bpm"
       st.markdown(
-          f'<div class="metric-card"><div class="metric-label">💓 PULS'
-          f' MEDIU</div><div class="metric-value">{val_puls}</div></div>',
+          f'<div class="metric-card"><div class="metric-label">💓 ULTIM'
+          f' PULS</div><div class="metric-value">{val_puls}</div></div>',
           unsafe_allow_html=True,
       )
 
@@ -433,32 +451,52 @@ with tab_dict["📊 Jurnal & Grafice"]:
     st.markdown("---")
 
     # Tabel Afișare Date
-    st.markdown("#### 📋 Tabelul Măsurătorilor")
+    st.markdown("#### 📋 Tabelul Măsurătorilor (Cronologic)")
     df_display = df.copy()
     df_display[date_col] = df_display[date_col].dt.strftime("%d.%m.%Y")
-    st.dataframe(df_display, use_container_width=True, height=400)
+    st.dataframe(df_display, use_container_width=True, height=450)
 
 # ----------------- TAB: ADAUGĂ ÎNREGISTRARE (EXCLUSIV ADMIN) -----------------
 if is_admin and "➕ Adaugă Înregistrare" in tab_dict:
   with tab_dict["➕ Adaugă Înregistrare"]:
     st.markdown("### 📝 Formular Introducere Măsurători (Admin)")
     with st.container(border=True):
+      selected_date = st.date_input("📅 Data Măsurătorii", value=date.today())
+
+      # Verificare dacă ziua e weekend (5 = Sâmbătă, 6 = Duminică)
+      is_weekend = selected_date.weekday() in [5, 6]
+
+      if is_weekend:
+        st.info(
+            "ℹ️ Valori configurate pentru **WEEKEND**: 6 înregistrări disponibile"
+            " pe zi (Dimineața, Prânz, Seara)."
+        )
+        momente_opțiuni = [
+            "Dimineața - Înainte de masă",
+            "Dimineața - După masă",
+            "Prânz - Înainte de masă",
+            "Prânz - După masă",
+            "Seara - Înainte de masă",
+            "Seara - După masă",
+        ]
+      else:
+        st.info(
+            "ℹ️ Valori configurate pentru **ZILE SĂPTĂMÂNĂ**: 4 înregistrări"
+            " disponibile pe zi (Dimineața, Seara)."
+        )
+        momente_opțiuni = [
+            "Dimineața - Înainte de masă",
+            "Dimineața - După masă",
+            "Seara - Înainte de masă",
+            "Seara - După masă",
+        ]
+
       with st.form("form_add"):
         c1, c2 = st.columns(2)
         with c1:
-          st.date_input("📅 Data Măsurătorii", value=date.today())
-          st.time_input("🕒 Ora Măsurătorii")
-          st.selectbox(
-              "🍽️ Momentul Măsurătorii",
-              [
-                  "Dimineața (Înainte de masă)",
-                  "Dimineața (După masă)",
-                  "Seara (Înainte de masă)",
-                  "Seara (După masă)",
-              ],
-          )
-        with c2:
+          moment = st.selectbox("🍽️ Momentul Măsurătorii", momente_opțiuni)
           st.number_input("🩸 Glicemie (mg/dL)", value=100)
+        with c2:
           st.number_input("🫀 Tensiune Sistolică", value=120)
           st.number_input("🫀 Tensiune Diastolică", value=80)
           st.number_input("💓 Puls (bpm)", value=72)
@@ -559,7 +597,7 @@ with tab_dict["📄 Raport PDF"]:
       clean_cols = [remove_diacritics(c) for c in data_frame.columns]
       table_data = [clean_cols]
 
-      for _, row in data_frame.head(25).iterrows():
+      for _, row in data_frame.iterrows():
         clean_row = [remove_diacritics(v) for v in row.values]
         table_data.append(clean_row)
 

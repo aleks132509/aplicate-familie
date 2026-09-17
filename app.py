@@ -178,12 +178,14 @@ st.sidebar.markdown("---")
 # ==========================================
 @st.cache_data(ttl=5)
 def load_and_clean_data(url):
+  if not url:
+    return pd.DataFrame()
+
   target_url = url
-  if "/edit" in url:
-    match = re.search(r"/d/([a-zA-Z0-9-_]+)", url)
-    if match:
-      doc_id = match.group(1)
-      target_url = f"https://docs.google.com/spreadsheets/d/{doc_id}/export?format=csv"
+  match = re.search(r"/d/([a-zA-Z0-9-_]+)", url)
+  if match:
+    doc_id = match.group(1)
+    target_url = f"https://docs.google.com/spreadsheets/d/{doc_id}/export?format=csv"
 
   try:
     df_raw = pd.read_csv(target_url, dtype=str, header=None)
@@ -213,11 +215,13 @@ def load_and_clean_data(url):
     return df_clean
 
   except Exception as e:
-    st.error(f"Eroare citire date: {e}")
+    st.warning(
+        "⚠️ Nu s-au putut prelua datele direct de la URL. Verificați accesul"
+        f" public la fișier. Eroare: {e}"
+    )
     return pd.DataFrame()
 
 
-# Căutare / Salvare directă în Google Sheet via API (dacă e configurat gcp_service_account)
 def save_to_google_sheet(
     date_str, moment_str, glic_v, sis_v, dia_v, puls_v, obs_v
 ):
@@ -243,10 +247,13 @@ def save_to_google_sheet(
     if not records:
       return False
 
-    # Căutăm rândul existent pentru suprascriere
     row_to_update = None
     for idx, row in enumerate(records[1:], start=2):
-      if len(row) >= 2 and row[0].strip() == date_str and row[1].strip() == moment_str:
+      if (
+          len(row) >= 2
+          and row[0].strip() == date_str
+          and row[1].strip() == moment_str
+      ):
         row_to_update = idx
         break
 
@@ -296,7 +303,7 @@ if not date_col and len(df.columns) > 0:
 if not moment_col and len(df.columns) > 1:
   moment_col = df.columns[1]
 
-# Sortare Cronologică (12.09.2026 sus -> prezent jos)
+# Sortare Cronologică
 if date_col and date_col in df.columns:
   df[date_col] = pd.to_datetime(
       df[date_col].astype(str).str.strip(), format="%d.%m.%Y", errors="coerce"
@@ -603,8 +610,8 @@ with tab_dict["📊 Jurnal & Grafice"]:
       st.dataframe(df_all, use_container_width=True, height=450)
   else:
     st.warning(
-        "Nu s-au putut încărca datele din Google Sheet. Verificați legătura de"
-        " conectare în st.secrets."
+        "Nu s-au putut încărca datele din Google Sheet. Verificați permisiunile"
+        " publice ('Oricine are link-ul') și legătura în st.secrets."
     )
 
 # ----------------- TAB: ADAUGĂ / SUPRASCRIE (ADMIN) -----------------

@@ -222,7 +222,7 @@ def trimite_email_cu_atasament(destinatar, subiect, mesaj, file_path, file_name)
     for cfg in configs:
         port = cfg["port"]
         use_ssl = cfg["use_ssl"]
-        
+         
         for attempt in range(2):
             try:
                 msg = EmailMessage()
@@ -245,12 +245,12 @@ def trimite_email_cu_atasament(destinatar, subiect, mesaj, file_path, file_name)
                         smtp.starttls()
                         smtp.login(email_sender, email_password)
                         smtp.send_message(msg)
-                        
+                     
                 return True, "Email trimis cu succes prin iCloud!"
             except Exception as e:
                 last_error = str(e)
                 time.sleep(1)
-                
+                 
     return False, f"Erore trimitere iCloud (toate porturile au eșuat): {last_error}"
 
 def verifica_si_fa_backup_automat():
@@ -274,7 +274,7 @@ def verifica_si_fa_backup_automat():
             if not df_cron.empty:
                 temp_backup_file = "temp_backup_cron.csv"
                 df_cron.to_csv(temp_backup_file, index=False)
-                
+                 
                 succes, _ = trimite_email_cu_atasament(
                     destinatar=email_dest,
                     subiect="💾 [Backup Automat] HealthTrack Pro - Date Medicale",
@@ -292,13 +292,8 @@ def verifica_si_fa_backup_automat():
         pass
 
 # ==========================================
-# SESSION STATE INITIALIZATION & TIMEOUT (10 MIN)
+# SESSION STATE INITIALIZATION
 # ==========================================
-TIMEOUT_SEC = 600  # 10 minute
-
-if "last_active_time" not in st.session_state:
-    st.session_state.last_active_time = time.time()
-
 if "users" not in st.session_state:
     st.session_state.users = {
         "Alex": {"pass": "Aleks132509", "role": "Administrator"},
@@ -311,11 +306,19 @@ if "logged_in" not in st.session_state:
 if "user" not in st.session_state:
     st.session_state.user = None
 
-# Verificare timeout inactivitate 10 minute
+# Gestionare Auto-Logout după 10 minute de inactivitate
+INACTIVITY_LIMIT = 600 # 600 secunde = 10 minute
+if "last_active_time" not in st.session_state:
+    st.session_state.last_active_time = time.time()
+
 if st.session_state.logged_in:
-    if time.time() - st.session_state.last_active_time > TIMEOUT_SEC:
+    if time.time() - st.session_state.last_active_time > INACTIVITY_LIMIT:
         st.session_state.logged_in = False
         st.session_state.user = None
+        st.warning("Ai fost deconectat automat după 10 minute de inactivitate.")
+        trigger_rerun()
+    else:
+        st.session_state.last_active_time = time.time()
 
 if "settings" not in st.session_state:
     st.session_state.settings = {
@@ -339,10 +342,6 @@ if "food_categories" not in st.session_state:
 if "action_history_stack" not in st.session_state:
     st.session_state.action_history_stack = []
 
-# Actualizare timp activitate la fiecare acțiune validă
-if st.session_state.logged_in:
-    st.session_state.last_active_time = time.time()
-
 # ==========================================
 # AUTENTIFICARE
 # ==========================================
@@ -353,9 +352,6 @@ if not st.session_state.logged_in:
     with col_b:
         st.markdown("<h1 style='text-align: center; color: #38bdf8;'>🩺 HealthTrack Pro</h1>", unsafe_allow_html=True)
         st.markdown("<p style='text-align: center; color: #94a3b8; font-size: 16px;'>Platformă de Monitorizare Medicală de Familie</p>", unsafe_allow_html=True)
-
-        if time.time() - st.session_state.last_active_time > TIMEOUT_SEC and st.session_state.get("user") is None:
-            st.warning("⏳ Ai fost deconectat automat din cauza inactivității (10 minute).")
 
         with st.container(border=True):
             username = st.text_input("👤 Utilizator")
@@ -573,16 +569,11 @@ def apply_color_styling(df_to_style, subset_cols):
         return df_to_style
 
 # ==========================================
-# SIDEBAR & FILTRARE + 1. BUTON SALVARE SIDEBAR
+# SIDEBAR & FILTRARE
 # ==========================================
 st.sidebar.markdown(f"### 👤 **{st.session_state.user}**")
 st.sidebar.markdown(f"Rol: <span class='role-badge'>{current_role}</span>", unsafe_allow_html=True)
 st.sidebar.markdown("<br>", unsafe_allow_html=True)
-
-# Buton de salvare sus în sidebar
-if st.sidebar.button("💾 Salvează Datele (Sidebar)", key="sidebar_save_btn", use_container_width=True):
-    save_all_files()
-    st.sidebar.success("Datele au fost salvate cu succes din sidebar!")
 
 st.sidebar.markdown("### 🔍 Filtre Date")
 if not df.empty:
@@ -600,7 +591,7 @@ if not df.empty:
     else:
         view_df = df.copy()
         filtru_luni = luni_disponibile
-        
+         
     filtru_luni_str = ", ".join(filtru_luni) if not toate_lunile else "Istoric Complet"
 else:
     view_df = df.copy()
@@ -627,13 +618,6 @@ tab_dict = {title: tabs[i] for i, title in enumerate(tab_titles)}
 
 # ----------------- TAB: JURNAL & GRAFICE -----------------
 with tab_dict["📊 Jurnal & Grafice"]:
-    # 2. Buton de salvare rapidă (Sus în pagină)
-    top_col1, top_col2 = st.columns([4, 1])
-    with top_col2:
-        if st.button("💾 Salvează Rapid", key="fast_save_top", use_container_width=True):
-            save_all_files()
-            st.success("Salvat cu succes!")
-
     st.markdown("### 📊 Tablou de Bord Medical")
     st.caption(f"Filtru curent: **{filtru_luni_str}**")
 
@@ -675,7 +659,7 @@ with tab_dict["📊 Jurnal & Grafice"]:
 
         st.markdown("<br>", unsafe_allow_html=True)
         sub_tab_glic, sub_tab_ta, sub_tab_puls, sub_tab_all = st.tabs(["🩸 Glicemie & Analiză Spike", "🫀 Tensiune Arterială", "💓 Puls", "📋 Toate Datele"])
-        
+         
         x_labels_composed = [f"{d.strftime('%d.%m')} ({m[:3]})" for d, m in zip(view_df[date_col], view_df[moment_col])]
 
         with sub_tab_glic:
@@ -703,15 +687,15 @@ with tab_dict["📊 Jurnal & Grafice"]:
                     textfont=dict(size=9.5, color="#ffffff"),
                     connectgaps=True
                 ))
-                
+                 
                 max_post = st.session_state.settings.get("target_glic_post_max", 160)
                 max_pre = st.session_state.settings.get("target_glic_max", 120)
                 fig_g.add_hline(y=max_post, line_dash="dash", line_color="#dc2626", annotation_text=f"Prag Max După Masă ({max_post})")
                 fig_g.add_hline(y=max_pre, line_dash="dot", line_color="#f59e0b", annotation_text=f"Prag Max Înainte Masă ({max_pre})")
-                
+                 
                 max_glic_data = glic_vals.max() if not glic_vals.dropna().empty else 200
                 upper_limit_g = max(250, int(max_glic_data) + 50)
-                
+                 
                 fig_g.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=40, r=40, t=50, b=120), xaxis=dict(tickangle=-45, dtick=1), yaxis=dict(range=[0, upper_limit_g]))
                 st.plotly_chart(fig_g, use_container_width=True)
 
@@ -729,7 +713,7 @@ with tab_dict["📊 Jurnal & Grafice"]:
             if col_sis in view_df.columns and col_dia in view_df.columns:
                 sis_vals = pd.to_numeric(view_df[col_sis], errors="coerce").replace(0, None)
                 dia_vals = pd.to_numeric(view_df[col_dia], errors="coerce").replace(0, None)
-                
+                 
                 sis_colors = ["#dc2626" if is_ta_spike(s, d) else "#2563eb" for s, d in zip(sis_vals, dia_vals)]
                 dia_colors = ["#dc2626" if is_ta_spike(s, d) else "#f59e0b" for s, d in zip(sis_vals, dia_vals)]
 
@@ -746,13 +730,13 @@ with tab_dict["📊 Jurnal & Grafice"]:
                     text=dia_vals, textposition="bottom center", textfont=dict(size=10, color="#ffffff"), 
                     texttemplate="<b>%{text}</b>", connectgaps=True
                 ))
-                
+                 
                 max_s_target = st.session_state.settings.get("target_ta_sis", 120)
                 fig_ta.add_hline(y=max_s_target, line_dash="dash", line_color="#dc2626", annotation_text=f"Prag Max Sistolică ({max_s_target})")
-                
+                 
                 fig_ta.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=40, r=40, t=50, b=120), xaxis=dict(tickangle=-45, dtick=1))
                 st.plotly_chart(fig_ta, use_container_width=True)
-                
+                 
                 cols_t = [date_col, moment_col, col_sis, col_dia, col_obs]
                 df_t_tab = view_df[cols_t].copy()
                 df_t_tab[date_col] = df_t_tab[date_col].dt.strftime("%d.%m.%Y")
@@ -764,7 +748,7 @@ with tab_dict["📊 Jurnal & Grafice"]:
                 st.dataframe(apply_color_styling(df_t_tab, ["Status Tensiune"]), use_container_width=True)
 
         with sub_tab_puls:
-            st.markdown("ℹ️ **Legendă Puls:** 🔵 Albastru = Puls în intervalul normal (60-100 bpm) | 🔴 Roșu = Puls scăzut sau ridicat.")
+            st.markdown("ℹ️ **Legendă Puls:** 🔵 Normal (60-100 bpm) | 🔴 Scăzut (<60) | 🔴 Ridicat (>100).")
             if col_puls in view_df.columns:
                 puls_vals = pd.to_numeric(view_df[col_puls], errors="coerce").replace(0, None)
                 puls_colors = ["#dc2626" if is_puls_spike(p) else "#38bdf8" for p in puls_vals]
@@ -776,110 +760,26 @@ with tab_dict["📊 Jurnal & Grafice"]:
                     text=puls_vals, textposition="top center", textfont=dict(size=10, color="#ffffff"),
                     texttemplate="<b>%{text}</b>", connectgaps=True
                 ))
-                fig_p.add_hline(y=100, line_dash="dash", line_color="#dc2626", annotation_text="Prag Max Puls (100)")
-                fig_p.add_hline(y=60, line_dash="dash", line_color="#f59e0b", annotation_text="Prag Min Puls (60)")
                 fig_p.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=40, r=40, t=50, b=120), xaxis=dict(tickangle=-45, dtick=1))
                 st.plotly_chart(fig_p, use_container_width=True)
 
                 cols_p = [date_col, moment_col, col_puls, col_obs]
                 df_p_tab = view_df[cols_p].copy()
                 df_p_tab[date_col] = df_p_tab[date_col].dt.strftime("%d.%m.%Y")
-                df_p_tab["Status Puls"] = df_p_tab.apply(lambda r: evaluate_puls(r[col_puls]), axis=1)
+                df_p_tab["Status Puls"] = df_p_tab[col_puls].apply(evaluate_puls)
                 df_p_tab[col_puls] = format_table_column(df_p_tab[col_puls])
                 df_p_tab[col_obs] = df_p_tab[col_obs].apply(clean_obs)
                 df_p_tab = df_p_tab[df_p_tab[col_puls] != ""]
                 st.dataframe(apply_color_styling(df_p_tab, ["Status Puls"]), use_container_width=True)
 
         with sub_tab_all:
-            st.markdown("### 📋 Istoric Complet Înregistrări")
+            st.markdown("📋 **Toate Înregistrările Medicale (Filtrate)**")
             df_all_tab = view_df.copy()
-            if not df_all_tab.empty:
-                df_all_tab[date_col] = df_all_tab[date_col].dt.strftime("%d.%m.%Y")
-                for c in [col_glic, col_sis, col_dia, col_puls]:
-                    if c in df_all_tab.columns:
-                        df_all_tab[c] = format_table_column(df_all_tab[c])
-                st.dataframe(df_all_tab, use_container_width=True)
-
-# ----------------- TAB: ADAUGĂ / SUPRASCRIE -----------------
-if is_admin:
-    with tab_dict["➕ Adaugă / Suprascrie"]:
-        st.markdown("### ➕ Adăugare sau Suprascriere Măsurători")
-        with st.form("form_add_record"):
-            f_date = st.date_input("Dată", value=date.today())
-            f_moment = st.selectbox("Moment Zi", ["Dimineața (Înainte de masă)", "Dimineața (După masă)", "Prânz (Înainte de masă)", "Prânz (După masă)", "Seara (Înainte de masă)", "Seara (După masă)", "Înainte de culcare", "Noaptea"])
-            
-            c1, c2, c3, c4 = st.columns(4)
-            with c1: f_glic = st.number_input("Glicemie (mg/dL)", min_value=0, max_value=600, value=0)
-            with c2: f_sis = st.number_input("Tensiune Sistolică", min_value=0, max_value=300, value=0)
-            with c3: f_dia = st.number_input("Tensiune Diastolică", min_value=0, max_value=200, value=0)
-            with c4: f_puls = st.number_input("Puls (bpm)", min_value=0, max_value=250, value=0)
-            
-            f_obs = st.text_input("Observații / Cauză alimentară", placeholder="Ex: am mancat o prajitura, stres, etc.")
-            
-            submitted = st.form_submit_button("💾 Salvează Înregistrarea", use_container_width=True)
-            if submitted:
-                save_local_record(f_date.strftime("%d.%m.%Y"), f_moment, f_glic, f_sis, f_dia, f_puls, f_obs)
-                st.success(f"Înregistrarea pentru {f_date.strftime('%d.%m.%Y')} ({f_moment}) a fost salvată!")
-                trigger_rerun()
-
-# ----------------- TAB: TRATAMENT -----------------
-with tab_dict["💊 Tratament"]:
-    st.markdown("### 💊 Schema de Tratament Curentă")
-    st.dataframe(st.session_state.meds_df, use_container_width=True)
-    
-    st.markdown("---")
-    st.markdown("### 📜 Istoric Administrare Medicamente")
-    if not st.session_state.meds_hist_df.empty:
-        st.dataframe(st.session_state.meds_hist_df, use_container_width=True)
-    else:
-        st.info("Nicio acțiune înregistrată în istoric.")
-
-# ----------------- TAB: PROGRAMĂRI -----------------
-if is_admin:
-    with tab_dict["📅 Programări"]:
-        st.markdown("### 📅 Programări Medicale")
-        st.dataframe(st.session_state.prog_df, use_container_width=True)
-
-# ----------------- TAB: RAPORT PDF -----------------
-with tab_dict["📄 Raport PDF"]:
-    st.markdown("### 📄 Generare Raport Medical PDF")
-    st.write("Poți genera și descărca un raport detaliat în format PDF cu măsurătorile tale.")
-    if st.button("📥 Generează Raport PDF", use_container_width=True):
-        st.info("Funcționalitate pregătită pentru export PDF.")
-
-# ----------------- TAB: SETĂRI -----------------
-with tab_dict["⚙️ Setări"]:
-    st.markdown("### ⚙️ Setări Aplicație & Notificări")
-    with st.form("settings_form"):
-        s_email = st.text_input("Email Sender (iCloud)", value=st.session_state.settings.get("email_sender", ""))
-        s_pass = st.text_input("Parolă aplicație (App-Specific Password)", type="password", value=st.session_state.settings.get("email_password", ""))
-        
-        c_s1, c_s2 = st.columns(2)
-        with c_s1:
-            t_g_max = st.number_input("Prag Maxim Glicemie (Înainte de masă)", value=int(st.session_state.settings.get("target_glic_max", 120)))
-            t_gp_max = st.number_input("Prag Maxim Glicemie (După masă)", value=int(st.session_state.settings.get("target_glic_post_max", 160)))
-        with c_s2:
-            t_s_sis = st.number_input("Prag Maxim Tensiune Sistolică", value=int(st.session_state.settings.get("target_ta_sis", 120)))
-            t_s_dia = st.number_input("Prag Maxim Tensiune Diastolică", value=int(st.session_state.settings.get("target_ta_dia", 80)))
-
-        saved_set = st.form_submit_button("💾 Salvează Setările", use_container_width=True)
-        if saved_set:
-            st.session_state.settings["email_sender"] = s_email
-            st.session_state.settings["email_password"] = s_pass
-            st.session_state.settings["target_glic_max"] = t_g_max
-            st.session_state.settings["target_glic_post_max"] = t_gp_max
-            st.session_state.settings["target_ta_sis"] = t_s_sis
-            st.session_state.settings["target_ta_dia"] = t_s_dia
-            st.success("Setările au fost salvate cu succes!")
-
-# ==========================================
-# 3. ZONA DE JOS: BUTONUL CLASIC DE SALVARE
-# ==========================================
-st.markdown("<br><hr>", unsafe_allow_html=True)
-c_bot1, c_bot2, c_bot3 = st.columns([1, 2, 1])
-with c_bot2:
-    if st.button("💾 Salvează Toate Datele (Jos)", key="bottom_save_btn", type="primary", use_container_width=True):
-        save_all_files()
-        st.success("Toate fișierele și datele au fost salvate cu succes din partea de jos a paginii!")
-
-st.caption("🔒 Sesiunea ta este securizată. Dacă părăsești aplicația și trec 10 minute de inactivitate, vei fi deconectat automat.")
+            df_all_tab[date_col] = df_all_tab[date_col].dt.strftime("%d.%m.%Y")
+            df_all_tab["Status Glicemie"] = df_all_tab.apply(lambda r: evaluate_glic(r[col_glic], r[moment_col]), axis=1)
+            df_all_tab["Status Tensiune"] = df_all_tab.apply(lambda r: evaluate_ta(r[col_sis], r[col_dia]), axis=1)
+            df_all_tab["Status Puls"] = df_all_tab[col_puls].apply(evaluate_puls)
+            for c in [col_glic, col_sis, col_dia, col_puls]:
+                if c in df_all_tab.columns:
+                    df_all_tab[c] = format_table_column(df_all_tab[c])
+            st.dataframe(df_all_tab, use_container_width=True)

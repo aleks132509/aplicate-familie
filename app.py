@@ -93,7 +93,7 @@ def trigger_rerun():
         st.experimental_rerun()
 
 # ==========================================
-# GESTIONARE FIȘIERE PERSISTENTE & SALVARE
+# GESTIONARE FIȘIERE PERSISTENTE
 # ==========================================
 DATA_FILE = "date_medicale_utilizator.csv"
 MEDS_FILE = "medicamente.csv"
@@ -167,27 +167,16 @@ def get_initial_foods():
     return default_foods
 
 def save_all_files():
-    """Buton/Funcție optimizată pentru salvare sigură în fișiere."""
-    try:
-        st.session_state.meds_df.to_csv(MEDS_FILE, index=False)
-        st.session_state.meds_hist_df.to_csv(MEDS_HIST_FILE, index=False)
-        st.session_state.prog_df.to_csv(PROG_FILE, index=False)
-        return True
-    except Exception as e:
-        print(f"Erore la salvarea fișierelor: {e}")
-        return False
+    st.session_state.meds_df.to_csv(MEDS_FILE, index=False)
+    st.session_state.meds_hist_df.to_csv(MEDS_HIST_FILE, index=False)
+    st.session_state.prog_df.to_csv(PROG_FILE, index=False)
 
 def save_custom_foods():
-    try:
-        rows = []
-        for cat, items in st.session_state.food_categories.items():
-            for item in items:
-                rows.append({"Categorie": cat, "Element": remove_diacritics(item).strip().lower()})
-        pd.DataFrame(rows).to_csv(FOODS_FILE, index=False)
-        return True
-    except Exception as e:
-        print(f"Erore la salvarea alimentelor: {e}")
-        return False
+    rows = []
+    for cat, items in st.session_state.food_categories.items():
+        for item in items:
+            rows.append({"Categorie": cat, "Element": remove_diacritics(item).strip().lower()})
+    pd.DataFrame(rows).to_csv(FOODS_FILE, index=False)
 
 def add_history_entry(actiune, medicament, detalii):
     new_entry = {
@@ -317,10 +306,6 @@ if "logged_in" not in st.session_state:
 if "user" not in st.session_state:
     st.session_state.user = None
 
-# Inițializare activitate pentru deconectare automată (auto-logout)
-if "last_activity" not in st.session_state:
-    st.session_state.last_activity = time.time()
-
 if "settings" not in st.session_state:
     st.session_state.settings = {
         "notif_enabled": True, 
@@ -344,19 +329,6 @@ if "action_history_stack" not in st.session_state:
     st.session_state.action_history_stack = []
 
 # ==========================================
-# VERIFICARE DECONECTARE AUTOMATĂ (AUTO-LOGOUT)
-# ==========================================
-INACTIVITY_TIMEOUT = 1200  # 20 minute de inactivitate
-if st.session_state.logged_in:
-    if time.time() - st.session_state.get("last_activity", time.time()) > INACTIVITY_TIMEOUT:
-        st.session_state.logged_in = False
-        st.session_state.user = None
-        st.warning("⏱️ Sesiunea a expirat din motive de securitate (inactivitate). Te-ai deconectat automat.")
-        trigger_rerun()
-    else:
-        st.session_state.last_activity = time.time()
-
-# ==========================================
 # AUTENTIFICARE
 # ==========================================
 if not st.session_state.logged_in:
@@ -376,7 +348,6 @@ if not st.session_state.logged_in:
                 if user_data and user_data["pass"] == password:
                     st.session_state.logged_in = True
                     st.session_state.user = username
-                    st.session_state.last_activity = time.time()
                     verifica_si_fa_backup_automat()
                     trigger_rerun()
                 else:
@@ -476,10 +447,8 @@ def save_local_record(date_str, moment_str, glic_v, sis_v, dia_v, puls_v, obs_v)
         else:
             df_to_save[date_col] = pd.to_datetime(df_to_save[date_col], errors="coerce").dt.strftime("%d.%m.%Y")
         df_to_save.to_csv(DATA_FILE, index=False)
-        return True
     except Exception as e:
-        print(f"Erore salvare locală: {e}")
-        return False
+        print(f"Erore: {e}")
 
 def format_table_column(series):
     return series.astype(str).str.strip().replace(["0", "0.0", "nan", "None", "", "<NA>"], "")
@@ -811,7 +780,7 @@ with tab_dict["📊 Jurnal & Grafice"]:
 # ----------------- TAB: ADAUGĂ / SUPRASCRIE (ADMIN) -----------------
 if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
     with tab_dict["➕ Adaugă / Suprascrie"]:
-        st.markdown("### 📝 Formular Introducere / Suprascriere Măsurători")
+        st.markdown("### 📝 Formular Introducere / Suprascrie Măsurători")
         
         c_undo1, c_undo2 = st.columns([2, 5])
         with c_undo1:
@@ -866,56 +835,71 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
                     if k.startswith("quick_"):
                         del st.session_state[k]
 
-            with st.form("form_add_overwrite"):
-                c1, c2 = st.columns(2)
-                with c1: glic_input = st.number_input("🩸 Glicemie (mg/dL) [0 = nemăsurat]", min_value=0, value=get_val(col_glic))
-                with c2:
-                    sis_input = st.number_input("🫀 Tensiune Sistolică [0 = nemăsurat]", min_value=0, value=get_val(col_sis))
-                    dia_input = st.number_input("🫀 Tensiune Diastolică [0 = nemăsurat]", min_value=0, value=get_val(col_dia))
-                    puls_input = st.number_input("💓 Puls [0 = nemăsurat]", min_value=0, value=get_val(col_puls))
+            def handle_save_action():
+                g_val = st.session_state.get("inp_glic", 0)
+                s_val = st.session_state.get("inp_sis", 0)
+                d_val = st.session_state.get("inp_dia", 0)
+                p_val = st.session_state.get("inp_puls", 0)
+                o_val = st.session_state.get("inp_obs", "")
+                save_local_record(selected_date.strftime("%d.%m.%Y"), selected_moment, g_val, s_val, d_val, p_val, o_val)
+                st.session_state["success_message"] = "✅ Salvare efectuată cu succes!"
+                trigger_rerun()
 
-                st.markdown("---")
-                st.markdown("##### ⚡ Asistent Inteligent Mese & Indice Glicemic (Sugestii instantanee)")
-                
-                search_food_input = st.selectbox(
-                    "🔍 Caută / Selectează rapid ingredient (afiseaza sugestii instant după primele litere)",
-                    options=[""] + sorted(list(set([item for items in st.session_state.food_categories.values() for item in items]))),
-                    key="search_food_dropdown_instant"
-                )
-                
-                selected_quick_items = []
-                cat_cols = st.columns(len(st.session_state.food_categories))
-                
-                search_query_clean = remove_diacritics(str(search_food_input).strip().lower())
+            # 💾 BUTON SALVARE SUS
+            st.button("💾 Salvează / Suprascrie (Sus)", type="primary", use_container_width=True, on_click=handle_save_action, key="top_save_btn")
+            st.markdown("---")
 
-                for idx, (cat_name, items) in enumerate(st.session_state.food_categories.items()):
-                    with cat_cols[idx]:
-                        st.caption(cat_name)
+            c1, c2 = st.columns(2)
+            with c1: 
+                st.number_input("🩸 Glicemie (mg/dL) [0 = nemăsurat]", min_value=0, value=get_val(col_glic), key="inp_glic")
+            with c2:
+                st.number_input("🫀 Tensiune Sistolică [0 = nemăsurat]", min_value=0, value=get_val(col_sis), key="inp_sis")
+                st.number_input("🫀 Tensiune Diastolică [0 = nemăsurat]", min_value=0, value=get_val(col_dia), key="inp_dia")
+                st.number_input("💓 Puls [0 = nemăsurat]", min_value=0, value=get_val(col_puls), key="inp_puls")
+
+            st.markdown("---")
+            st.markdown("##### ⚡ Asistent Inteligent Mese & Indice Glicemic (Sugestii instantanee)")
+            
+            search_food_input = st.selectbox(
+                "🔍 Caută / Selectează rapid ingredient (afiseaza sugestii instant după primele litere)",
+                options=[""] + sorted(list(set([item for items in st.session_state.food_categories.values() for item in items]))),
+                key="search_food_dropdown_instant"
+            )
+            
+            selected_quick_items = []
+            cat_cols = st.columns(len(st.session_state.food_categories))
+            
+            search_query_clean = remove_diacritics(str(search_food_input).strip().lower())
+
+            for idx, (cat_name, items) in enumerate(st.session_state.food_categories.items()):
+                with cat_cols[idx]:
+                    st.caption(cat_name)
+                    
+                    for item in sorted(items):
+                        item_clean = remove_diacritics(item).lower()
+                        is_default_checked = (search_query_clean and item_clean.startswith(search_query_clean))
                         
-                        for item in sorted(items):
-                            item_clean = remove_diacritics(item).lower()
-                            is_default_checked = (search_query_clean and item_clean.startswith(search_query_clean))
-                            
-                            if st.checkbox(item, value=is_default_checked, key=f"quick_{cat_name}_{item}_{session_form_key}"):
-                                selected_quick_items.append(item)
+                        if st.checkbox(item, value=is_default_checked, key=f"quick_{cat_name}_{item}_{session_form_key}"):
+                            selected_quick_items.append(item)
 
-                base_obs_initial = get_obs()
-                if selected_quick_items:
-                    joined_quick = ", ".join(sorted(list(set(selected_quick_items))))
-                    if base_obs_initial:
-                        if joined_quick not in base_obs_initial:
-                            base_obs_initial = f"{base_obs_initial}, {joined_quick}"
-                    else:
-                        base_obs_initial = joined_quick
+            base_obs_initial = get_obs()
+            if selected_quick_items:
+                joined_quick = ", ".join(sorted(list(set(selected_quick_items))))
+                if base_obs_initial:
+                    if joined_quick not in base_obs_initial:
+                        base_obs_initial = f"{base_obs_initial}, {joined_quick}"
+                else:
+                    base_obs_initial = joined_quick
 
-                obs_input = st.text_area("✍️ Notițe / Observații", value=base_obs_initial)
-                
-                submitted = st.form_submit_button("💾 Salvează / Suprascrie", type="primary", use_container_width=True)
+            if "inp_obs" not in st.session_state or st.session_state.get("last_form_key_obs") != session_form_key:
+                st.session_state["inp_obs"] = base_obs_initial
+                st.session_state["last_form_key_obs"] = session_form_key
 
-                if submitted:
-                    save_local_record(selected_date.strftime("%d.%m.%Y"), selected_moment, glic_input, sis_input, dia_input, puls_input, obs_input)
-                    st.session_state["success_message"] = "✅ Salvare efectuată cu succes!"
-                    trigger_rerun()
+            st.text_area("✍️ Notițe / Observații", key="inp_obs")
+            
+            st.markdown("---")
+            # 💾 BUTON SALVARE JOS
+            st.button("💾 Salvează / Suprascrie (Jos)", type="primary", use_container_width=True, on_click=handle_save_action, key="bottom_save_btn")
 
 # ----------------- TAB: TRATAMENT -----------------
 with tab_dict["💊 Tratament"]:
@@ -940,7 +924,6 @@ with tab_dict["💊 Tratament"]:
                             new_row = pd.DataFrame([{"Medicament": m_nume, "Doză": m_doza, "Orar": m_orar, "Administrare": m_admin}])
                             st.session_state.meds_df = pd.concat([st.session_state.meds_df, new_row], ignore_index=True)
                             add_history_entry("Adăugare", m_nume, f"Doză: {m_doza}, Orar: {m_orar}")
-                            save_all_files()
                             st.success(f"{m_nume} adăugat!")
                             trigger_rerun()
 
@@ -962,7 +945,6 @@ with tab_dict["💊 Tratament"]:
                             st.session_state.meds_df.loc[idx, "Orar"] = e_orar
                             st.session_state.meds_df.loc[idx, "Administrare"] = e_admin
                             add_history_entry("Modificare", med_to_edit, f"Doză: -> {e_doza}")
-                            save_all_files()
                             st.success("Actualizat!")
                             trigger_rerun()
 
@@ -1267,6 +1249,10 @@ with tab_dict["📄 Raport PDF"]:
                 plt.plot(xi, yi, marker="o", markersize=6.5, color=dot_color)
                 plt.annotate(str(int(yi)), (xi, yi), textcoords="offset points", xytext=(0, 7), ha="center", fontsize=7.5, fontweight="bold", bbox=dict(boxstyle="round,pad=0.15", fc="white", ec=dot_color, alpha=0.95))
         
+        # Limită axa Y dinamică cu headroom pentru a preveni depășirea graficului
+        max_y = max(y_vals) if y_vals and max(y_vals) > 0 else 200
+        plt.ylim(0, max(max_y * 1.25, 220))
+
         plt.title(title + " | Legenda: Albastru = Normal, Rosu = Spike / Afara pragului", fontsize=9.5, fontweight="bold", color="#1e3a8a", pad=15)
         plt.ylabel(ylabel, fontsize=9, fontweight="bold")
         plt.xticks(rotation=35, fontsize=7.5, ha="right")
@@ -1309,6 +1295,11 @@ with tab_dict["📄 Raport PDF"]:
                 plt.plot(xi, d, marker="o", markersize=6.5, color=d_color)
                 plt.annotate(f"D:{int(d)}", (xi, d), textcoords="offset points", xytext=(0, -12), ha="center", fontsize=7, fontweight="bold", bbox=dict(boxstyle="round,pad=0.15", fc="white", ec=d_color, alpha=0.95))
                 
+        # Limită axa Y dinamică cu headroom pentru tensiune
+        all_ta = [s for s in sis_vals if s > 0] + [d for d in dia_vals if d > 0]
+        max_t = max(all_ta) if all_ta else 180
+        plt.ylim(0, max(max_t * 1.25, 200))
+
         plt.title(title + " | Legenda: Albastru = Sistolica, Galben = Diastolica, Rosu = Crescuta", fontsize=9.5, fontweight="bold", color="#1e3a8a", pad=15)
         plt.ylabel("mmHg", fontsize=9, fontweight="bold")
         plt.xticks(rotation=35, fontsize=7.5, ha="right")
@@ -1340,6 +1331,10 @@ with tab_dict["📄 Raport PDF"]:
                 plt.plot(xi, p, marker="o", markersize=6.5, color=p_color)
                 plt.annotate(str(int(p)), (xi, p), textcoords="offset points", xytext=(0, 7), ha="center", fontsize=7.5, fontweight="bold", bbox=dict(boxstyle="round,pad=0.15", fc="white", ec=p_color, alpha=0.95))
                 
+        # Limită axa Y dinamică cu headroom pentru puls
+        max_p = max(puls_vals) if puls_vals and max(puls_vals) > 0 else 100
+        plt.ylim(30, max(max_p * 1.25, 140))
+
         plt.title(title + " | Legenda: Verde = Normal (60-100), Rosu = Afara intervalului", fontsize=9.5, fontweight="bold", color="#1e3a8a", pad=15)
         plt.ylabel("bpm", fontsize=9, fontweight="bold")
         plt.xticks(rotation=35, fontsize=7.5, ha="right")

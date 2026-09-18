@@ -200,7 +200,8 @@ def trimite_email_alerta(destinatar, subiect, mesaj):
         msg['From'] = email_sender
         msg['To'] = destinatar
 
-        with smtplib.SMTP_SSL('smtp.mail.me.com', 465, timeout=10) as smtp:
+        # Timeout mărit la 15 secunde pentru a preveni erorile de conexiune/rețea (Connection timed out)
+        with smtplib.SMTP_SSL('smtp.mail.me.com', 465, timeout=15) as smtp:
             smtp.login(email_sender, email_password)
             smtp.send_message(msg)
         return True, "Email trimis cu succes prin iCloud!"
@@ -619,7 +620,6 @@ with tab_dict["📊 Jurnal & Grafice"]:
                 ))
                 
                 max_s_target = st.session_state.settings.get("target_ta_sis", 120)
-                max_d_target = st.session_state.settings.get("target_ta_dia", 80)
                 fig_ta.add_hline(y=max_s_target, line_dash="dash", line_color="#ef4444", annotation_text=f"Prag Max Sistolică ({max_s_target})")
                 
                 fig_ta.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=40, r=40, t=50, b=80), xaxis=dict(tickangle=-35))
@@ -1022,16 +1022,16 @@ with tab_dict["⚙️ Setări"]:
         st.markdown("#### ✉️ Configurare Server iCloud Mail & Test")
         st.session_state.settings["email_sender"] = st.text_input("Adresa ta de iCloud (expeditor, ex: nume@icloud.com)", value=st.session_state.settings.get("email_sender", ""))
         st.session_state.settings["email_password"] = st.text_input("Parolă specifică de aplicație iCloud (App-Specific Password)", type="password", value=st.session_state.settings.get("email_password", ""))
-        st.markdown("<small>💡 *Notă: Nu folosi parola ta principală Apple ID. Vezi ghidul anterior de generare.*</small>", unsafe_allow_html=True)
+        st.markdown("<small>💡 *Notă: Nu folosi parola ta principală Apple ID. Generează o App-Specific Password din portalul tău Apple ID.*</small>", unsafe_allow_html=True)
         
         if st.button("🔌 Testează Conexiunea iCloud (Trimite Email Test)", type="primary"):
             test_dest = st.session_state.settings.get("email_sender", "")
             if not test_dest:
                 st.error("Completează mai întâi adresa de email a expeditorului.")
             else:
-                success_t, msg_t = trimite_email_alerta(test_dest, "🧪 Test Conexiune HealthTrack Pro", "Salut! Conexiunea SMTP cu serverul iCloud funcționează perfect.")
+                success_t, msg_t = trimite_email_alerta(test_dest, "🧪 Test Conexiune HealthTrack Pro", "Salut! Conexiunea SMTP cu serverul iCloud funcționează perfect și timeout-ul a fost extins.")
                 if success_t:
-                    st.success("✅ Conexiune reușită! Emailul de test a fost trimis.")
+                    st.success("✅ Conexiune reușită! Emailul de test a fost trimis prin iCloud.")
                 else:
                     st.error(f"❌ {msg_t}")
 
@@ -1107,8 +1107,13 @@ with tab_dict["📄 Raport PDF"]:
             if s > 0 and d > 0:
                 is_spike = is_ta_spike(s, d)
                 s_color = "#ef4444" if is_spike else "#ef4444"
+                d_color = "#ef4444" if is_spike else "#f59e0b"
+                
                 plt.plot(xi, s, marker="o", markersize=6, color=s_color)
                 plt.annotate(str(int(s)), (xi, s), textcoords="offset points", xytext=(0, 6), ha="center", fontsize=7, fontweight="bold", bbox=dict(boxstyle="round,pad=0.15", fc="white", ec=s_color, alpha=0.9))
+                
+                plt.plot(xi, d, marker="o", markersize=6, color=d_color)
+                plt.annotate(str(int(d)), (xi, d), textcoords="offset points", xytext=(0, -10), ha="center", fontsize=7, fontweight="bold", bbox=dict(boxstyle="round,pad=0.15", fc="white", ec=d_color, alpha=0.9))
                 
         plt.title(title, fontsize=10, fontweight="bold", color="#1e3a8a", pad=14)
         plt.ylabel("mmHg", fontsize=9, fontweight="bold")

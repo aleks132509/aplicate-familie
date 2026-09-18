@@ -241,7 +241,6 @@ if "prog_df" not in st.session_state:
 if "food_categories" not in st.session_state:
     st.session_state.food_categories = get_initial_foods()
 
-# Istoric acțiuni pentru butonul de Undo
 if "action_history_stack" not in st.session_state:
     st.session_state.action_history_stack = []
 
@@ -334,7 +333,6 @@ def save_local_record(date_str, moment_str, glic_v, sis_v, dia_v, puls_v, obs_v)
 
     obs_clean_val = clean_obs(obs_v)
     
-    # Salvăm starea anterioară în stiva de Undo înainte de suprascriere/adăugare
     st.session_state.action_history_stack.append({
         "old_df": st.session_state.local_df_v2.copy(),
         "desc": f"Salvare înregistrare {date_str} - {moment_str}"
@@ -560,10 +558,6 @@ with tab_dict["📊 Jurnal & Grafice"]:
         st.markdown("<br>", unsafe_allow_html=True)
         sub_tab_glic, sub_tab_ta, sub_tab_puls, sub_tab_all = st.tabs(["🩸 Glicemie & Analiză Spike", "🫀 Tensiune Arterială", "💓 Puls", "📋 Toate Datele"])
         
-        # Agregare inteligentă dacă sunt multe valori pe lună pentru a nu aglomera graficul
-        if len(view_df) > 20:
-            st.info("ℹ️ *Afișare optimizată pentru volum mare de date lunare (agregare cronologică aerisită).*")
-        
         x_labels_composed = [f"{d.strftime('%d.%m')} ({m[:3]})" for d, m in zip(view_df[date_col], view_df[moment_col])]
 
         with sub_tab_glic:
@@ -704,7 +698,6 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
     with tab_dict["➕ Adaugă / Suprascrie"]:
         st.markdown("### 📝 Formular Introducere / Suprascriere Măsurători")
         
-        # Buton de Undo rapid pentru ultima salvare
         c_undo1, c_undo2 = st.columns([2, 5])
         with c_undo1:
             if st.session_state.action_history_stack:
@@ -751,7 +744,6 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
                     return clean_obs(existing_row[col_obs])
                 return ""
 
-            # Resetare curată a biferelor la schimbarea datei sau momentului
             session_form_key = f"form_state_{selected_date}_{selected_moment}"
             if "last_form_key" not in st.session_state or st.session_state["last_form_key"] != session_form_key:
                 st.session_state["last_form_key"] = session_form_key
@@ -769,14 +761,28 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
 
                 st.markdown("---")
                 st.markdown("##### ⚡ Asistent Inteligent Mese & Indice Glicemic")
-                search_food_input = st.text_input("🔍 Caută rapid alimente / elemente în categorii", key="search_food_add_input")
+                
+                # Câmp de căutare fără diacritice, care filtrează elementele care începe cu termenul căutat (prefix)
+                search_food_input = st.text_input("🔍 Caută rapid alimente (afișează elementele care încep cu termenul introdus)", key="search_food_add_input")
                 
                 selected_quick_items = []
                 cat_cols = st.columns(len(st.session_state.food_categories))
+                
+                search_query_clean = remove_diacritics(search_food_input.strip().lower())
+
                 for idx, (cat_name, items) in enumerate(st.session_state.food_categories.items()):
                     with cat_cols[idx]:
                         st.caption(cat_name)
-                        filtered_items = [i for i in items if search_food_input.strip().lower() in i.lower()] if search_food_input else items
+                        
+                        # Filtrare strictă: elementul trebuie să înceapă cu textul căutat (după eliminarea diacriticelor)
+                        if search_query_clean:
+                            filtered_items = [
+                                i for i in items 
+                                if remove_diacritics(i.lower()).startswith(search_query_clean)
+                            ]
+                        else:
+                            filtered_items = items
+                            
                         for item in filtered_items:
                             if st.checkbox(item, key=f"quick_{cat_name}_{item}_{session_form_key}"):
                                 selected_quick_items.append(item)
@@ -792,7 +798,7 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
 
                 obs_input = st.text_area("✍️ Notițe / Observații", value=base_obs_initial)
                 
-                # Salvăm doar la apăsarea butonului esențial (nu la Enter pe câmpuri)
+                # Salvare exclusiv la apăsarea butonului dedicat (nu se salvează la Enter în alte câmpuri)
                 submitted = st.form_submit_button("💾 Salvează / Suprascrie", type="primary", use_container_width=True)
 
                 if submitted:
@@ -1045,12 +1051,12 @@ with tab_dict["⚙️ Setări"]:
         st.markdown("<br>", unsafe_allow_html=True)
 
         with st.container(border=True):
-            st.markdown("#### 🍎 Gestiune Elemente Mese & Indice Glicemic (Cu Căutare pentru Ștergere)")
+            st.markdown("#### 🍎 Gestiune Elemente Mese & Indice Glicemic (Căutare fără diacritice)")
             fc_cat = st.selectbox("Selectează Categoria", list(st.session_state.food_categories.keys()))
             
             c_f1, c_f2 = st.columns(2)
             with c_f1:
-                new_food_item = st.text_input("Adaugă element nou (ex: cola 0, cereale integrale etc.)")
+                new_food_item = st.text_input("Adaugă element nou (ex: paine, cola 0 etc.)")
                 if st.button("➕ Adaugă în Categorie"):
                     if new_food_item and new_food_item.strip():
                         item_clean = new_food_item.strip().lower()
@@ -1061,7 +1067,12 @@ with tab_dict["⚙️ Setări"]:
                             trigger_rerun()
             with c_f2:
                 search_del_item = st.text_input("🔍 Caută element de șters", key="search_del_food_input")
-                items_to_show = [i for i in st.session_state.food_categories[fc_cat] if search_del_item.strip().lower() in i.lower()] if search_del_item else st.session_state.food_categories[fc_cat]
+                search_del_clean = remove_diacritics(search_del_item.strip().lower())
+                
+                items_to_show = [
+                    i for i in st.session_state.food_categories[fc_cat] 
+                    if search_del_clean in remove_diacritics(i.lower())
+                ] if search_del_clean else st.session_state.food_categories[fc_cat]
                 
                 if items_to_show:
                     del_food_item = st.selectbox("Selectează element existent", items_to_show, key="del_food_select")

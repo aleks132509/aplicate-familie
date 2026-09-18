@@ -117,10 +117,17 @@ def get_initial_history():
 
 def get_initial_prog():
     if os.path.exists(PROG_FILE):
-        df_p = pd.read_csv(PROG_FILE)
-        if "Ora" not in df_p.columns: df_p["Ora"] = "10:00"
-        if "Efectuat" not in df_p.columns: df_p["Efectuat"] = "Nu"
-        return df_p
+        try:
+            df_p = pd.read_csv(PROG_FILE)
+            if "Ora" not in df_p.columns: df_p["Ora"] = "10:00"
+            if "Efectuat" not in df_p.columns: df_p["Efectuat"] = "Nu"
+            if "Clinică" not in df_p.columns: df_p["Clinică"] = "-"
+            if "Zile_Alerta" not in df_p.columns: df_p["Zile_Alerta"] = "1, 3"
+            if "Observații" not in df_p.columns: df_p["Observații"] = ""
+            return df_p
+        except:
+            pass
+            
     return pd.DataFrame([
         {"Dată": "2026-09-25", "Ora": "09:00", "Tip": "Analize de laborator", "Clinică": "Regina Maria", "Zile_Alerta": "1, 3, 7", "Efectuat": "Nu", "Observații": "Repetare analize Diabet"},
         {"Dată": "2026-10-05", "Ora": "14:30", "Tip": "Consult Diabet", "Clinică": "Dr. Clenciu Craiova", "Zile_Alerta": "2, 5", "Efectuat": "Nu", "Observații": "Rețetă 3 luni"},
@@ -314,36 +321,15 @@ def format_table_column(series):
 # EVALUARE SPIKE & CAUZĂ ALIMENTARĂ
 # ==========================================
 HIGH_GI_FOODS_MAPPING = {
-    "ciocolata": "ciocolata",
-    "ciocolată": "ciocolata",
-    "prajitura": "prajitura",
-    "prăjitură": "prajitura",
-    "prajituri": "prajituri",
-    "prăjituri": "prajituri",
-    "tort": "tort",
-    "suc": "suc",
-    "fanta": "fanta",
-    "cola": "cola",
-    "pepsi": "pepsi",
-    "dulciuri": "dulciuri",
-    "inghetata": "inghetata",
-    "înghețată": "inghetata",
-    "paine alba": "paine alba",
-    "pâine albă": "paine alba",
-    "pizza": "pizza",
-    "paste": "paste",
-    "orez": "orez",
-    "cartofi": "cartofi",
-    "cartofi prajiti": "cartofi prajiti",
-    "zahar": "zahar",
-    "zahăr": "zahar",
-    "miere": "miere",
-    "bere": "bere",
-    "patiserie": "patiserie",
-    "gogosi": "gogosi",
-    "gogoși": "gogosi",
-    "covrigi": "covrigi",
-    "croissant": "croissant"
+    "ciocolata": "ciocolata", "ciocolată": "ciocolata",
+    "prajitura": "prajitura", "prăjitură": "prajitura",
+    "prajituri": "prajituri", "prăjituri": "prajituri",
+    "tort": "tort", "suc": "suc", "fanta": "fanta", "cola": "cola", "pepsi": "pepsi",
+    "dulciuri": "dulciuri", "inghetata": "inghetata", "înghețată": "inghetata",
+    "paine alba": "paine alba", "pâine albă": "paine alba", "pizza": "pizza",
+    "paste": "paste", "orez": "orez", "cartofi": "cartofi", "cartofi prajiti": "cartofi prajiti",
+    "zahar": "zahar", "zahăr": "zahar", "miere": "miere", "bere": "bere",
+    "patiserie": "patiserie", "gogosi": "gogosi", "gogoși": "gogosi", "covrigi": "covrigi", "croissant": "croissant"
 }
 
 def check_food_cause(obs_text):
@@ -646,7 +632,6 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
                     return clean_obs(existing_row[col_obs])
                 return ""
 
-            # Asistent rapid observații bazat pe cheie unică bazată pe dată și moment pentru a se reseta corect la schimbare
             st.markdown("##### ⚡ Asistent Rapid Observații (Click pentru adăugare)")
             categorii_alimente = {
                 "🍫 Dulciuri / Deserturi": ["ciocolată", "prăjitură", "tort", "înghețată", "zahăr", "miere"],
@@ -789,7 +774,7 @@ if is_admin and "📅 Programări" in tab_dict:
                 st.markdown("#### ✔️ Marchează 'Done'")
                 if not st.session_state.prog_df.empty:
                     prog_indices = list(st.session_state.prog_df.index)
-                    prog_labels = [f"{row['Dată']} {row['Ora']} - {row['Tip']} ({row['Clinică']})" for _, row in st.session_state.prog_df.iterrows()]
+                    prog_labels = [f"{row.get('Dată', '')} {row.get('Ora', '10:00')} - {row.get('Tip', '')} ({row.get('Clinică', '')})" for _, row in st.session_state.prog_df.iterrows()]
                     selected_prog_idx = st.selectbox("Alege programare", prog_indices, format_func=lambda i: prog_labels[i])
                     
                     current_status = st.session_state.prog_df.loc[selected_prog_idx, "Efectuat"]

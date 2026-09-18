@@ -187,6 +187,24 @@ def add_history_entry(actiune, medicament, detalii):
     st.session_state.meds_hist_df = pd.concat([st.session_state.meds_hist_df, pd.DataFrame([new_entry])], ignore_index=True)
     save_all_files()
 
+def get_chronological_backup_df():
+    if not os.path.exists(DATA_FILE):
+        return pd.DataFrame()
+    try:
+        df_b = pd.read_csv(DATA_FILE)
+        if "Dată" in df_b.columns:
+            df_b["Dată_dt"] = pd.to_datetime(df_b["Dată"].astype(str).str.strip(), format="%d.%m.%Y", errors="coerce")
+            df_b = df_b.dropna(subset=["Dată_dt"]).sort_values(by="Dată_dt", ascending=True).drop(columns=["Dată_dt"])
+        for col in df_b.columns:
+            if df_b[col].dtype == object:
+                df_b[col] = df_b[col].apply(lambda x: remove_diacritics(str(x)) if pd.notna(x) else x)
+        df_b.columns = [remove_diacritics(c) for c in df_b.columns]
+        if 'Luna_An' in df_b.columns: 
+            df_b = df_b.drop(columns=['Luna_An'])
+        return df_b
+    except:
+        return pd.DataFrame()
+
 def trimite_email_cu_atasament(destinatar, subiect, mesaj, file_path, file_name):
     email_sender = st.session_state.settings.get("email_sender", "").strip()
     email_password = st.session_state.settings.get("email_password", "").strip()
@@ -213,7 +231,6 @@ def trimite_email_cu_atasament(destinatar, subiect, mesaj, file_path, file_name)
     except Exception as e:
         return False, f"Erore trimitere iCloud: {str(e)}"
 
-# Backup automat însigurat împotriva blocajelor de rețea
 def verifica_si_fa_backup_automat():
     try:
         email_dest = st.session_state.settings.get("email_sender", "").strip()
@@ -231,14 +248,21 @@ def verifica_si_fa_backup_automat():
                 pass
 
         if ultima_data is None or (azi - ultima_data).days >= 2:
-            if os.path.exists(DATA_FILE):
+            df_cron = get_chronological_backup_df()
+            if not df_cron.empty:
+                temp_backup_file = "temp_backup_cron.csv"
+                df_cron.to_csv(temp_backup_file, index=False)
+                
                 succes, _ = trimite_email_cu_atasament(
                     destinatar=email_dest,
                     subiect="💾 [Backup Automat] HealthTrack Pro - Date Medicale",
-                    mesaj=f"Salut!\n\nAcesta este backup-ul tău automat generat la data de {azi.strftime('%d.%m.%Y')}.\nFișierul CSV cu toate datele medicale este atașat acestui mesaj.\n\nHealthTrack Pro System",
-                    file_path=DATA_FILE,
+                    mesaj=f"Salut!\n\nAcesta este backup-ul tău automat cronologic generat la data de {azi.strftime('%d.%m.%Y')}.\nFișierul CSV cu toate datele medicale este atașat acestui mesaj.\n\nHealthTrack Pro System",
+                    file_path=temp_backup_file,
                     file_name="backup_date_medicale.csv"
                 )
+                if os.path.exists(temp_backup_file):
+                    os.remove(temp_backup_file)
+
                 if succes:
                     with open(BACKUP_LOG_FILE, "w") as f:
                         f.write(azi.strftime("%Y-%m-%d"))
@@ -1127,31 +1151,27 @@ with tab_dict["⚙️ Setări"]:
             if not test_dest:
                 st.error("Completează mai întâi adresa de email a expeditorului.")
             else:
-                success_t, msg_t = trimite_email_cu_atasament(test_dest, "🧪 Test Conexiune HealthTrack Pro", "Salut! Conexiunea SMTP cu serverul iCloud funcționează perfect și timeout-ul a fost extins.", DATA_FILE, "backup_test.csv")
+                df_test_cron = get_chronological_backup_df()
+                temp_test_file = "temp_test_backup.csv"
+                if not df_test_cron.empty:
+                    df_test_cron.to_csv(temp_test_file, index=False)
+                
+                success_t, msg_t = trimite_email_cu_atasament(test_dest, "🧪 Test Conexiune HealthTrack Pro", "Salut! Conexiunea SMTP cu serverul iCloud funcționează perfect și fișierul cronologic este atașat.", temp_test_file, "backup_test.csv")
+                
+                if os.path.exists(temp_test_file):
+                    os.remove(temp_test_file)
+
                 if success_t:
-                    st.success("✅ Conexiune reușită! Emailul de test cu fișierul de date atașat a fost trimis prin iCloud.")
+                    st.success("✅ Conexiune reușită! Emailul de test cu fișierul de date cronologic a fost trimis prin iCloud.")
                 else:
                     st.error(f"❌ {msg_t}")
 
         st.markdown("<br>", unsafe_allow_html=True)
-        st.markdown("#### 💾 Backup Manual (CSV)")
-        if not view_df.empty:
-            df_backup = view_df.copy()
-            if date_col in df_backup.columns:
-                if not pd.api.types.is_datetime64_any_dtype(df_backup[date_col]):
-                    df_backup[date_col] = pd.to_datetime(df_backup[date_col], errors="coerce")
-                df_backup = df_backup.dropna(subset=[date_col]).sort_values(by=date_col, ascending=True).reset_index(drop=True)
-                df_backup[date_col] = df_backup[date_col].dt.strftime("%d.%m.%Y")
-                
-            for col in df_backup.columns:
-                if df_backup[col].dtype == object:
-                    df_backup[col] = df_backup[col].apply(lambda x: remove_diacritics(str(x)) if pd.notna(x) else x)
-            df_backup.columns = [remove_diacritics(c) for c in df_backup.columns]
-            
-            if 'Luna_An' in df_backup.columns: df_backup = df_backup.drop(columns=['Luna_An'])
-                
-            csv_data = df_backup.to_csv(index=False).encode('utf-8')
-            st.download_button(label="📥 Descarcă Backup CSV", data=csv_data, file_name="backup_date_medicale.csv", mime="text/csv", use_container_width=True)
+        st.markdown("#### 💾 Backup Manual (CSV Cronologic)")
+        df_backup_cron = get_chronological_backup_df()
+        if not df_backup_cron.empty:
+            csv_data = df_backup_cron.to_csv(index=False).encode('utf-8')
+            st.download_button(label="📥 Descarcă Backup CSV Cronologic", data=csv_data, file_name="backup_date_medicale.csv", mime="text/csv", use_container_width=True)
 
     with col_set2:
         st.markdown("#### 🎯 Valori Țintă Medicale")

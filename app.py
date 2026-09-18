@@ -111,7 +111,7 @@ if "settings" not in st.session_state:
       "target_ta_dia": 80,
   }
 
-# Memorie temporară locală în sesiune dacă nu e conectat Google Sheets real
+# Memorie temporară locală în sesiune
 if "local_df_override" not in st.session_state:
   st.session_state.local_df_override = None
 
@@ -177,7 +177,7 @@ st.sidebar.markdown("---")
 
 
 # ==========================================
-# DATE DEMO (FALLBACK SIGURANȚĂ)
+# DATE DEMO (STANDARDIZATE)
 # ==========================================
 def get_mock_data():
   return pd.DataFrame({
@@ -247,19 +247,44 @@ def load_and_clean_data(url):
     return get_mock_data()
 
 
-# Încărcare inițială sau din suprascriere locală de sesiune
 base_df = load_and_clean_data(GOOGLE_SHEET_URL)
 if st.session_state.local_df_override is not None:
-  df = st.session_state.local_df_override
+  df = st.session_state.local_df_override.copy()
 else:
   df = base_df.copy()
+
+# Asigurare denumire standardizată a coloanelor principale dacă lipsesc
+if len(df.columns) >= 6:
+  df.columns = [
+      "Dată",
+      "Moment Zi",
+      "Glicemie",
+      "Sistolică",
+      "Diastolică",
+      "Puls",
+  ] + list(df.columns[6:])
+
+date_col = "Dată" if "Dată" in df.columns else df.columns[0]
+moment_col = "Moment Zi" if "Moment Zi" in df.columns else df.columns[1]
+col_glic = "Glicemie" if "Glicemie" in df.columns else df.columns[2]
+col_sis = "Sistolică" if "Sistolică" in df.columns else df.columns[3]
+col_dia = "Diastolică" if "Diastolică" in df.columns else df.columns[4]
+col_puls = "Puls" if "Puls" in df.columns else df.columns[5]
+
+# Conversie dată sigură
+if date_col in df.columns:
+  df[date_col] = pd.to_datetime(
+      df[date_col].astype(str).str.strip(), format="%d.%m.%Y", errors="coerce"
+  )
+  if df[date_col].isna().all():
+    df[date_col] = pd.to_datetime(df[date_col], dayfirst=True, errors="coerce")
+  df = df.dropna(subset=[date_col]).sort_values(by=date_col, ascending=True)
 
 
 def save_to_google_sheet_or_local(
     date_str, moment_str, glic_v, sis_v, dia_v, puls_v, obs_v
 ):
   global df
-  # Dacă avem configurat Google Sheets cu gspread real
   if HAS_GSPREAD and "gcp_service_account" in st.secrets:
     try:
       scopes = ["https://www.googleapis.com/auth/spreadsheets"]
@@ -302,100 +327,32 @@ def save_to_google_sheet_or_local(
       st.error(f"Eroare Google Sheets: {e}")
       return False
   else:
-    # Salvăm direct în DataFrame-ul curent din sesiune (pentru testare/mod local)
-    d_col = df.columns[0]
-    m_col = df.columns[1] if len(df.columns) > 1 else "Moment Zi"
-    g_col = col_glic if col_glic in df.columns else df.columns[2]
-    s_col = col_sis if col_sis in df.columns else df.columns[3]
-    d_col_ta = col_dia if col_dia in df.columns else df.columns[4]
-    p_col = col_puls if col_puls in df.columns else df.columns[5]
-    o_col = (
-        "Observații" if "Observații" in df.columns else df.columns[6]
-        if len(df.columns) > 6
-        else None
-    )
-
-    # Căutăm dacă există rândul
-    mask = (df[d_col].astype(str).str.contains(date_str)) & (
-        df[m_col].astype(str) == moment_str
+    # Salvare în sesiune locală
+    mask = (df[date_col].dt.strftime("%d.%m.%Y") == date_str) & (
+        df[moment_col].astype(str) == moment_str
     )
 
     if mask.any():
-      df.loc[mask, g_col] = glic_v
-      df.loc[mask, s_col] = sis_v
-      df.loc[mask, d_col_ta] = dia_v
-      df.loc[mask, p_col] = puls_v
-      if o_col and o_col in df.columns:
-        df.loc[mask, o_col] = obs_v
+      df.loc[mask, col_glic] = glic_v
+      df.loc[mask, col_sis] = sis_v
+      df.loc[mask, col_dia] = dia_v
+      df.loc[mask, col_puls] = puls_v
+      if "Observații" in df.columns:
+        df.loc[mask, "Observații"] = obs_v
     else:
       new_record = {
-          d_col: date_str,
-          m_col: moment_str,
-          g_col: glic_v,
-          s_col: sis_v,
-          d_col_ta: dia_v,
-          p_col: puls_v,
+          date_col: pd.to_datetime(date_str, format="%d.%m.%Y"),
+          moment_col: moment_str,
+          col_glic: glic_v,
+          col_sis: sis_v,
+          col_dia: dia_v,
+          col_puls: puls_v,
+          "Observații": obs_v,
       }
-      if o_col:
-        new_record[o_col] = obs_v
       df = pd.concat([df, pd.DataFrame([new_record])], ignore_index=True)
 
-    st.session_state.local_df_override = df
+    st.session_state.local_df_override = df.copy()
     return True
-
-
-date_col = None
-moment_col = None
-for c in df.columns:
-  c_norm = remove_diacritics(str(c)).lower()
-  if "data" in c_norm or "date" in c_norm:
-    date_col = c
-  elif "moment" in c_norm or "ora" in c_norm or "zi" in c_norm:
-    moment_col = c
-
-if not date_col and len(df.columns) > 0:
-  date_col = df.columns[0]
-if not moment_col and len(df.columns) > 1:
-  moment_col = df.columns[1]
-
-if date_col and date_col in df.columns:
-  df[date_col] = pd.to_datetime(
-      df[date_col].astype(str).str.strip(), format="%d.%m.%Y", errors="coerce"
-  )
-  if df[date_col].isna().all():
-    df[date_col] = pd.to_datetime(df[date_col], dayfirst=True, errors="coerce")
-  df = df.dropna(subset=[date_col]).sort_values(by=date_col, ascending=True)
-
-cols = list(df.columns)
-col_glic = next(
-    (
-        c
-        for c in cols
-        if any(
-            k in remove_diacritics(str(c)).lower()
-            for k in ["glic", "inainte", "dupa"]
-        )
-    ),
-    None,
-)
-col_sis = next(
-    (c for c in cols if "sist" in remove_diacritics(str(c)).lower()), None
-)
-col_dia = next(
-    (c for c in cols if "diast" in remove_diacritics(str(c)).lower()), None
-)
-col_puls = next(
-    (c for c in cols if "puls" in remove_diacritics(str(c)).lower()), None
-)
-
-if not col_glic and len(cols) > 2:
-  col_glic = cols[2]
-if not col_sis and len(cols) > 3:
-  col_sis = cols[3]
-if not col_dia and len(cols) > 4:
-  col_dia = cols[4]
-if not col_puls and len(cols) > 5:
-  col_puls = cols[5]
 
 
 def format_table_column(series):
@@ -493,7 +450,7 @@ with tab_dict["📊 Jurnal & Grafice"]:
 
   if not df.empty and date_col in df.columns:
     avg_glic_str = "Nemăsurat"
-    if col_glic and col_glic in df.columns:
+    if col_glic in df.columns:
       s_glic_all = (
           pd.to_numeric(df[col_glic], errors="coerce")
           .fillna(0)
@@ -507,7 +464,7 @@ with tab_dict["📊 Jurnal & Grafice"]:
 
     with kpi1:
       val_glic = "Nemăsurat"
-      if col_glic and col_glic in df.columns:
+      if col_glic in df.columns:
         s_glic = (
             pd.to_numeric(df[col_glic], errors="coerce")
             .fillna(0)
@@ -532,7 +489,7 @@ with tab_dict["📊 Jurnal & Grafice"]:
 
     with kpi3:
       val_sis, val_dia = "-", "-"
-      if col_sis and col_sis in df.columns:
+      if col_sis in df.columns:
         s_sis = (
             pd.to_numeric(df[col_sis], errors="coerce")
             .fillna(0)
@@ -541,7 +498,7 @@ with tab_dict["📊 Jurnal & Grafice"]:
         )
         if not s_sis.empty:
           val_sis = int(s_sis.iloc[-1])
-      if col_dia and col_dia in df.columns:
+      if col_dia in df.columns:
         s_dia = (
             pd.to_numeric(df[col_dia], errors="coerce")
             .fillna(0)
@@ -564,7 +521,7 @@ with tab_dict["📊 Jurnal & Grafice"]:
 
     with kpi4:
       val_puls = "Nemăsurat"
-      if col_puls and col_puls in df.columns:
+      if col_puls in df.columns:
         s_puls = (
             pd.to_numeric(df[col_puls], errors="coerce")
             .fillna(0)
@@ -598,7 +555,7 @@ with tab_dict["📊 Jurnal & Grafice"]:
     # 1. TAB GLICEMIE
     with sub_tab_glic:
       st.markdown("#### 🩸 Evoluție și Tabel Dedicat - Glicemie")
-      if col_glic and col_glic in df.columns:
+      if col_glic in df.columns:
         glic_vals = pd.to_numeric(df[col_glic], errors="coerce").replace(
             0, None
         )
@@ -635,11 +592,7 @@ with tab_dict["📊 Jurnal & Grafice"]:
         )
         st.plotly_chart(fig_g, use_container_width=True)
 
-        cols_g = [date_col]
-        if moment_col:
-          cols_g.append(moment_col)
-        cols_g.append(col_glic)
-
+        cols_g = [date_col, moment_col, col_glic]
         df_g_tab = df[cols_g].copy()
         df_g_tab[date_col] = df_g_tab[date_col].dt.strftime("%d.%m.%Y")
         df_g_tab["Status Glicemie"] = df_g_tab[col_glic].apply(evaluate_glic)
@@ -654,12 +607,7 @@ with tab_dict["📊 Jurnal & Grafice"]:
     # 2. TAB TENSIUNE ARTERIALĂ
     with sub_tab_ta:
       st.markdown("#### 🫀 Evoluție și Tabel Dedicat - Tensiune Arterială")
-      if (
-          col_sis
-          and col_sis in df.columns
-          and col_dia
-          and col_dia in df.columns
-      ):
+      if col_sis in df.columns and col_dia in df.columns:
         sis_vals = pd.to_numeric(df[col_sis], errors="coerce").replace(0, None)
         dia_vals = pd.to_numeric(df[col_dia], errors="coerce").replace(0, None)
 
@@ -704,11 +652,7 @@ with tab_dict["📊 Jurnal & Grafice"]:
         )
         st.plotly_chart(fig_ta, use_container_width=True)
 
-        cols_t = [date_col]
-        if moment_col:
-          cols_t.append(moment_col)
-        cols_t.extend([col_sis, col_dia])
-
+        cols_t = [date_col, moment_col, col_sis, col_dia]
         df_t_tab = df[cols_t].copy()
         df_t_tab[date_col] = df_t_tab[date_col].dt.strftime("%d.%m.%Y")
         df_t_tab["Status Tensiune"] = df_t_tab.apply(
@@ -726,7 +670,7 @@ with tab_dict["📊 Jurnal & Grafice"]:
     # 3. TAB PULS
     with sub_tab_puls:
       st.markdown("#### 💓 Evoluție și Tabel Dedicat - Puls")
-      if col_puls and col_puls in df.columns:
+      if col_puls in df.columns:
         puls_vals = pd.to_numeric(df[col_puls], errors="coerce").replace(
             0, None
         )
@@ -757,11 +701,7 @@ with tab_dict["📊 Jurnal & Grafice"]:
         )
         st.plotly_chart(fig_p, use_container_width=True)
 
-        cols_p = [date_col]
-        if moment_col:
-          cols_p.append(moment_col)
-        cols_p.append(col_puls)
-
+        cols_p = [date_col, moment_col, col_puls]
         df_p_tab = df[cols_p].copy()
         df_p_tab[date_col] = df_p_tab[date_col].dt.strftime("%d.%m.%Y")
         df_p_tab["Status Puls"] = df_p_tab[col_puls].apply(evaluate_puls)
@@ -1057,10 +997,8 @@ with tab_dict["📄 Raport PDF"]:
 
     x_labels = data_frame[date_col].dt.strftime("%d.%m.%Y").tolist()
 
-    # Grafic Glicemie PDF
     if (
         include_glic
-        and col_glic
         and col_glic in data_frame.columns
         and not data_frame[col_glic].isna().all()
     ):
@@ -1071,12 +1009,9 @@ with tab_dict["📄 Raport PDF"]:
       story.append(Image(img_g, width=500, height=150))
       story.append(Spacer(1, 8))
 
-    # Grafic Tensiune PDF
     if (
         include_ta
-        and col_sis
         and col_sis in data_frame.columns
-        and col_dia
         and col_dia in data_frame.columns
     ):
       plt.figure(figsize=(7.5, 2.2))
@@ -1153,10 +1088,8 @@ with tab_dict["📄 Raport PDF"]:
       story.append(Image(img_ta_buf, width=500, height=150))
       story.append(Spacer(1, 8))
 
-    # Grafic Puls PDF
     if (
         include_puls
-        and col_puls
         and col_puls in data_frame.columns
         and not data_frame[col_puls].isna().all()
     ):
@@ -1167,7 +1100,6 @@ with tab_dict["📄 Raport PDF"]:
       story.append(Image(img_p, width=500, height=150))
       story.append(Spacer(1, 8))
 
-    # Tabel Centralizator cu Culori în PDF
     if include_tables and not data_frame.empty:
       story.append(Spacer(1, 6))
       story.append(Paragraph("<b>Tabel Centralizator Date</b>", styles["Heading2"]))

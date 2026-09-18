@@ -213,28 +213,18 @@ DATA_FILE = "date_medicale_utilizator.csv"
 
 
 def get_initial_data():
-  # Ștergem fișierul corupt anterior o singură dată pentru a curăța datele de tip None
-  if os.path.exists(DATA_FILE):
-    try:
-      df_check = pd.read_csv(DATA_FILE)
-      # Dacă găsim date de tip None sau NaN la coloana Dată, resetăm fișierul
-      if (
-          "Dată" in df_check.columns
-          and df_check["Dată"].astype(str).str.contains("None|NaT").any()
-      ):
-        os.remove(DATA_FILE)
-    except:
-      pass
-
   if os.path.exists(DATA_FILE):
     try:
       df_saved = pd.read_csv(DATA_FILE)
       if "Dată" in df_saved.columns:
+        # Curățăm și convertim corect datele evitând apariția valorilor None/NaT
         df_saved["Dată"] = pd.to_datetime(
             df_saved["Dată"].astype(str).str.strip(),
             format="%d.%m.%Y",
             errors="coerce",
         )
+        # Dacă rândurile au date invalide, le eliminăm sau le filtrăm
+        df_saved = df_saved.dropna(subset=["Dată"])
       return df_saved
     except Exception:
       pass
@@ -268,6 +258,7 @@ if date_col in df.columns and not df.empty:
   df[date_col] = pd.to_datetime(
       df[date_col].astype(str).str.strip(), format="%d.%m.%Y", errors="coerce"
   )
+  df = df.dropna(subset=[date_col])
   df = df.sort_values(by=date_col, ascending=True).reset_index(drop=True)
 
 
@@ -275,10 +266,15 @@ def save_local_record(date_str, moment_str, glic_v, sis_v, dia_v, puls_v, obs_v)
   global df
   current_df = st.session_state.local_df_v2.copy()
 
+  # Asigurăm formatul corect ca string pentru căutare în DataFrame
   if not current_df.empty and date_col in current_df.columns:
-    mask = (current_df[date_col].astype(str) == date_str) & (
+    current_df["Dată_str"] = pd.to_datetime(
+        current_df[date_col], errors="coerce"
+    ).dt.strftime("%d.%m.%Y")
+    mask = (current_df["Dată_str"] == date_str) & (
         current_df[moment_col].astype(str) == moment_str
     )
+    current_df = current_df.drop(columns=["Dată_str"])
   else:
     mask = pd.Series([False] * len(current_df))
 
@@ -291,7 +287,7 @@ def save_local_record(date_str, moment_str, glic_v, sis_v, dia_v, puls_v, obs_v)
       current_df.loc[mask, "Observații"] = obs_v
   else:
     new_record = {
-        date_col: date_str,
+        date_col: pd.to_datetime(date_str, format="%d.%m.%Y"),
         moment_col: moment_str,
         col_glic: glic_v,
         col_sis: sis_v,
@@ -305,7 +301,7 @@ def save_local_record(date_str, moment_str, glic_v, sis_v, dia_v, puls_v, obs_v)
 
   st.session_state.local_df_v2 = current_df
 
-  # Salvare permanentă pe disc cu conversia corectă a datei
+  # Salvare permanentă pe disc cu conversia curată a datei
   try:
     df_to_save = current_df.copy()
     if pd.api.types.is_datetime64_any_dtype(df_to_save[date_col]):

@@ -218,7 +218,9 @@ def get_initial_data():
       df_saved = pd.read_csv(DATA_FILE)
       if "Dată" in df_saved.columns:
         df_saved["Dată"] = pd.to_datetime(
-            df_saved["Dată"], format="%d.%m.%Y", errors="coerce"
+            df_saved["Dată"].astype(str).str.strip(),
+            format="%d.%m.%Y",
+            errors="coerce",
         )
       return df_saved
     except Exception:
@@ -290,11 +292,16 @@ def save_local_record(date_str, moment_str, glic_v, sis_v, dia_v, puls_v, obs_v)
 
   st.session_state.local_df_v2 = current_df
 
-  # Salvare permanentă pe disc (nu se pierde la Clear Cache)
+  # Salvare permanentă pe disc cu conversia corectă a datei
   try:
     df_to_save = current_df.copy()
     if pd.api.types.is_datetime64_any_dtype(df_to_save[date_col]):
       df_to_save[date_col] = df_to_save[date_col].dt.strftime("%d.%m.%Y")
+    else:
+      df_to_save[date_col] = pd.to_datetime(
+          df_to_save[date_col], errors="coerce"
+      ).dt.strftime("%d.%m.%Y")
+
     df_to_save.to_csv(DATA_FILE, index=False)
   except Exception as e:
     print(f"Erore la salvarea fișierului: {e}")
@@ -625,7 +632,6 @@ with tab_dict["📊 Jurnal & Grafice"]:
         df_t_tab[col_sis] = format_table_column(df_t_tab[col_sis])
         df_t_tab[col_dia] = format_table_column(df_t_tab[col_dia])
 
-        # Excludem rândurile nemăsurate pentru Tensiune
         df_t_tab = df_t_tab[
             (df_t_tab[col_sis] != "Nemăsurat")
             | (df_t_tab[col_dia] != "Nemăsurat")
@@ -675,7 +681,6 @@ with tab_dict["📊 Jurnal & Grafice"]:
         df_p_tab["Status Puls"] = df_p_tab[col_puls].apply(evaluate_puls)
         df_p_tab[col_puls] = format_table_column(df_p_tab[col_puls])
 
-        # Excludem rândurile nemăsurate pentru Puls
         df_p_tab = df_p_tab[df_p_tab[col_puls] != "Nemăsurat"]
 
         st.dataframe(
@@ -1252,7 +1257,6 @@ with tab_dict["⚙️ Setări"]:
             st.session_state.users[st.session_state.user]["pass"] = own_pass
             st.success("Parola ta a fost actualizată!")
 
-    # Opțiune de Backup / Siguranță suplimentară
     with st.container(border=True):
       st.markdown("#### 💾 Siguranță Date (Backup)")
       if os.path.exists(DATA_FILE):

@@ -193,6 +193,8 @@ def get_initial_data():
                     format="%d.%m.%Y", errors="coerce",
                 )
                 df_saved = df_saved.dropna(subset=["Dată"])
+            if "Observații" not in df_saved.columns:
+                df_saved["Observații"] = ""
             return df_saved
         except Exception:
             pass
@@ -209,6 +211,7 @@ col_glic = "Glicemie"
 col_sis = "Sistolică"
 col_dia = "Diastolică"
 col_puls = "Puls"
+col_obs = "Observații"
 
 if date_col in df.columns and not df.empty:
     if pd.api.types.is_datetime64_any_dtype(df[date_col]):
@@ -221,10 +224,10 @@ if date_col in df.columns and not df.empty:
 def save_local_record(date_str, moment_str, glic_v, sis_v, dia_v, puls_v, obs_v):
     global df
     current_df = st.session_state.local_df_v2.copy()
-    if "Observații" in current_df.columns:
-        current_df["Observații"] = current_df["Observații"].astype(str)
+    if col_obs in current_df.columns:
+        current_df[col_obs] = current_df[col_obs].astype(str)
     else:
-        current_df["Observații"] = ""
+        current_df[col_obs] = ""
 
     if not current_df.empty and date_col in current_df.columns:
         current_df["Dată_str"] = pd.to_datetime(current_df[date_col], errors="coerce").dt.strftime("%d.%m.%Y")
@@ -238,12 +241,12 @@ def save_local_record(date_str, moment_str, glic_v, sis_v, dia_v, puls_v, obs_v)
         current_df.loc[mask, col_sis] = sis_v
         current_df.loc[mask, col_dia] = dia_v
         current_df.loc[mask, col_puls] = puls_v
-        current_df.loc[mask, "Observații"] = str(obs_v)
+        current_df.loc[mask, col_obs] = str(obs_v)
     else:
         new_record = {
             date_col: pd.to_datetime(date_str, format="%d.%m.%Y"),
             moment_col: moment_str, col_glic: glic_v, col_sis: sis_v, col_dia: dia_v, col_puls: puls_v,
-            "Observații": str(obs_v),
+            col_obs: str(obs_v),
         }
         current_df = pd.concat([current_df, pd.DataFrame([new_record])], ignore_index=True)
 
@@ -257,7 +260,7 @@ def save_local_record(date_str, moment_str, glic_v, sis_v, dia_v, puls_v, obs_v)
             df_to_save[date_col] = pd.to_datetime(df_to_save[date_col], errors="coerce").dt.strftime("%d.%m.%Y")
         df_to_save.to_csv(DATA_FILE, index=False)
     except Exception as e:
-        print(f"Eroare: {e}")
+        print(f"Erore: {e}")
 
 def format_table_column(series):
     return series.astype(str).str.strip().replace(["0", "0.0", "nan", "None", "", "<NA>"], "Nemăsurat")
@@ -314,7 +317,7 @@ def apply_color_styling(df_to_style, subset_cols):
         return df_to_style
 
 # ==========================================
-# SIDEBAR & FILTRARE GLOBALA LUNA MULTIPLA
+# SIDEBAR & FILTRARE MULTIPLĂ LUNI
 # ==========================================
 st.sidebar.markdown(f"### 👤 **{st.session_state.user}**")
 st.sidebar.markdown(f"Rol: <span class='role-badge'>{current_role}</span>", unsafe_allow_html=True)
@@ -331,8 +334,8 @@ if not df.empty:
         if len(filtru_luni) > 0:
             view_df = df[df['Luna_An'].isin(filtru_luni)].copy()
         else:
-            view_df = pd.DataFrame(columns=df.columns) # Golește dacă nu e nimic selectat
-            filtru_luni_str = "Nicio lună selectată"
+            view_df = pd.DataFrame(columns=df.columns)
+            filtru_luni = []
     else:
         view_df = df.copy()
         filtru_luni = luni_disponibile
@@ -363,7 +366,7 @@ tab_dict = {title: tabs[i] for i, title in enumerate(tab_titles)}
 
 # ----------------- TAB: JURNAL & GRAFICE -----------------
 with tab_dict["📊 Jurnal & Grafice"]:
-    st.markdown(f"### 📊 Tablou de Bord Medical")
+    st.markdown("### 📊 Tablou de Bord Medical")
     st.caption(f"Filtru curent: **{filtru_luni_str}**")
 
     if view_df.empty:
@@ -403,17 +406,32 @@ with tab_dict["📊 Jurnal & Grafice"]:
             st.markdown(f'<div class="metric-card"><div class="metric-label">📅 TOTAL (FILTRU)</div><div class="metric-value">{len(view_df)}</div></div>', unsafe_allow_html=True)
 
         st.markdown("<br>", unsafe_allow_html=True)
-        sub_tab_glic, sub_tab_ta, sub_tab_puls, sub_tab_all = st.tabs(["🩸 Glicemie", "🫀 Tensiune Arterială", "💓 Puls", "📋 Toate Datele"])
+        sub_tab_glic, sub_tab_ta, sub_tab_puls, sub_tab_all = st.tabs(["🩸 Glicemie & Spike-uri", "🫀 Tensiune Arterială", "💓 Puls", "📋 Toate Datele"])
         x_data_strict = view_df[date_col].dt.strftime("%d.%m.%Y")
 
         with sub_tab_glic:
             if col_glic in view_df.columns:
                 glic_vals = pd.to_numeric(view_df[col_glic], errors="coerce").replace(0, None)
+                
+                # Detectare Spike-uri (valori mari peste pragul maxim sau detectate în observații)
+                max_tinta = st.session_state.settings.get("target_glic_max", 120)
+                spike_colors = ["#ef4444" if (v and v > max_tinta) else "#38bdf8" for v in glic_vals]
+                spike_texts = [f"⚠️ SPIKE: {int(v)}" if (v and v > max_tinta) else str(v) for v in glic_vals]
+
                 fig_g = go.Figure()
-                fig_g.add_trace(go.Scatter(x=x_data_strict, y=glic_vals, mode="lines+markers+text", name="Glicemie", line=dict(color="#38bdf8", width=3), marker=dict(size=10), text=glic_vals, textposition="top center", textfont=dict(size=12, color="#ffffff"), texttemplate="<b>%{text}</b>", connectgaps=True))
+                fig_g.add_trace(go.Scatter(
+                    x=x_data_strict, y=glic_vals, mode="lines+markers+text", name="Glicemie",
+                    line=dict(color="#38bdf8", width=3),
+                    marker=dict(size=12, color=spike_colors),
+                    text=spike_texts, textposition="top center",
+                    textfont=dict(size=11, color="#ffffff"),
+                    connectgaps=True
+                ))
+                fig_g.add_hline(y=max_tinta, line_dash="dash", line_color="#ef4444", annotation_text=f"Prag Maxim ({max_tinta})")
                 fig_g.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=40, r=40, t=40, b=30))
                 st.plotly_chart(fig_g, use_container_width=True)
-                cols_g = [date_col, moment_col, col_glic]
+
+                cols_g = [date_col, moment_col, col_glic, col_obs]
                 df_g_tab = view_df[cols_g].copy()
                 df_g_tab[date_col] = df_g_tab[date_col].dt.strftime("%d.%m.%Y")
                 df_g_tab["Status Glicemie"] = df_g_tab.apply(lambda r: evaluate_glic(r[col_glic], r[moment_col]), axis=1)
@@ -430,7 +448,7 @@ with tab_dict["📊 Jurnal & Grafice"]:
                 fig_ta.add_trace(go.Scatter(x=x_data_strict, y=dia_vals, mode="lines+markers+text", name="Diastolică", line=dict(color="#f59e0b", width=3), marker=dict(size=10), text=dia_vals, textposition="bottom center", textfont=dict(size=12, color="#ffffff"), texttemplate="<b>%{text}</b>", connectgaps=True))
                 fig_ta.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=40, r=40, t=40, b=30))
                 st.plotly_chart(fig_ta, use_container_width=True)
-                cols_t = [date_col, moment_col, col_sis, col_dia]
+                cols_t = [date_col, moment_col, col_sis, col_dia, col_obs]
                 df_t_tab = view_df[cols_t].copy()
                 df_t_tab[date_col] = df_t_tab[date_col].dt.strftime("%d.%m.%Y")
                 df_t_tab["Status Tensiune"] = df_t_tab.apply(lambda r: evaluate_ta(r[col_sis], r[col_dia]), axis=1)
@@ -446,7 +464,7 @@ with tab_dict["📊 Jurnal & Grafice"]:
                 fig_p.add_trace(go.Scatter(x=x_data_strict, y=puls_vals, mode="lines+markers+text", name="Puls (bpm)", line=dict(color="#10b981", width=3), marker=dict(size=10), text=puls_vals, textposition="top center", textfont=dict(size=12, color="#ffffff"), texttemplate="<b>%{text}</b>", connectgaps=True))
                 fig_p.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=40, r=40, t=40, b=30))
                 st.plotly_chart(fig_p, use_container_width=True)
-                cols_p = [date_col, moment_col, col_puls]
+                cols_p = [date_col, moment_col, col_puls, col_obs]
                 df_p_tab = view_df[cols_p].copy()
                 df_p_tab[date_col] = df_p_tab[date_col].dt.strftime("%d.%m.%Y")
                 df_p_tab["Status Puls"] = df_p_tab[col_puls].apply(evaluate_puls)
@@ -498,15 +516,21 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
                     except: return 0
                 return 0
 
+            def get_obs():
+                if not existing_row.empty and col_obs in existing_row:
+                    val = existing_row[col_obs]
+                    return str(val) if pd.notna(val) and val != "nan" else ""
+                return ""
+
             with st.form("form_add_overwrite"):
                 c1, c2 = st.columns(2)
                 with c1: glic_input = st.number_input("🩸 Glicemie (mg/dL) [0 = nemăsurat]", min_value=0, value=get_val(col_glic))
                 with c2:
                     sis_input = st.number_input("🫀 Tensiune Sistolică [0 = nemăsurat]", min_value=0, value=get_val(col_sis))
                     dia_input = st.number_input("🫀 Tensiune Diastolică [0 = nemăsurat]", min_value=0, value=get_val(col_dia))
-                    puls_input = st.number_input("💓 Puls (bpm) [0 = nemăsurat]", min_value=0, value=get_val(col_puls))
+                    puls_input = st.number_input("💓 Puls (Apple Watch / alt dispozitiv) [0 = nemăsurat]", min_value=0, value=get_val(col_puls))
 
-                obs_input = st.text_area("✍️ Notițe / Observații")
+                obs_input = st.text_area("✍️ Notițe / Observații (Ex: Ce ai mâncat, ciocolată, prăjituri, factor de stres...)", value=get_obs())
                 submitted = st.form_submit_button("💾 Salvează / Suprascrie", type="primary", use_container_width=True)
 
                 if submitted:
@@ -582,9 +606,30 @@ if is_admin and "📅 Programări" in tab_dict:
         ])
         st.dataframe(prog_df, use_container_width=True)
 
-# ----------------- TAB: SETĂRI & ISTORIC -----------------
+# ----------------- TAB: SETĂRI & ADMIN -----------------
 with tab_dict["⚙️ Setări"]:
-    st.markdown("### ⚙️ Setări Generale și Istoric Tratament")
+    st.markdown("### ⚙️ Setări Generale, Roluri & Istoric")
+    
+    # GESTIONARE UTILIZATORI (ADMIN)
+    if is_admin:
+        with st.container(border=True):
+            st.markdown("#### 👥 Gestiune Utilizatori și Roluri (Admin)")
+            user_list = list(st.session_state.users.keys())
+            target_user = st.selectbox("Selectează utilizator pentru editare", user_list)
+            
+            current_target_role = st.session_state.users[target_user].get("role", "Membru")
+            role_options = ["Membru", "Doctor", "Administrator"]
+            updated_role = st.selectbox("Schimbă Rol", role_options, index=role_options.index(current_target_role))
+            updated_pass = st.text_input("Parolă Nouă (lasă gol dacă nu schimbi)", type="password", key="pass_edit_user")
+
+            if st.button("💾 Salvează Modificări Utilizator"):
+                st.session_state.users[target_user]["role"] = updated_role
+                if updated_pass:
+                    st.session_state.users[target_user]["pass"] = updated_pass
+                st.success(f"Detaliile pentru {target_user} au fost actualizate!")
+                trigger_rerun()
+        st.markdown("<br>", unsafe_allow_html=True)
+
     st.markdown("#### 📜 Istoric Modificări Medicamente")
     st.dataframe(st.session_state.meds_hist_df.sort_values(by="Data_Ora", ascending=False), use_container_width=True)
     st.markdown("---")
@@ -595,7 +640,7 @@ with tab_dict["⚙️ Setări"]:
         st.session_state.settings["notif_enabled"] = st.checkbox("Activează Notificările", value=st.session_state.settings["notif_enabled"])
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("#### 💾 Siguranță Date & Backup (CSV)")
-        st.info("Descarcă manual datele din lunile selectate (fără diacritice).")
+        st.info("Descarcă manual datele din lunile selectate (fără diacritice, sortate cronologic).")
         
         if not view_df.empty:
             df_backup = view_df.copy()
@@ -610,8 +655,7 @@ with tab_dict["⚙️ Setări"]:
                     df_backup[col] = df_backup[col].apply(lambda x: remove_diacritics(str(x)) if pd.notna(x) else x)
             df_backup.columns = [remove_diacritics(c) for c in df_backup.columns]
             
-            if 'Luna_An' in df_backup.columns:
-                df_backup = df_backup.drop(columns=['Luna_An'])
+            if 'Luna_An' in df_backup.columns: df_backup = df_backup.drop(columns=['Luna_An'])
                 
             csv_data = df_backup.to_csv(index=False).encode('utf-8')
             st.download_button(label="📥 Descarcă Backup CSV", data=csv_data, file_name="backup_date_medicale.csv", mime="text/csv", use_container_width=True)
@@ -634,7 +678,7 @@ with tab_dict["📄 Raport PDF"]:
         opt_ta = st.checkbox("Include Grafic Tensiune Arterială 🫀", value=True)
     with col_opt2:
         opt_puls = st.checkbox("Include Grafic Puls 💓", value=True)
-        opt_tabele = st.checkbox("Include Tabelul Centralizator (Colorat) 📋", value=True)
+        opt_tabele = st.checkbox("Include Tabelul Centralizator (Colorat & Observații) 📋", value=True)
 
     def generate_pdf_chart(x_vals, y_vals, title, ylabel, color_hex):
         plt.figure(figsize=(7.5, 2.2))
@@ -692,23 +736,25 @@ with tab_dict["📄 Raport PDF"]:
                 story.append(Spacer(1, 15))
 
             if include_tables:
-                story.append(Paragraph("Date Tabelare (Valori în Roșu/Verde conform țintelor)", styles["Heading2"]))
-                table_data = [["Dată", "Moment", "Glic", "TA", "Puls"]]
+                story.append(Paragraph("Date Tabelare și Observații (Valori în Roșu/Verde)", styles["Heading2"]))
+                table_data = [["Dată", "Moment", "Glic", "TA", "Puls", "Observații"]]
                 
-                # Stilul de baza
                 t_style = [
                     ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#1e3a8a")),
                     ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
                     ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                    ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
                     ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-                    ('BOTTOMPADDING', (0,0), (-1,0), 12),
-                    ('GRID', (0,0), (-1,-1), 1, colors.black),
+                    ('FONTSIZE', (0,0), (-1,-1), 8),
+                    ('BOTTOMPADDING', (0,0), (-1,0), 10),
+                    ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
                 ]
                 
                 r_idx = 1
                 for _, row in data_frame.iterrows():
                     dt_str = row[date_col].strftime("%d.%m.%Y")
                     mm = remove_diacritics(str(row.get(moment_col, "")))
+                    obs_str = remove_diacritics(str(row.get(col_obs, "")))
                     
                     glic_v = row.get(col_glic, 0)
                     sis_v = row.get(col_sis, 0)
@@ -719,9 +765,9 @@ with tab_dict["📄 Raport PDF"]:
                     ta_str = f"{int(sis_v)}/{int(dia_v)}" if pd.notna(sis_v) and float(sis_v)>0 else "-"
                     p_str = str(int(puls_v)) if pd.notna(puls_v) and float(puls_v)>0 else "-"
                     
-                    table_data.append([dt_str, mm, g_str, ta_str, p_str])
+                    table_data.append([dt_str, mm, g_str, ta_str, p_str, obs_str])
                     
-                    # Logica culorilor
+                    # Culori în funcție de ținte
                     ev_g = evaluate_glic(glic_v, mm)
                     if "🟢" in ev_g: t_style.append(('TEXTCOLOR', (2, r_idx), (2, r_idx), colors.HexColor("#16a34a")))
                     elif "🔴" in ev_g: t_style.append(('TEXTCOLOR', (2, r_idx), (2, r_idx), colors.HexColor("#dc2626")))
@@ -736,7 +782,7 @@ with tab_dict["📄 Raport PDF"]:
                     
                     r_idx += 1
                 
-                t = Table(table_data, colWidths=[70, 150, 50, 70, 50])
+                t = Table(table_data, colWidths=[60, 110, 40, 50, 40, 200])
                 t.setStyle(TableStyle(t_style))
                 story.append(t)
         else:
@@ -748,5 +794,5 @@ with tab_dict["📄 Raport PDF"]:
 
     if st.button("Crează Raport PDF", type="primary"):
         pdf_buffer = make_pdf_report(view_df, opt_glic, opt_ta, opt_puls, opt_tabele)
-        file_name = "Raport_Medical.pdf"
+        file_name = f"Raport_Medical_{filtru_luni_str.replace(', ', '_')}.pdf"
         st.download_button(label="⬇️ Descarcă PDF", data=pdf_buffer, file_name=file_name, mime="application/pdf")

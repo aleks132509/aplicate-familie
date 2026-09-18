@@ -86,7 +86,6 @@ def trigger_rerun():
     else:
         st.experimental_rerun()
 
-
 # ==========================================
 # GESTIONARE FIȘIERE PERSISTENTE & PROGRAMĂRI
 # ==========================================
@@ -301,27 +300,53 @@ def format_table_column(series):
     return series.astype(str).str.strip().replace(["0", "0.0", "nan", "None", "", "<NA>"], "Nemăsurat")
 
 # ==========================================
-# EVALUARE SPIKE INTELIGENTĂ & CAUZĂ ALIMENTARĂ
+# EVALUARE SPIKE INTELIGENTĂ & CAUZĂ ALIMENTARĂ (UNICA FORMĂ CURATĂ)
 # ==========================================
-HIGH_GI_FOODS = [
-    "ciocolata", "ciocolată", "prajitura", "prăjitură", "prajituri", "prăjituri", 
-    "tort", "suc", "fanta", "cola", "pepsi", "dulciuri", "inghetata", "înghețată", 
-    "paine alba", "pâine albă", "pizza", "paste", "orez", "cartofi", "cartofi prajiti", 
-    "zahar", "zahăr", "miere", "bere", "patiserie", "gogosi", "gogoși", "covrigi", "croissant"
-]
+HIGH_GI_FOODS_MAPPING = {
+    "ciocolata": "ciocolata",
+    "ciocolată": "ciocolata",
+    "prajitura": "prajitura",
+    "prăjitură": "prajitura",
+    "prajituri": "prajituri",
+    "prăjituri": "prajituri",
+    "tort": "tort",
+    "suc": "suc",
+    "fanta": "fanta",
+    "cola": "cola",
+    "pepsi": "pepsi",
+    "dulciuri": "dulciuri",
+    "inghetata": "inghetata",
+    "înghețată": "inghetata",
+    "paine alba": "paine alba",
+    "pâine albă": "paine alba",
+    "pizza": "pizza",
+    "paste": "paste",
+    "orez": "orez",
+    "cartofi": "cartofi",
+    "cartofi prajiti": "cartofi prajiti",
+    "zahar": "zahar",
+    "zahăr": "zahar",
+    "miere": "miere",
+    "bere": "bere",
+    "patiserie": "patiserie",
+    "gogosi": "gogosi",
+    "gogoși": "gogosi",
+    "covrigi": "covrigi",
+    "croissant": "croissant"
+}
 
 def check_food_cause(obs_text):
     if not isinstance(obs_text, str) or not obs_text.strip():
         return ""
     obs_clean = remove_diacritics(obs_text.lower())
-    found_foods = []
-    for food in HIGH_GI_FOODS:
-        food_clean = remove_diacritics(food)
-        if re.search(r'\b' + re.escape(food_clean) + r'\b', obs_clean):
-            found_foods.append(food)
+    found_foods = set()
+    for keyword, standard_name in HIGH_GI_FOODS_MAPPING.items():
+        kw_clean = remove_diacritics(keyword)
+        if re.search(r'\b' + re.escape(kw_clean) + r'\b', obs_clean):
+            found_foods.add(standard_name)
     
     if found_foods:
-        return f" (Cauză probabilă: {', '.join(set(found_foods))})"
+        return f" (Cauză probabilă: {', '.join(sorted(found_foods))})"
     elif len(obs_text.strip()) > 0:
         return f" ({obs_text.strip()[:20]})"
     return ""
@@ -333,7 +358,7 @@ def is_glic_spike(val, moment_zi=""):
         if "După masă" in str(moment_zi):
             t_max = st.session_state.settings.get("target_glic_post_max", 160)
         else:
-            t_max = st.session_state.settings.get("target_glic_min", 120)
+            t_max = st.session_state.settings.get("target_glic_max", 120)
         return v > t_max
     except:
         return False
@@ -606,15 +631,42 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
                     return str(val) if pd.notna(val) and val != "nan" else ""
                 return ""
 
+            # --- SELECTOR RAPID ELEMENTE CU INDICE GLICEMIC MARE SAU ALTELE ---
+            st.markdown("##### ⚡ Asistent Rapid Observații (Click pentru adăugare)")
+            categorii_alimente = {
+                "🍫 Dulciuri / Deserturi": ["ciocolată", "prăjitură", "tort", "înghețată", "zahăr", "miere"],
+                "🍞 Carbohidrați Rapizi / Făinoase": ["pâine albă", "pizza", "paste", "orez", "cartofi prăjiți", "covrigi", "croissant", "gogoși", "patiserie"],
+                "🥤 Băuturi": ["suc", "cola", "fanta", "pepsi", "bere"],
+                "🏃 Stare / Altele": ["stres", "oboseală", "după efort fizic", "masă copioasă"]
+            }
+            
+            selected_quick_items = []
+            cols_chips = st.columns(len(categorii_alimente))
+            for idx, (cat_name, items) in enumerate(categorii_alimente.items()):
+                with cols_chips[idx]:
+                    st.caption(cat_name)
+                    for item in items:
+                        if st.checkbox(item, key=f"quick_{cat_name}_{item}"):
+                            selected_quick_items.append(item)
+
+            base_obs_initial = get_obs()
+            if selected_quick_items:
+                joined_quick = ", ".join(selected_quick_items)
+                if base_obs_initial:
+                    if joined_quick not in base_obs_initial:
+                        base_obs_initial = f"{base_obs_initial}, {joined_quick}"
+                else:
+                    base_obs_initial = joined_quick
+
             with st.form("form_add_overwrite"):
                 c1, c2 = st.columns(2)
                 with c1: glic_input = st.number_input("🩸 Glicemie (mg/dL) [0 = nemăsurat]", min_value=0, value=get_val(col_glic))
                 with c2:
                     sis_input = st.number_input("🫀 Tensiune Sistolică [0 = nemăsurat]", min_value=0, value=get_val(col_sis))
                     dia_input = st.number_input("🫀 Tensiune Diastolică [0 = nemăsurat]", min_value=0, value=get_val(col_dia))
-                    puls_input = st.number_input("💓 Puls (Apple Watch / alt dispozitiv) [0 = nemăsurat]", min_value=0, value=get_val(col_puls))
+                    puls_input = st.number_input("💓 Puls [0 = nemăsurat]", min_value=0, value=get_val(col_puls))
 
-                obs_input = st.text_area("✍️ Notițe / Observații (Ex: Ce ai mâncat: ciocolată, prăjituri, pizza...)", value=get_obs())
+                obs_input = st.text_area("✍️ Notițe / Observații (Completat automat sau liber)", value=base_obs_initial)
                 submitted = st.form_submit_button("💾 Salvează / Suprascrie", type="primary", use_container_width=True)
 
                 if submitted:
@@ -680,7 +732,7 @@ with tab_dict["💊 Tratament"]:
                         st.success(f"{to_delete} șters!")
                         trigger_rerun()
 
-# ----------------- TAB: PROGRAMĂRI (CU PERIOADE MULTIPLE & EMAIL) -----------------
+# ----------------- TAB: PROGRAMĂRI -----------------
 if is_admin and "📅 Programări" in tab_dict:
     with tab_dict["📅 Programări"]:
         st.markdown("### 📅 Programări Medicale & Alerte Multiple")
@@ -821,7 +873,7 @@ with tab_dict["⚙️ Setări"]:
             st.download_button(label="📥 Descarcă Backup CSV", data=csv_data, file_name="backup_date_medicale.csv", mime="text/csv", use_container_width=True)
 
     with col_set2:
-        st.markdown("#### 🎯 Valori Țintă Medicale (pentru culori PDF/Ecrane)")
+        st.markdown("#### 🎯 Valori Țintă Medicale")
         st.session_state.settings["target_glic_min"] = st.number_input("Glicemie Min Înainte Masă", value=st.session_state.settings["target_glic_min"], disabled=not is_admin)
         st.session_state.settings["target_glic_max"] = st.number_input("Glicemie Max Înainte Masă", value=st.session_state.settings["target_glic_max"], disabled=not is_admin)
         st.session_state.settings["target_glic_post_max"] = st.number_input("Glicemie Max După Masă", value=st.session_state.settings["target_glic_post_max"], disabled=not is_admin)

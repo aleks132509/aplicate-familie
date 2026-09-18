@@ -213,29 +213,46 @@ def trimite_email_cu_atasament(destinatar, subiect, mesaj, file_path, file_name)
     if not email_sender or not email_password:
         return False, "Datele de configurare email lipsesc din Setări."
 
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            msg = EmailMessage()
-            msg.set_content(mesaj)
-            msg['Subject'] = subiect
-            msg['From'] = email_sender
-            msg['To'] = destinatar
+    # Încercăm mai întâi portul 587 (STARTTLS), apoi portul 465 (SSL)
+    configs = [
+        {"port": 587, "use_ssl": False},
+        {"port": 465, "use_ssl": True}
+    ]
 
-            if os.path.exists(file_path):
-                with open(file_path, "rb") as f:
-                    file_data = f.read()
-                msg.add_attachment(file_data, maintype="application", subtype="octet-stream", filename=file_name)
+    last_error = ""
+    for cfg in configs:
+        port = cfg["port"]
+        use_ssl = cfg["use_ssl"]
+        
+        for attempt in range(2):
+            try:
+                msg = EmailMessage()
+                msg.set_content(mesaj)
+                msg['Subject'] = subiect
+                msg['From'] = email_sender
+                msg['To'] = destinatar
 
-            # Timeout extins la 30 secunde pentru a evita erorile de rețea
-            with smtplib.SMTP_SSL('smtp.mail.me.com', 465, timeout=30) as smtp:
-                smtp.login(email_sender, email_password)
-                smtp.send_message(msg)
-            return True, "Email trimis cu succes prin iCloud!"
-        except Exception as e:
-            if attempt == max_retries - 1:
-                return False, f"Erore trimitere iCloud: {str(e)}"
-            time.sleep(2) # Așteaptă 2 secunde înainte de reîncercare
+                if os.path.exists(file_path):
+                    with open(file_path, "rb") as f:
+                        file_data = f.read()
+                    msg.add_attachment(file_data, maintype="application", subtype="octet-stream", filename=file_name)
+
+                if use_ssl:
+                    with smtplib.SMTP_SSL('smtp.mail.me.com', port, timeout=30) as smtp:
+                        smtp.login(email_sender, email_password)
+                        smtp.send_message(msg)
+                else:
+                    with smtplib.SMTP('smtp.mail.me.com', port, timeout=30) as smtp:
+                        smtp.starttls()
+                        smtp.login(email_sender, email_password)
+                        smtp.send_message(msg)
+                        
+                return True, "Email trimis cu succes prin iCloud!"
+            except Exception as e:
+                last_error = str(e)
+                time.sleep(1)
+                
+    return False, f"Erore trimitere iCloud (toate porturile au eșuat): {last_error}"
 
 def verifica_si_fa_backup_automat():
     try:

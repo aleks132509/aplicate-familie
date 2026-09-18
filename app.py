@@ -136,18 +136,18 @@ def get_initial_prog():
 
 def get_initial_foods():
     default_foods = {
-        "🔴 Indice Glicemic Ridicat (Dulciuri / Făinoase / Băuturi cu zahăr)": [
-            "ciocolată", "prăjitură", "tort", "înghețată", "zahăr", "miere", 
-            "pâine albă", "pizza", "paste albe", "cartofi prăjiți", "covrigi", 
-            "croissant", "gogoși", "patiserie", "suc", "cola", "fanta", "pepsi", "bere"
+        "🔴 Indice Glicemic Ridicat (Dulciuri / Făinoase / Fast-Food / Băuturi cu zahăr)": [
+            "ciocolată", "prăjitură", "tort", "înghețată", "zahăr", "miere", "biscuiți",
+            "pâine albă", "pizza", "paste albe", "cartofi prăjiți", "covrigi", "napolitane",
+            "croissant", "gogoși", "patiserie", "cornuri", "suc", "cola", "fanta", "pepsi", "bere", "energizant"
         ],
         "🟡 Indice Glicemic Mediu (Cereale / Paste integrale / Legume amidonoase)": [
-            "pâine integrală", "paste integrale", "orez integral", "orez basmati", 
-            "fulgi de ovăz", "fulgi de mei", "fulgi de secară", "cartofi fierți", "porumb", "mălai (mămăligă)"
+            "pâine integrală", "paste integrale", "orez integral", "orez basmati", "orez alb",
+            "fulgi de ovăz", "fulgi de mei", "fulgi de secară", "cartofi fierți", "porumb", "mălai (mămăligă)", "mazăre", "fasole boabe"
         ],
-        "🟢 Indice Glicemic Scăzut / Altele (Fără impact major sau Cola Zero)": [
+        "🟢 Indice Glicemic Scăzut / Altele (Fără impact major sau băuturi zero)": [
             "cola 0", "pepsi zero", "apă minerală", "cafea fără zahăr", "ceai neîndulcit", 
-            "stres", "oboseală", "după efort fizic", "masă copioasă"
+            "stres", "oboseală", "după efort fizic", "masă copioasă", "salată verde", "castraveți", "roșii"
         ]
     }
     if os.path.exists(FOODS_FILE):
@@ -200,8 +200,7 @@ def trimite_email_alerta(destinatar, subiect, mesaj):
         msg['From'] = email_sender
         msg['To'] = destinatar
 
-        # Setări dedicate pentru serverul iCloud (smtp.mail.me.com pe portul 465 SSL)
-        with smtplib.SMTP_SSL('smtp.mail.me.com', 465) as smtp:
+        with smtplib.SMTP_SSL('smtp.mail.me.com', 465, timeout=10) as smtp:
             smtp.login(email_sender, email_password)
             smtp.send_message(msg)
         return True, "Email trimis cu succes prin iCloud!"
@@ -368,7 +367,6 @@ def check_food_cause(obs_text):
     obs_clean = remove_diacritics(obs_clean_text.lower())
     found_foods = set()
     
-    # Verificăm în categoriile dinamice
     for cat, items in st.session_state.food_categories.items():
         for item in items:
             kw_clean = remove_diacritics(item.lower())
@@ -533,7 +531,6 @@ with tab_dict["📊 Jurnal & Grafice"]:
         st.markdown("<br>", unsafe_allow_html=True)
         sub_tab_glic, sub_tab_ta, sub_tab_puls, sub_tab_all = st.tabs(["🩸 Glicemie & Analiză Spike", "🫀 Tensiune Arterială", "💓 Puls", "📋 Toate Datele"])
         
-        # Construim etichete personalizate pe axa X pentru a vizualiza clar și prânzul
         x_labels_composed = [f"{d.strftime('%d.%m')} ({m})" for d, m in zip(view_df[date_col], view_df[moment_col])]
 
         with sub_tab_glic:
@@ -644,7 +641,6 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
         with st.container(border=True):
             selected_date = st.date_input("📅 Selectează Data", value=date.today(), key="input_date_picker")
             
-            # Opțiunea cu prânzul inclus pentru TOATE zilele săptămânii
             momente_opțiuni = [
                 "Dimineața - Înainte de masă", 
                 "Dimineața - După masă", 
@@ -674,17 +670,19 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
                     return clean_obs(existing_row[col_obs])
                 return ""
 
-            st.markdown("##### ⚡ Asistent Inteligent Mese & Indice Glicemic (Click pentru adăugare)")
+            st.markdown("##### ⚡ Asistent Inteligent Mese & Indice Glicemic (Cu Căutare Rapidă)")
+            
+            search_food_input = st.text_input("🔍 Caută rapid alimente / elemente în categorii", key="search_food_add_input")
             
             key_suffix = f"_{selected_date.strftime('%Y%m%d')}_{selected_moment}"
             selected_quick_items = []
             
-            # Afișăm pe categorii în funcție de Indexul Glicemic
             cat_cols = st.columns(len(st.session_state.food_categories))
             for idx, (cat_name, items) in enumerate(st.session_state.food_categories.items()):
                 with cat_cols[idx]:
                     st.caption(cat_name)
-                    for item in items:
+                    filtered_items = [i for i in items if search_food_input.strip().lower() in i.lower()] if search_food_input else items
+                    for item in filtered_items:
                         if st.checkbox(item, key=f"quick_{cat_name}_{item}{key_suffix}"):
                             selected_quick_items.append(item)
 
@@ -774,7 +772,7 @@ with tab_dict["💊 Tratament"]:
 # ----------------- TAB: PROGRAMĂRI -----------------
 if is_admin and "📅 Programări" in tab_dict:
     with tab_dict["📅 Programări"]:
-        st.markdown("### 📅 Programări Medicale, Interval Orar & Status")
+        st.markdown("### 📅 Programări Medicale, Editare, Ștergere & Alerte")
         st.dataframe(st.session_state.prog_df, use_container_width=True)
 
         st.markdown("---")
@@ -809,24 +807,59 @@ if is_admin and "📅 Programări" in tab_dict:
 
         with col_p2:
             with st.container(border=True):
-                st.markdown("#### ✔️ Marchează 'Done'")
+                st.markdown("#### ✏️ Editează / Șterge / Status")
                 if not st.session_state.prog_df.empty:
                     prog_indices = list(st.session_state.prog_df.index)
                     prog_labels = [f"{row.get('Dată', '')} {row.get('Ora', '10:00')} - {row.get('Tip', '')} ({row.get('Clinică', '')})" for _, row in st.session_state.prog_df.iterrows()]
                     selected_prog_idx = st.selectbox("Alege programare", prog_indices, format_func=lambda i: prog_labels[i])
                     
-                    current_status = st.session_state.prog_df.loc[selected_prog_idx, "Efectuat"]
-                    new_status = st.selectbox("Status", ["Nu", "Da (Done)"], index=1 if current_status == "Da" else 0)
+                    row_data = st.session_state.prog_df.loc[selected_prog_idx]
                     
-                    if st.button("Actualizează Status", type="primary"):
-                        st.session_state.prog_df.loc[selected_prog_idx, "Efectuat"] = "Da" if "Da" in new_status else "Nu"
-                        save_all_files()
-                        st.success("Status actualizat!")
-                        trigger_rerun()
+                    with st.form("form_edit_prog"):
+                        try:
+                            default_dt = datetime.strptime(str(row_data.get("Dată", date.today().strftime("%Y-%m-%d"))), "%Y-%m-%d").date()
+                        except:
+                            default_dt = date.today()
+                            
+                        e_p_data = st.date_input("Dată Nouă", value=default_dt)
+                        e_p_ora = st.text_input("Ora Nouă", value=str(row_data.get("Ora", "10:00")))
+                        e_p_tip = st.text_input("Tip Nou", value=str(row_data.get("Tip", "")))
+                        e_p_clinica = st.text_input("Clinică Nouă", value=str(row_data.get("Clinică", "")))
+                        e_p_alerta = st.text_input("Zile Alertă Noi", value=str(row_data.get("Zile_Alerta", "1, 3")))
+                        
+                        stat_opts = ["Nu", "Da (Done)"]
+                        curr_stat = str(row_data.get("Efectuat", "Nu"))
+                        e_p_efectuat = st.selectbox("Status", stat_opts, index=1 if "Da" in curr_stat else 0)
+                        
+                        e_p_obs = st.text_area("Observații Noi", value=str(row_data.get("Observații", "")))
+                        
+                        col_sub1, col_sub2 = st.columns(2)
+                        with col_sub1:
+                            btn_mod = st.form_submit_button("💾 Salvează Modificări", type="primary")
+                        with col_sub2:
+                            btn_del = st.form_submit_button("🗑️ Șterge Programarea", type="secondary")
+                            
+                        if btn_mod:
+                            st.session_state.prog_df.loc[selected_prog_idx, "Dată"] = e_p_data.strftime("%Y-%m-%d")
+                            st.session_state.prog_df.loc[selected_prog_idx, "Ora"] = e_p_ora
+                            st.session_state.prog_df.loc[selected_prog_idx, "Tip"] = e_p_tip
+                            st.session_state.prog_df.loc[selected_prog_idx, "Clinică"] = e_p_clinica
+                            st.session_state.prog_df.loc[selected_prog_idx, "Zile_Alerta"] = e_p_alerta
+                            st.session_state.prog_df.loc[selected_prog_idx, "Efectuat"] = "Da" if "Da" in e_p_efectuat else "Nu"
+                            st.session_state.prog_df.loc[selected_prog_idx, "Observații"] = clean_obs(e_p_obs)
+                            save_all_files()
+                            st.success("Programare actualizată cu succes!")
+                            trigger_rerun()
+                            
+                        if btn_del:
+                            st.session_state.prog_df = st.session_state.prog_df.drop(selected_prog_idx).reset_index(drop=True)
+                            save_all_files()
+                            st.success("Programare ștersă!")
+                            trigger_rerun()
 
         with col_p3:
             with st.container(border=True):
-                st.markdown("#### 📨 Trimitere Automată Email (iCloud)")
+                st.markdown("#### 📨 Trimitere & Test iCloud")
                 destinatar_auto = st.text_input("Email Destinatar", value=st.session_state.settings.get("email_sender", ""))
                 
                 if st.button("🚀 Trimite Alerte Automat Acum", type="primary"):
@@ -862,7 +895,7 @@ if is_admin and "📅 Programări" in tab_dict:
 
 # ----------------- TAB: SETĂRI & ADMIN -----------------
 with tab_dict["⚙️ Setări"]:
-    st.markdown("### ⚙️ Setări Generale, Configurare iCloud & Elemente Mese")
+    st.markdown("### ⚙️ Setări Generale, Test Conexiune iCloud & Elemente Mese")
     
     if is_admin:
         col_u1, col_u2 = st.columns(2)
@@ -902,15 +935,13 @@ with tab_dict["⚙️ Setări"]:
                     trigger_rerun()
         st.markdown("<br>", unsafe_allow_html=True)
 
-        # Gestiune elemente meniu masă (adaugă/șterge cola 0, cereale, paste etc.)
         with st.container(border=True):
-            st.markdown("#### 🍎 Gestiune Elemente Mese & Indice Glicemic (Adăugare / Ștergere)")
+            st.markdown("#### 🍎 Gestiune Elemente Mese & Indice Glicemic (Cu Căutare pentru Ștergere)")
             fc_cat = st.selectbox("Selectează Categoria", list(st.session_state.food_categories.keys()))
-            st.markdown(f"Elemente actuale în **{fc_cat}**: {', '.join(st.session_state.food_categories[fc_cat])}")
             
             c_f1, c_f2 = st.columns(2)
             with c_f1:
-                new_food_item = st.text_input("Adaugă element nou (ex: cola 0, paste integrale etc.)")
+                new_food_item = st.text_input("Adaugă element nou (ex: cola 0, cereale integrale etc.)")
                 if st.button("➕ Adaugă în Categorie"):
                     if new_food_item and new_food_item.strip():
                         item_clean = new_food_item.strip().lower()
@@ -920,22 +951,39 @@ with tab_dict["⚙️ Setări"]:
                             st.success(f"Elementul '{item_clean}' a fost adăugat!")
                             trigger_rerun()
             with c_f2:
-                if st.session_state.food_categories[fc_cat]:
-                    del_food_item = st.selectbox("Șterge element existent", st.session_state.food_categories[fc_cat], key="del_food_select")
+                search_del_item = st.text_input("🔍 Caută element de șters", key="search_del_food_input")
+                items_to_show = [i for i in st.session_state.food_categories[fc_cat] if search_del_item.strip().lower() in i.lower()] if search_del_item else st.session_state.food_categories[fc_cat]
+                
+                if items_to_show:
+                    del_food_item = st.selectbox("Selectează element existent", items_to_show, key="del_food_select")
                     if st.button("🗑️ Șterge Elementul Selectat"):
                         st.session_state.food_categories[fc_cat].remove(del_food_item)
                         save_custom_foods()
                         st.success(f"Elementul '{del_food_item}' a fost șters!")
                         trigger_rerun()
+                else:
+                    st.info("Niciun element găsit după căutare.")
 
     st.markdown("---")
     col_set1, col_set2 = st.columns(2)
     with col_set1:
-        st.markdown("#### ✉️ Configurare Server iCloud Mail")
+        st.markdown("#### ✉️ Configurare Server iCloud Mail & Test")
         st.session_state.settings["email_sender"] = st.text_input("Adresa ta de iCloud (expeditor, ex: nume@icloud.com)", value=st.session_state.settings.get("email_sender", ""))
         st.session_state.settings["email_password"] = st.text_input("Parolă specifică de aplicație iCloud (App-Specific Password)", type="password", value=st.session_state.settings.get("email_password", ""))
-        st.markdown("<small>💡 *Notă: Pentru iCloud, este necesar să generezi o **App-Specific Password** din portalul tău Apple ID (appleid.apple.com).*</small>", unsafe_allow_html=True)
+        st.markdown("<small>💡 *Notă: Nu folosi parola ta principală Apple ID. Vezi mai jos ghidul de generare.*</small>", unsafe_allow_html=True)
         
+        # Buton dedicat pentru testarea conexiunii SMTP și eliminarea erorii de timeout
+        if st.button("🔌 Testează Conexiunea iCloud (Trimite Email Test)", type="primary"):
+            test_dest = st.session_state.settings.get("email_sender", "")
+            if not test_dest:
+                st.error("Completează mai întâi adresa de email a expeditorului.")
+            else:
+                success_t, msg_t = trimite_email_alerta(test_dest, "🧪 Test Conexiune HealthTrack Pro", "Salut! Conexiunea SMTP cu serverul iCloud funcționează perfect.")
+                if success_t:
+                    st.success("✅ Conexiune reușită! Emailul de test a fost trimis.")
+                else:
+                    st.error(f"❌ {msg_t}")
+
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("#### 💾 Backup Manual (CSV)")
         if not view_df.empty:
@@ -977,8 +1025,32 @@ with tab_dict["📄 Raport PDF"]:
         opt_puls = st.checkbox("Include Grafic Puls 💓", value=True)
         opt_tabele = st.checkbox("Include Tabelul Centralizator (Curat, Fără Diacritice/Nan) 📋", value=True)
 
-    def generate_pdf_chart(x_vals, y_vals, title, ylabel, color_hex):
-        # Mărim lățimea și spațierea pentru a evita orice suprapunere de text pe grafic
+    def generate_pdf_chart_glic(x_vals, y_vals, moments_list, title, ylabel, color_hex):
+        plt.figure(figsize=(8.0, 2.6))
+        plt.plot(x_vals, y_vals, marker="o", linestyle="-", color=color_hex, linewidth=2.2, markersize=5)
+        
+        # Puncte roșii pentru spike-uri pe grafic, exact ca în jurnal
+        for xi, yi, m in zip(x_vals, y_vals, moments_list):
+            if yi > 0:
+                is_spike = is_glic_spike(yi, m)
+                dot_color = "#ef4444" if is_spike else color_hex
+                plt.plot(xi, yi, marker="o", markersize=6, color=dot_color)
+                plt.annotate(str(int(yi)), (xi, yi), textcoords="offset points", xytext=(0, 6), ha="center", fontsize=7.5, fontweight="bold", bbox=dict(boxstyle="round,pad=0.15", fc="white", ec=dot_color, alpha=0.9))
+                
+        plt.title(title, fontsize=10, fontweight="bold", color="#1e3a8a", pad=14)
+        plt.ylabel(ylabel, fontsize=9, fontweight="bold")
+        plt.xticks(rotation=35, fontsize=7.5, ha="right")
+        plt.yticks(fontsize=8)
+        plt.grid(True, linestyle=":", alpha=0.6)
+        plt.tight_layout()
+
+        img_buffer = io.BytesIO()
+        plt.savefig(img_buffer, format="png", dpi=220)
+        plt.close()
+        img_buffer.seek(0)
+        return img_buffer
+
+    def generate_pdf_chart_simple(x_vals, y_vals, title, ylabel, color_hex):
         plt.figure(figsize=(8.0, 2.6))
         plt.plot(x_vals, y_vals, marker="o", linestyle="-", color=color_hex, linewidth=2.2, markersize=5)
         for xi, yi in zip(x_vals, y_vals):
@@ -1010,27 +1082,27 @@ with tab_dict["📄 Raport PDF"]:
         story.append(Paragraph(date_text, ParagraphStyle("DateStyle", parent=styles["Normal"], alignment=1, spaceAfter=20)))
 
         if not data_frame.empty:
-            # Etichete compuse clare și în PDF pentru a distinge dimineața, prânzul și seara
             x_data = [f"{d.strftime('%d.%m')} ({m[:3]})" for d, m in zip(data_frame[date_col], data_frame[moment_col])]
+            moments_arr = data_frame[moment_col].tolist() if moment_col in data_frame.columns else [""] * len(data_frame)
             
             if include_glic and col_glic in data_frame.columns:
                 g_vals = pd.to_numeric(data_frame[col_glic], errors='coerce').fillna(0).tolist()
                 story.append(Paragraph("Evolutie Glicemie", styles["Heading2"]))
-                img_buf = generate_pdf_chart(x_data, g_vals, "Glicemie (mg/dL)", "mg/dL", "#38bdf8")
+                img_buf = generate_pdf_chart_glic(x_data, g_vals, moments_arr, "Glicemie (mg/dL)", "mg/dL", "#38bdf8")
                 story.append(Image(img_buf, width=470, height=150))
                 story.append(Spacer(1, 15))
                 
             if include_ta and col_sis in data_frame.columns:
                 s_vals = pd.to_numeric(data_frame[col_sis], errors='coerce').fillna(0).tolist()
                 story.append(Paragraph("Evolutie Tensiune Sistolica", styles["Heading2"]))
-                img_buf = generate_pdf_chart(x_data, s_vals, "Tensiune Sistolica (mmHg)", "mmHg", "#ef4444")
+                img_buf = generate_pdf_chart_simple(x_data, s_vals, "Tensiune Sistolica (mmHg)", "mmHg", "#ef4444")
                 story.append(Image(img_buf, width=470, height=150))
                 story.append(Spacer(1, 15))
                 
             if include_puls and col_puls in data_frame.columns:
                 p_vals = pd.to_numeric(data_frame[col_puls], errors='coerce').fillna(0).tolist()
                 story.append(Paragraph("Evolutie Puls", styles["Heading2"]))
-                img_buf = generate_pdf_chart(x_data, p_vals, "Puls (bpm)", "bpm", "#10b981")
+                img_buf = generate_pdf_chart_simple(x_data, p_vals, "Puls (bpm)", "bpm", "#10b981")
                 story.append(Image(img_buf, width=470, height=150))
                 story.append(Spacer(1, 15))
 

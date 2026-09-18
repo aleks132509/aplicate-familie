@@ -111,7 +111,6 @@ if "settings" not in st.session_state:
       "target_ta_dia": 80,
   }
 
-# Memorie temporară locală în sesiune
 if "local_df_override" not in st.session_state:
   st.session_state.local_df_override = None
 
@@ -253,7 +252,6 @@ if st.session_state.local_df_override is not None:
 else:
   df = base_df.copy()
 
-# Asigurare denumire standardizată a coloanelor principale dacă lipsesc
 if len(df.columns) >= 6:
   df.columns = [
       "Dată",
@@ -271,7 +269,6 @@ col_sis = "Sistolică" if "Sistolică" in df.columns else df.columns[3]
 col_dia = "Diastolică" if "Diastolică" in df.columns else df.columns[4]
 col_puls = "Puls" if "Puls" in df.columns else df.columns[5]
 
-# Conversie dată sigură
 if date_col in df.columns:
   df[date_col] = pd.to_datetime(
       df[date_col].astype(str).str.strip(), format="%d.%m.%Y", errors="coerce"
@@ -327,7 +324,6 @@ def save_to_google_sheet_or_local(
       st.error(f"Eroare Google Sheets: {e}")
       return False
   else:
-    # Salvare în sesiune locală
     mask = (df[date_col].dt.strftime("%d.%m.%Y") == date_str) & (
         df[moment_col].astype(str) == moment_str
     )
@@ -364,7 +360,7 @@ def format_table_column(series):
 
 
 # ==========================================
-# FUNCȚII EVALUARE MEDICALĂ
+# FUNCȚII EVALUARE MEDICALĂ & STYLING
 # ==========================================
 def evaluate_glic(val):
   try:
@@ -428,6 +424,16 @@ def color_status(val):
         " text-align: center;"
     )
   return ""
+
+
+def apply_color_styling(df_to_style, subset_cols):
+  try:
+    if hasattr(df_to_style.style, "map"):
+      return df_to_style.style.map(color_status, subset=subset_cols)
+    else:
+      return df_to_style.style.applymap(color_status, subset=subset_cols)
+  except Exception:
+    return df_to_style
 
 
 # ==========================================
@@ -599,7 +605,7 @@ with tab_dict["📊 Jurnal & Grafice"]:
         df_g_tab[col_glic] = format_table_column(df_g_tab[col_glic])
 
         st.dataframe(
-            df_g_tab.style.map(color_status, subset=["Status Glicemie"]),
+            apply_color_styling(df_g_tab, ["Status Glicemie"]),
             use_container_width=True,
             height=350,
         )
@@ -662,7 +668,7 @@ with tab_dict["📊 Jurnal & Grafice"]:
         df_t_tab[col_dia] = format_table_column(df_t_tab[col_dia])
 
         st.dataframe(
-            df_t_tab.style.map(color_status, subset=["Status Tensiune"]),
+            apply_color_styling(df_t_tab, ["Status Tensiune"]),
             use_container_width=True,
             height=350,
         )
@@ -708,7 +714,7 @@ with tab_dict["📊 Jurnal & Grafice"]:
         df_p_tab[col_puls] = format_table_column(df_p_tab[col_puls])
 
         st.dataframe(
-            df_p_tab.style.map(color_status, subset=["Status Puls"]),
+            apply_color_styling(df_p_tab, ["Status Puls"]),
             use_container_width=True,
             height=350,
         )
@@ -975,7 +981,9 @@ with tab_dict["📄 Raport PDF"]:
     story = []
     styles = getSampleStyleSheet()
 
-    title_text = remove_diacritics("RAPORT MEDICAL DE MONITORIZARE - HEALTHTRACK PRO")
+    title_text = remove_diacritics(
+        "RAPORT MEDICAL DE MONITORIZARE - HEALTHTRACK PRO"
+    )
     date_text = remove_diacritics(
         f"Generat la: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
     )
@@ -1102,7 +1110,9 @@ with tab_dict["📄 Raport PDF"]:
 
     if include_tables and not data_frame.empty:
       story.append(Spacer(1, 6))
-      story.append(Paragraph("<b>Tabel Centralizator Date</b>", styles["Heading2"]))
+      story.append(
+          Paragraph("<b>Tabel Centralizator Date</b>", styles["Heading2"])
+      )
       story.append(Spacer(1, 4))
 
       df_pdf = data_frame.copy()
@@ -1141,19 +1151,31 @@ with tab_dict["📄 Raport PDF"]:
         for c_idx, val in enumerate(row.values):
           val_str = str(val)
           if "🟢" in val_str:
-            t_style.append(
-                ("BACKGROUND", (c_idx, r_idx), (c_idx, r_idx), colors.HexColor("#d1fae5"))
-            )
-            t_style.append(
-                ("TEXTCOLOR", (c_idx, r_idx), (c_idx, r_idx), colors.HexColor("#065f46"))
-            )
+            t_style.append((
+                "BACKGROUND",
+                (c_idx, r_idx),
+                (c_idx, r_idx),
+                colors.HexColor("#d1fae5"),
+            ))
+            t_style.append((
+                "TEXTCOLOR",
+                (c_idx, r_idx),
+                (c_idx, r_idx),
+                colors.HexColor("#065f46"),
+            ))
           elif "🔴" in val_str:
-            t_style.append(
-                ("BACKGROUND", (c_idx, r_idx), (c_idx, r_idx), colors.HexColor("#fee2e2"))
-            )
-            t_style.append(
-                ("TEXTCOLOR", (c_idx, r_idx), (c_idx, r_idx), colors.HexColor("#991b1b"))
-            )
+            t_style.append((
+                "BACKGROUND",
+                (c_idx, r_idx),
+                (c_idx, r_idx),
+                colors.HexColor("#fee2e2"),
+            ))
+            t_style.append((
+                "TEXTCOLOR",
+                (c_idx, r_idx),
+                (c_idx, r_idx),
+                colors.HexColor("#991b1b"),
+            ))
 
       t = Table(table_data)
       t.setStyle(TableStyle(t_style))
@@ -1164,9 +1186,7 @@ with tab_dict["📄 Raport PDF"]:
     return buffer.getvalue()
 
   if st.button("🚀 Generează și Descarcă Raportul PDF", type="primary"):
-    pdf_bytes = make_pdf_report(
-        df, opt_glic, opt_ta, opt_puls, opt_tabele
-    )
+    pdf_bytes = make_pdf_report(df, opt_glic, opt_ta, opt_puls, opt_tabele)
     st.download_button(
         label="📥 Descarcă Fișierul PDF",
         data=pdf_bytes,

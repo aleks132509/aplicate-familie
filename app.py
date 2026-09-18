@@ -111,6 +111,10 @@ if "settings" not in st.session_state:
       "target_ta_dia": 80,
   }
 
+# Memorie temporară locală în sesiune dacă nu e conectat Google Sheets real
+if "local_df_override" not in st.session_state:
+  st.session_state.local_df_override = None
+
 GOOGLE_SHEET_URL = st.secrets.get("GOOGLE_SHEET_URL", "")
 
 # ==========================================
@@ -243,66 +247,102 @@ def load_and_clean_data(url):
     return get_mock_data()
 
 
-def save_to_google_sheet(
+# Încărcare inițială sau din suprascriere locală de sesiune
+base_df = load_and_clean_data(GOOGLE_SHEET_URL)
+if st.session_state.local_df_override is not None:
+  df = st.session_state.local_df_override
+else:
+  df = base_df.copy()
+
+
+def save_to_google_sheet_or_local(
     date_str, moment_str, glic_v, sis_v, dia_v, puls_v, obs_v
 ):
-  if not HAS_GSPREAD or "gcp_service_account" not in st.secrets:
-    st.info("ℹ️ Salvat în sesiunea curentă (Mod local / Fără Service Account).")
-    return True
+  global df
+  # Dacă avem configurat Google Sheets cu gspread real
+  if HAS_GSPREAD and "gcp_service_account" in st.secrets:
+    try:
+      scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+      creds = Credentials.from_service_account_info(
+          dict(st.secrets["gcp_service_account"]), scopes=scopes
+      )
+      client = gspread.authorize(creds)
+      sheet_url = st.secrets["GOOGLE_SHEET_URL"]
+      sh = client.open_by_url(sheet_url)
+      ws = sh.get_worksheet(0)
 
-  try:
-    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
-    creds = Credentials.from_service_account_info(
-        dict(st.secrets["gcp_service_account"]), scopes=scopes
+      records = ws.get_all_values()
+      row_to_update = None
+      if records:
+        for idx, row in enumerate(records[1:], start=2):
+          if (
+              len(row) >= 2
+              and row[0].strip() == date_str
+              and row[1].strip() == moment_str
+          ):
+            row_to_update = idx
+            break
+
+      new_row = [
+          date_str,
+          moment_str,
+          str(glic_v) if glic_v > 0 else "0",
+          str(sis_v) if sis_v > 0 else "0",
+          str(dia_v) if dia_v > 0 else "0",
+          str(puls_v) if puls_v > 0 else "0",
+          obs_v,
+      ]
+
+      if row_to_update:
+        ws.update(f"A{row_to_update}:G{row_to_update}", [new_row])
+      else:
+        ws.append_row(new_row)
+      return True
+    except Exception as e:
+      st.error(f"Eroare Google Sheets: {e}")
+      return False
+  else:
+    # Salvăm direct în DataFrame-ul curent din sesiune (pentru testare/mod local)
+    d_col = df.columns[0]
+    m_col = df.columns[1] if len(df.columns) > 1 else "Moment Zi"
+    g_col = col_glic if col_glic in df.columns else df.columns[2]
+    s_col = col_sis if col_sis in df.columns else df.columns[3]
+    d_col_ta = col_dia if col_dia in df.columns else df.columns[4]
+    p_col = col_puls if col_puls in df.columns else df.columns[5]
+    o_col = (
+        "Observații" if "Observații" in df.columns else df.columns[6]
+        if len(df.columns) > 6
+        else None
     )
-    client = gspread.authorize(creds)
 
-    sheet_url = st.secrets["GOOGLE_SHEET_URL"]
-    sh = client.open_by_url(sheet_url)
-    ws = sh.get_worksheet(0)
+    # Căutăm dacă există rândul
+    mask = (df[d_col].astype(str).str.contains(date_str)) & (
+        df[m_col].astype(str) == moment_str
+    )
 
-    records = ws.get_all_values()
-    row_to_update = None
-    if records:
-      for idx, row in enumerate(records[1:], start=2):
-        if (
-            len(row) >= 2
-            and row[0].strip() == date_str
-            and row[1].strip() == moment_str
-        ):
-          row_to_update = idx
-          break
-
-    new_row = [
-        date_str,
-        moment_str,
-        str(glic_v) if glic_v > 0 else "0",
-        str(sis_v) if sis_v > 0 else "0",
-        str(dia_v) if dia_v > 0 else "0",
-        str(puls_v) if puls_v > 0 else "0",
-        obs_v,
-    ]
-
-    if row_to_update:
-      ws.update(f"A{row_to_update}:G{row_to_update}", [new_row])
-      st.success(
-          f"✅ Înregistrarea pentru {date_str} ({moment_str}) a fost SUPRASCRISĂ"
-          " în Google Sheet!"
-      )
+    if mask.any():
+      df.loc[mask, g_col] = glic_v
+      df.loc[mask, s_col] = sis_v
+      df.loc[mask, d_col_ta] = dia_v
+      df.loc[mask, p_col] = puls_v
+      if o_col and o_col in df.columns:
+        df.loc[mask, o_col] = obs_v
     else:
-      ws.append_row(new_row)
-      st.success(
-          f"✅ Înregistrare nouă adăugată pentru {date_str} ({moment_str}) în"
-          " Google Sheet!"
-      )
+      new_record = {
+          d_col: date_str,
+          m_col: moment_str,
+          g_col: glic_v,
+          s_col: sis_v,
+          d_col_ta: dia_v,
+          p_col: puls_v,
+      }
+      if o_col:
+        new_record[o_col] = obs_v
+      df = pd.concat([df, pd.DataFrame([new_record])], ignore_index=True)
 
+    st.session_state.local_df_override = df
     return True
-  except Exception as e:
-    st.error(f"Eroare la scriere în Google Sheet: {e}")
-    return False
 
-
-df = load_and_clean_data(GOOGLE_SHEET_URL)
 
 date_col = None
 moment_col = None
@@ -555,7 +595,7 @@ with tab_dict["📊 Jurnal & Grafice"]:
 
     x_data_strict = df[date_col].dt.strftime("%d.%m.%Y")
 
-    # 1. TAB GLICEMIE (Cu fundal semitransparent pentru text clar)
+    # 1. TAB GLICEMIE
     with sub_tab_glic:
       st.markdown("#### 🩸 Evoluție și Tabel Dedicat - Glicemie")
       if col_glic and col_glic in df.columns:
@@ -574,16 +614,12 @@ with tab_dict["📊 Jurnal & Grafice"]:
                 marker=dict(size=10, color="#38bdf8"),
                 text=glic_vals,
                 textposition="top center",
-                textfont=dict(size=12, color="#ffffff", family="sans-serif"),
+                textfont=dict(size=12, color="#ffffff"),
                 texttemplate="<b>%{text}</b>",
                 connectgaps=True,
             )
         )
-        # Adăugare etichetă vizuală pe fundal pentru text
-        fig_g.update_traces(
-            textfont=dict(color="#ffffff"),
-            cliponaxis=False,
-        )
+        fig_g.update_traces(cliponaxis=False)
         fig_g.add_hline(
             y=120,
             line_dash="dash",
@@ -842,13 +878,15 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
 
         obs_input = st.text_area("✍️ Notițe / Observații")
 
-        if st.form_submit_button(
+        submitted = st.form_submit_button(
             "💾 Salvează / Suprascrie Înregistrarea",
             type="primary",
             use_container_width=True,
-        ):
+        )
+
+        if submitted:
           d_str = selected_date.strftime("%d.%m.%Y")
-          saved = save_to_google_sheet(
+          saved = save_to_google_sheet_or_local(
               d_str,
               selected_moment,
               glic_input,
@@ -858,6 +896,10 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
               obs_input,
           )
           if saved:
+            st.success(
+                f"✅ Înregistrarea pentru {d_str} ({selected_moment}) a fost"
+                " salvată cu succes!"
+            )
             st.cache_data.clear()
             st.rerun()
 

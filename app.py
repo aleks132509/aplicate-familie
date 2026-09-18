@@ -113,6 +113,40 @@ if "settings" not in st.session_state:
       "target_ta_dia": 80,
   }
 
+if "meds_df" not in st.session_state:
+  st.session_state.meds_df = pd.DataFrame([
+      {
+          "Medicament": "Glucophage",
+          "Doză": "1000 mg",
+          "Orar": "Dimineața / Seara",
+          "Administrare": "După masă",
+      },
+      {
+          "Medicament": "Lagosa",
+          "Doză": "150 mg",
+          "Orar": "Dimineața / Seara",
+          "Administrare": "După masă",
+      },
+      {
+          "Medicament": "Diaprel MR",
+          "Doză": "60 mg (1/2)",
+          "Orar": "Dimineața",
+          "Administrare": "Înainte de masă",
+      },
+      {
+          "Medicament": "Atacand",
+          "Doză": "8 mg",
+          "Orar": "Seara",
+          "Administrare": "După masă",
+      },
+      {
+          "Medicament": "Nebilet",
+          "Doză": "5 mg",
+          "Orar": "Dimineața",
+          "Administrare": "După masă",
+      },
+  ])
+
 # ==========================================
 # AUTENTIFICARE
 # ==========================================
@@ -260,7 +294,6 @@ def evaluate_glic(val, moment_zi=""):
     if v == 0 or pd.isna(v):
       return "Nemăsurat"
 
-    # Verificăm dacă este după masă sau înainte de masă
     if "După masă" in str(moment_zi):
       t_min = st.session_state.settings.get("target_glic_post_min", 70)
       t_max = st.session_state.settings.get("target_glic_post_max", 160)
@@ -751,39 +784,64 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
 # ----------------- TAB: TRATAMENT -----------------
 with tab_dict["💊 Tratament"]:
   st.markdown("### 💊 Schemă Tratament Medical")
-  meds_df = pd.DataFrame([
-      {
-          "Medicament": "Glucophage",
-          "Doză": "1000 mg",
-          "Orar": "Dimineața / Seara",
-          "Administrare": "După masă",
-      },
-      {
-          "Medicament": "Lagosa",
-          "Doză": "150 mg",
-          "Orar": "Dimineața / Seara",
-          "Administrare": "După masă",
-      },
-      {
-          "Medicament": "Diaprel MR",
-          "Doză": "60 mg (1/2)",
-          "Orar": "Dimineața",
-          "Administrare": "Înainte de masă",
-      },
-      {
-          "Medicament": "Atacand",
-          "Doză": "8 mg",
-          "Orar": "Seara",
-          "Administrare": "După masă",
-      },
-      {
-          "Medicament": "Nebilet",
-          "Doză": "5 mg",
-          "Orar": "Dimineața",
-          "Administrare": "După masă",
-      },
-  ])
-  st.dataframe(meds_df, use_container_width=True)
+  st.dataframe(st.session_state.meds_df, use_container_width=True)
+
+  if is_admin:
+    st.markdown("---")
+    st.markdown("#### ⚙️ Gestiune Listă Tratament (Administrator)")
+
+    col_m1, col_m2 = st.columns(2)
+    with col_m1:
+      with st.container(border=True):
+        st.markdown("##### ➕ Adaugă Medicament Nou")
+        with st.form("add_med_form"):
+          m_nume = st.text_input("Nume Medicament")
+          m_doza = st.text_input("Doză (ex: 500 mg, 1 tabletă)")
+          m_orar = st.text_input("Orar (ex: Dimineața / Seara)")
+          m_admin = st.selectbox(
+              "Moment Administrare", ["Înainte de masă", "După masă", "Oriunde"]
+          )
+          submitted_med = st.form_submit_button(
+              "Adaugă în Schemă", type="primary"
+          )
+
+          if submitted_med:
+            if m_nume:
+              new_row = pd.DataFrame(
+                  [{
+                      "Medicament": m_nume,
+                      "Doză": m_doza,
+                      "Orar": m_orar,
+                      "Administrare": m_admin,
+                  }]
+              )
+              st.session_state.meds_df = pd.concat(
+                  [st.session_state.meds_df, new_row], ignore_index=True
+              )
+              st.success(f"Medicamentul {m_nume} a fost adăugat!")
+              trigger_rerun()
+            else:
+              st.warning("Introdu numele medicamentului.")
+
+    with col_m2:
+      with st.container(border=True):
+        st.markdown("##### 🗑️ Șterge Medicament")
+        if not st.session_state.meds_df.empty:
+          med_list_opts = st.session_state.meds_df["Medicament"].tolist()
+          to_delete = st.selectbox(
+              "Selectează medicamentul de eliminat", med_list_opts
+          )
+          if st.button("Șterge Medicamentul", type="secondary"):
+            st.session_state.meds_df = (
+                st.session_state.meds_df[
+                    st.session_state.meds_df["Medicament"] != to_delete
+                ]
+                .reset_index(drop=True)
+            )
+            st.success(f"Medicamentul {to_delete} a fost șters din schemă!")
+            trigger_rerun()
+        else:
+          st.info("Nu există medicamente în listă.")
 
 # ----------------- TAB: PROGRAMĂRI -----------------
 if is_admin and "📅 Programări" in tab_dict:
@@ -1109,7 +1167,7 @@ with tab_dict["⚙️ Setări"]:
         new_username = st.text_input("Nume Utilizator Nou")
         new_password = st.text_input("Parolă Utilizator", type="password")
         new_role = st.selectbox(
-            "Assignare Rol", ["Membru", "Doctor", "Administrator"]
+            "Asignare Rol", ["Membru", "Doctor", "Administrator"]
         )
 
         if st.button("➕ Creează Cont", type="primary"):

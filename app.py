@@ -213,6 +213,19 @@ DATA_FILE = "date_medicale_utilizator.csv"
 
 
 def get_initial_data():
+  # Ștergem fișierul corupt anterior o singură dată pentru a curăța datele de tip None
+  if os.path.exists(DATA_FILE):
+    try:
+      df_check = pd.read_csv(DATA_FILE)
+      # Dacă găsim date de tip None sau NaN la coloana Dată, resetăm fișierul
+      if (
+          "Dată" in df_check.columns
+          and df_check["Dată"].astype(str).str.contains("None|NaT").any()
+      ):
+        os.remove(DATA_FILE)
+    except:
+      pass
+
   if os.path.exists(DATA_FILE):
     try:
       df_saved = pd.read_csv(DATA_FILE)

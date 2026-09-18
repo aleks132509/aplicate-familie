@@ -92,12 +92,13 @@ def trigger_rerun():
         st.experimental_rerun()
 
 # ==========================================
-# GESTIONARE FIȘIERE PERSISTENTE & PROGRAMĂRI
+# GESTIONARE FIȘIERE PERSISTENTE
 # ==========================================
 DATA_FILE = "date_medicale_utilizator.csv"
 MEDS_FILE = "medicamente.csv"
 MEDS_HIST_FILE = "istoric_medicamente.csv"
 PROG_FILE = "programari_medicale.csv"
+FOODS_FILE = "alimente_custom.csv"
 
 def get_initial_meds():
     if os.path.exists(MEDS_FILE):
@@ -133,10 +134,47 @@ def get_initial_prog():
         {"Dată": "2026-10-05", "Ora": "14:30", "Tip": "Consult Diabet", "Clinică": "Dr. Clenciu Craiova", "Zile_Alerta": "2, 5", "Efectuat": "Nu", "Observații": "Rețetă 3 luni"},
     ])
 
+def get_initial_foods():
+    default_foods = {
+        "🔴 Indice Glicemic Ridicat (Dulciuri / Făinoase / Băuturi cu zahăr)": [
+            "ciocolată", "prăjitură", "tort", "înghețată", "zahăr", "miere", 
+            "pâine albă", "pizza", "paste albe", "cartofi prăjiți", "covrigi", 
+            "croissant", "gogoși", "patiserie", "suc", "cola", "fanta", "pepsi", "bere"
+        ],
+        "🟡 Indice Glicemic Mediu (Cereale / Paste integrale / Legume amidonoase)": [
+            "pâine integrală", "paste integrale", "orez integral", "orez basmati", 
+            "fulgi de ovăz", "fulgi de mei", "fulgi de secară", "cartofi fierți", "porumb", "mălai (mămăligă)"
+        ],
+        "🟢 Indice Glicemic Scăzut / Altele (Fără impact major sau Cola Zero)": [
+            "cola 0", "pepsi zero", "apă minerală", "cafea fără zahăr", "ceai neîndulcit", 
+            "stres", "oboseală", "după efort fizic", "masă copioasă"
+        ]
+    }
+    if os.path.exists(FOODS_FILE):
+        try:
+            df_f = pd.read_csv(FOODS_FILE)
+            categories = {}
+            for _, row in df_f.iterrows():
+                cat = row["Categorie"]
+                item = row["Element"]
+                if cat not in categories: categories[cat] = []
+                categories[cat].append(item)
+            return categories
+        except:
+            pass
+    return default_foods
+
 def save_all_files():
     st.session_state.meds_df.to_csv(MEDS_FILE, index=False)
     st.session_state.meds_hist_df.to_csv(MEDS_HIST_FILE, index=False)
     st.session_state.prog_df.to_csv(PROG_FILE, index=False)
+
+def save_custom_foods():
+    rows = []
+    for cat, items in st.session_state.food_categories.items():
+        for item in items:
+            rows.append({"Categorie": cat, "Element": item})
+    pd.DataFrame(rows).to_csv(FOODS_FILE, index=False)
 
 def add_history_entry(actiune, medicament, detalii):
     new_entry = {
@@ -162,12 +200,13 @@ def trimite_email_alerta(destinatar, subiect, mesaj):
         msg['From'] = email_sender
         msg['To'] = destinatar
 
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
+        # Setări dedicate pentru serverul iCloud (smtp.mail.me.com pe portul 465 SSL)
+        with smtplib.SMTP_SSL('smtp.mail.me.com', 465) as smtp:
             smtp.login(email_sender, email_password)
             smtp.send_message(msg)
-        return True, "Email trimis cu succes!"
+        return True, "Email trimis cu succes prin iCloud!"
     except Exception as e:
-        return False, f"Erore trimitere: {str(e)}"
+        return False, f"Erore trimitere iCloud: {str(e)}"
 
 # ==========================================
 # SESSION STATE INITIALIZATION
@@ -200,6 +239,8 @@ if "meds_hist_df" not in st.session_state:
     st.session_state.meds_hist_df = get_initial_history()
 if "prog_df" not in st.session_state:
     st.session_state.prog_df = get_initial_prog()
+if "food_categories" not in st.session_state:
+    st.session_state.food_categories = get_initial_foods()
 
 # ==========================================
 # AUTENTIFICARE
@@ -320,31 +361,22 @@ def format_table_column(series):
 # ==========================================
 # EVALUARE SPIKE & CAUZĂ ALIMENTARĂ
 # ==========================================
-HIGH_GI_FOODS_MAPPING = {
-    "ciocolata": "ciocolata", "ciocolată": "ciocolata",
-    "prajitura": "prajitura", "prăjitură": "prajitura",
-    "prajituri": "prajituri", "prăjituri": "prajituri",
-    "tort": "tort", "suc": "suc", "fanta": "fanta", "cola": "cola", "pepsi": "pepsi",
-    "dulciuri": "dulciuri", "inghetata": "inghetata", "înghețată": "inghetata",
-    "paine alba": "paine alba", "pâine albă": "paine alba", "pizza": "pizza",
-    "paste": "paste", "orez": "orez", "cartofi": "cartofi", "cartofi prajiti": "cartofi prajiti",
-    "zahar": "zahar", "zahăr": "zahar", "miere": "miere", "bere": "bere",
-    "patiserie": "patiserie", "gogosi": "gogosi", "gogoși": "gogosi", "covrigi": "covrigi", "croissant": "croissant"
-}
-
 def check_food_cause(obs_text):
     obs_clean_text = clean_obs(obs_text)
     if not obs_clean_text:
         return ""
     obs_clean = remove_diacritics(obs_clean_text.lower())
     found_foods = set()
-    for keyword, standard_name in HIGH_GI_FOODS_MAPPING.items():
-        kw_clean = remove_diacritics(keyword)
-        if re.search(r'\b' + re.escape(kw_clean) + r'\b', obs_clean):
-            found_foods.add(standard_name)
+    
+    # Verificăm în categoriile dinamice
+    for cat, items in st.session_state.food_categories.items():
+        for item in items:
+            kw_clean = remove_diacritics(item.lower())
+            if re.search(r'\b' + re.escape(kw_clean) + r'\b', obs_clean):
+                found_foods.add(item)
     
     if found_foods:
-        return f" (Cauză probabilă: {', '.join(sorted(found_foods))})"
+        return f" (Cauză: {', '.join(sorted(found_foods))})"
     elif len(obs_clean_text) > 0:
         return f" ({obs_clean_text[:20]})"
     return ""
@@ -500,7 +532,9 @@ with tab_dict["📊 Jurnal & Grafice"]:
 
         st.markdown("<br>", unsafe_allow_html=True)
         sub_tab_glic, sub_tab_ta, sub_tab_puls, sub_tab_all = st.tabs(["🩸 Glicemie & Analiză Spike", "🫀 Tensiune Arterială", "💓 Puls", "📋 Toate Datele"])
-        x_data_strict = view_df[date_col].dt.strftime("%d.%m.%Y")
+        
+        # Construim etichete personalizate pe axa X pentru a vizualiza clar și prânzul
+        x_labels_composed = [f"{d.strftime('%d.%m')} ({m})" for d, m in zip(view_df[date_col], view_df[moment_col])]
 
         with sub_tab_glic:
             if col_glic in view_df.columns:
@@ -515,18 +549,18 @@ with tab_dict["📊 Jurnal & Grafice"]:
                     if is_glic_spike(v, m):
                         cause = check_food_cause(obs)
                         spike_colors.append("#ef4444")
-                        spike_texts.append(f"⚠️ SPIKE: {int(v)}{cause}")
+                        spike_texts.append(f"⚠️ {int(v)}{cause}")
                     else:
                         spike_colors.append("#38bdf8")
                         spike_texts.append(str(int(v)) if pd.notna(v) else "")
 
                 fig_g = go.Figure()
                 fig_g.add_trace(go.Scatter(
-                    x=x_data_strict, y=glic_vals, mode="lines+markers+text", name="Glicemie",
+                    x=x_labels_composed, y=glic_vals, mode="lines+markers+text", name="Glicemie",
                     line=dict(color="#38bdf8", width=3),
                     marker=dict(size=12, color=spike_colors),
                     text=spike_texts, textposition="top center",
-                    textfont=dict(size=11, color="#ffffff"),
+                    textfont=dict(size=10, color="#ffffff"),
                     connectgaps=True
                 ))
                 
@@ -535,7 +569,7 @@ with tab_dict["📊 Jurnal & Grafice"]:
                 fig_g.add_hline(y=max_post, line_dash="dash", line_color="#ef4444", annotation_text=f"Prag Maxim După Masă ({max_post})")
                 fig_g.add_hline(y=max_pre, line_dash="dot", line_color="#f59e0b", annotation_text=f"Prag Maxim Înainte Masă ({max_pre})")
                 
-                fig_g.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=40, r=40, t=40, b=30))
+                fig_g.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=40, r=40, t=50, b=80), xaxis=dict(tickangle=-35))
                 st.plotly_chart(fig_g, use_container_width=True)
 
                 cols_g = [date_col, moment_col, col_glic, col_obs]
@@ -552,9 +586,9 @@ with tab_dict["📊 Jurnal & Grafice"]:
                 sis_vals = pd.to_numeric(view_df[col_sis], errors="coerce").replace(0, None)
                 dia_vals = pd.to_numeric(view_df[col_dia], errors="coerce").replace(0, None)
                 fig_ta = go.Figure()
-                fig_ta.add_trace(go.Scatter(x=x_data_strict, y=sis_vals, mode="lines+markers+text", name="Sistolică", line=dict(color="#ef4444", width=3), marker=dict(size=10), text=sis_vals, textposition="top center", textfont=dict(size=12, color="#ffffff"), texttemplate="<b>%{text}</b>", connectgaps=True))
-                fig_ta.add_trace(go.Scatter(x=x_data_strict, y=dia_vals, mode="lines+markers+text", name="Diastolică", line=dict(color="#f59e0b", width=3), marker=dict(size=10), text=dia_vals, textposition="bottom center", textfont=dict(size=12, color="#ffffff"), texttemplate="<b>%{text}</b>", connectgaps=True))
-                fig_ta.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=40, r=40, t=40, b=30))
+                fig_ta.add_trace(go.Scatter(x=x_labels_composed, y=sis_vals, mode="lines+markers+text", name="Sistolică", line=dict(color="#ef4444", width=3), marker=dict(size=10), text=sis_vals, textposition="top center", textfont=dict(size=11, color="#ffffff"), texttemplate="<b>%{text}</b>", connectgaps=True))
+                fig_ta.add_trace(go.Scatter(x=x_labels_composed, y=dia_vals, mode="lines+markers+text", name="Diastolică", line=dict(color="#f59e0b", width=3), marker=dict(size=10), text=dia_vals, textposition="bottom center", textfont=dict(size=11, color="#ffffff"), texttemplate="<b>%{text}</b>", connectgaps=True))
+                fig_ta.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=40, r=40, t=50, b=80), xaxis=dict(tickangle=-35))
                 st.plotly_chart(fig_ta, use_container_width=True)
                 cols_t = [date_col, moment_col, col_sis, col_dia, col_obs]
                 df_t_tab = view_df[cols_t].copy()
@@ -570,8 +604,8 @@ with tab_dict["📊 Jurnal & Grafice"]:
             if col_puls in view_df.columns:
                 puls_vals = pd.to_numeric(view_df[col_puls], errors="coerce").replace(0, None)
                 fig_p = go.Figure()
-                fig_p.add_trace(go.Scatter(x=x_data_strict, y=puls_vals, mode="lines+markers+text", name="Puls (bpm)", line=dict(color="#10b981", width=3), marker=dict(size=10), text=puls_vals, textposition="top center", textfont=dict(size=12, color="#ffffff"), texttemplate="<b>%{text}</b>", connectgaps=True))
-                fig_p.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=40, r=40, t=40, b=30))
+                fig_p.add_trace(go.Scatter(x=x_labels_composed, y=puls_vals, mode="lines+markers+text", name="Puls (bpm)", line=dict(color="#10b981", width=3), marker=dict(size=10), text=puls_vals, textposition="top center", textfont=dict(size=11, color="#ffffff"), texttemplate="<b>%{text}</b>", connectgaps=True))
+                fig_p.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=40, r=40, t=50, b=80), xaxis=dict(tickangle=-35))
                 st.plotly_chart(fig_p, use_container_width=True)
                 cols_p = [date_col, moment_col, col_puls, col_obs]
                 df_p_tab = view_df[cols_p].copy()
@@ -609,8 +643,16 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
 
         with st.container(border=True):
             selected_date = st.date_input("📅 Selectează Data", value=date.today(), key="input_date_picker")
-            is_weekend = selected_date.weekday() in [5, 6]
-            momente_opțiuni = ["Dimineața - Înainte de masă", "Dimineața - După masă", "Prânz - Înainte de masă", "Prânz - După masă", "Seara - Înainte de masă", "Seara - După masă"] if is_weekend else ["Dimineața - Înainte de masă", "Dimineața - După masă", "Seara - Înainte de masă", "Seara - După masă"]
+            
+            # Opțiunea cu prânzul inclus pentru TOATE zilele săptămânii
+            momente_opțiuni = [
+                "Dimineața - Înainte de masă", 
+                "Dimineața - După masă", 
+                "Prânz - Înainte de masă", 
+                "Prânz - După masă", 
+                "Seara - Înainte de masă", 
+                "Seara - După masă"
+            ]
             selected_moment = st.selectbox("🍽️ Momentul Măsurătorii", momente_opțiuni, key="input_moment_select")
 
             existing_row = pd.DataFrame()
@@ -632,19 +674,15 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
                     return clean_obs(existing_row[col_obs])
                 return ""
 
-            st.markdown("##### ⚡ Asistent Rapid Observații (Click pentru adăugare)")
-            categorii_alimente = {
-                "🍫 Dulciuri / Deserturi": ["ciocolată", "prăjitură", "tort", "înghețată", "zahăr", "miere"],
-                "🍞 Carbohidrați Rapizi / Făinoase": ["pâine albă", "pizza", "paste", "orez", "cartofi prăjiți", "covrigi", "croissant", "gogoși", "patiserie"],
-                "🥤 Băuturi": ["suc", "cola", "fanta", "pepsi", "bere"],
-                "🏃 Stare / Altele": ["stres", "oboseală", "după efort fizic", "masă copioasă"]
-            }
+            st.markdown("##### ⚡ Asistent Inteligent Mese & Indice Glicemic (Click pentru adăugare)")
             
             key_suffix = f"_{selected_date.strftime('%Y%m%d')}_{selected_moment}"
             selected_quick_items = []
-            cols_chips = st.columns(len(categorii_alimente))
-            for idx, (cat_name, items) in enumerate(categorii_alimente.items()):
-                with cols_chips[idx]:
+            
+            # Afișăm pe categorii în funcție de Indexul Glicemic
+            cat_cols = st.columns(len(st.session_state.food_categories))
+            for idx, (cat_name, items) in enumerate(st.session_state.food_categories.items()):
+                with cat_cols[idx]:
                     st.caption(cat_name)
                     for item in items:
                         if st.checkbox(item, key=f"quick_{cat_name}_{item}{key_suffix}"):
@@ -667,7 +705,7 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
                     dia_input = st.number_input("🫀 Tensiune Diastolică [0 = nemăsurat]", min_value=0, value=get_val(col_dia))
                     puls_input = st.number_input("💓 Puls [0 = nemăsurat]", min_value=0, value=get_val(col_puls))
 
-                obs_input = st.text_area("✍️ Notițe / Observații", value=base_obs_initial)
+                obs_input = st.text_area("✍️ Notițe / Observații (poți edita/adăuga liber)", value=base_obs_initial)
                 submitted = st.form_submit_button("💾 Salvează / Suprascrie", type="primary", use_container_width=True)
 
                 if submitted:
@@ -788,7 +826,7 @@ if is_admin and "📅 Programări" in tab_dict:
 
         with col_p3:
             with st.container(border=True):
-                st.markdown("#### 📨 Trimitere Automată Email")
+                st.markdown("#### 📨 Trimitere Automată Email (iCloud)")
                 destinatar_auto = st.text_input("Email Destinatar", value=st.session_state.settings.get("email_sender", ""))
                 
                 if st.button("🚀 Trimite Alerte Automat Acum", type="primary"):
@@ -816,7 +854,7 @@ if is_admin and "📅 Programări" in tab_dict:
                         if trimis_ok > 0:
                             succes, rez = trimite_email_alerta(destinatar_auto, "🔔 Notificare Programare Medicală", mesaj_final)
                             if succes:
-                                st.success("Notificările automate au fost trimise!")
+                                st.success("Notificările automate au fost trimise prin iCloud!")
                             else:
                                 st.error(rez)
                         else:
@@ -824,7 +862,7 @@ if is_admin and "📅 Programări" in tab_dict:
 
 # ----------------- TAB: SETĂRI & ADMIN -----------------
 with tab_dict["⚙️ Setări"]:
-    st.markdown("### ⚙️ Setări Generale, Credențiale Email & Utilizatori")
+    st.markdown("### ⚙️ Setări Generale, Configurare iCloud & Elemente Mese")
     
     if is_admin:
         col_u1, col_u2 = st.columns(2)
@@ -864,16 +902,39 @@ with tab_dict["⚙️ Setări"]:
                     trigger_rerun()
         st.markdown("<br>", unsafe_allow_html=True)
 
-    st.markdown("#### 📜 Istoric Modificări Medicamente")
-    st.dataframe(st.session_state.meds_hist_df.sort_values(by="Data_Ora", ascending=False), use_container_width=True)
+        # Gestiune elemente meniu masă (adaugă/șterge cola 0, cereale, paste etc.)
+        with st.container(border=True):
+            st.markdown("#### 🍎 Gestiune Elemente Mese & Indice Glicemic (Adăugare / Ștergere)")
+            fc_cat = st.selectbox("Selectează Categoria", list(st.session_state.food_categories.keys()))
+            st.markdown(f"Elemente actuale în **{fc_cat}**: {', '.join(st.session_state.food_categories[fc_cat])}")
+            
+            c_f1, c_f2 = st.columns(2)
+            with c_f1:
+                new_food_item = st.text_input("Adaugă element nou (ex: cola 0, paste integrale etc.)")
+                if st.button("➕ Adaugă în Categorie"):
+                    if new_food_item and new_food_item.strip():
+                        item_clean = new_food_item.strip().lower()
+                        if item_clean not in st.session_state.food_categories[fc_cat]:
+                            st.session_state.food_categories[fc_cat].append(item_clean)
+                            save_custom_foods()
+                            st.success(f"Elementul '{item_clean}' a fost adăugat!")
+                            trigger_rerun()
+            with c_f2:
+                if st.session_state.food_categories[fc_cat]:
+                    del_food_item = st.selectbox("Șterge element existent", st.session_state.food_categories[fc_cat], key="del_food_select")
+                    if st.button("🗑️ Șterge Elementul Selectat"):
+                        st.session_state.food_categories[fc_cat].remove(del_food_item)
+                        save_custom_foods()
+                        st.success(f"Elementul '{del_food_item}' a fost șters!")
+                        trigger_rerun()
+
     st.markdown("---")
-    
     col_set1, col_set2 = st.columns(2)
     with col_set1:
-        st.markdown("#### ✉️ Configurare Server Trimis Email")
-        st.session_state.settings["email_sender"] = st.text_input("Adresa ta de Gmail (expeditor)", value=st.session_state.settings.get("email_sender", ""))
-        st.session_state.settings["email_password"] = st.text_input("Parolă aplicație Google (App Password)", type="password", value=st.session_state.settings.get("email_password", ""))
-        st.markdown("<small>💡 *Notă: Pentru Gmail, generează o **App Password** din setările contului tău Google.*</small>", unsafe_allow_html=True)
+        st.markdown("#### ✉️ Configurare Server iCloud Mail")
+        st.session_state.settings["email_sender"] = st.text_input("Adresa ta de iCloud (expeditor, ex: nume@icloud.com)", value=st.session_state.settings.get("email_sender", ""))
+        st.session_state.settings["email_password"] = st.text_input("Parolă specifică de aplicație iCloud (App-Specific Password)", type="password", value=st.session_state.settings.get("email_password", ""))
+        st.markdown("<small>💡 *Notă: Pentru iCloud, este necesar să generezi o **App-Specific Password** din portalul tău Apple ID (appleid.apple.com).*</small>", unsafe_allow_html=True)
         
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("#### 💾 Backup Manual (CSV)")
@@ -917,20 +978,21 @@ with tab_dict["📄 Raport PDF"]:
         opt_tabele = st.checkbox("Include Tabelul Centralizator (Curat, Fără Diacritice/Nan) 📋", value=True)
 
     def generate_pdf_chart(x_vals, y_vals, title, ylabel, color_hex):
-        plt.figure(figsize=(7.5, 2.2))
-        plt.plot(x_vals, y_vals, marker="o", linestyle="-", color=color_hex, linewidth=2.2, markersize=6)
+        # Mărim lățimea și spațierea pentru a evita orice suprapunere de text pe grafic
+        plt.figure(figsize=(8.0, 2.6))
+        plt.plot(x_vals, y_vals, marker="o", linestyle="-", color=color_hex, linewidth=2.2, markersize=5)
         for xi, yi in zip(x_vals, y_vals):
             if yi > 0:
-                plt.annotate(str(int(yi)), (xi, yi), textcoords="offset points", xytext=(0, 7), ha="center", fontsize=8, fontweight="bold", bbox=dict(boxstyle="round,pad=0.2", fc="white", ec=color_hex, alpha=0.85))
-        plt.title(title, fontsize=10, fontweight="bold", color="#1e3a8a", pad=12)
+                plt.annotate(str(int(yi)), (xi, yi), textcoords="offset points", xytext=(0, 6), ha="center", fontsize=7.5, fontweight="bold", bbox=dict(boxstyle="round,pad=0.15", fc="white", ec=color_hex, alpha=0.9))
+        plt.title(title, fontsize=10, fontweight="bold", color="#1e3a8a", pad=14)
         plt.ylabel(ylabel, fontsize=9, fontweight="bold")
-        plt.xticks(rotation=20, fontsize=8)
+        plt.xticks(rotation=35, fontsize=7.5, ha="right")
         plt.yticks(fontsize=8)
         plt.grid(True, linestyle=":", alpha=0.6)
         plt.tight_layout()
 
         img_buffer = io.BytesIO()
-        plt.savefig(img_buffer, format="png", dpi=200)
+        plt.savefig(img_buffer, format="png", dpi=220)
         plt.close()
         img_buffer.seek(0)
         return img_buffer
@@ -948,27 +1010,28 @@ with tab_dict["📄 Raport PDF"]:
         story.append(Paragraph(date_text, ParagraphStyle("DateStyle", parent=styles["Normal"], alignment=1, spaceAfter=20)))
 
         if not data_frame.empty:
-            x_data = data_frame[date_col].dt.strftime("%d.%m").tolist()
+            # Etichete compuse clare și în PDF pentru a distinge dimineața, prânzul și seara
+            x_data = [f"{d.strftime('%d.%m')} ({m[:3]})" for d, m in zip(data_frame[date_col], data_frame[moment_col])]
             
             if include_glic and col_glic in data_frame.columns:
                 g_vals = pd.to_numeric(data_frame[col_glic], errors='coerce').fillna(0).tolist()
                 story.append(Paragraph("Evolutie Glicemie", styles["Heading2"]))
                 img_buf = generate_pdf_chart(x_data, g_vals, "Glicemie (mg/dL)", "mg/dL", "#38bdf8")
-                story.append(Image(img_buf, width=450, height=132))
+                story.append(Image(img_buf, width=470, height=150))
                 story.append(Spacer(1, 15))
                 
             if include_ta and col_sis in data_frame.columns:
                 s_vals = pd.to_numeric(data_frame[col_sis], errors='coerce').fillna(0).tolist()
                 story.append(Paragraph("Evolutie Tensiune Sistolica", styles["Heading2"]))
                 img_buf = generate_pdf_chart(x_data, s_vals, "Tensiune Sistolica (mmHg)", "mmHg", "#ef4444")
-                story.append(Image(img_buf, width=450, height=132))
+                story.append(Image(img_buf, width=470, height=150))
                 story.append(Spacer(1, 15))
                 
             if include_puls and col_puls in data_frame.columns:
                 p_vals = pd.to_numeric(data_frame[col_puls], errors='coerce').fillna(0).tolist()
                 story.append(Paragraph("Evolutie Puls", styles["Heading2"]))
                 img_buf = generate_pdf_chart(x_data, p_vals, "Puls (bpm)", "bpm", "#10b981")
-                story.append(Image(img_buf, width=450, height=132))
+                story.append(Image(img_buf, width=470, height=150))
                 story.append(Spacer(1, 15))
 
             if include_tables:

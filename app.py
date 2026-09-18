@@ -200,7 +200,6 @@ def trimite_email_alerta(destinatar, subiect, mesaj):
         msg['From'] = email_sender
         msg['To'] = destinatar
 
-        # Timeout mărit la 15 secunde pentru a preveni erorile de conexiune/rețea (Connection timed out)
         with smtplib.SMTP_SSL('smtp.mail.me.com', 465, timeout=15) as smtp:
             smtp.login(email_sender, email_password)
             smtp.send_message(msg)
@@ -550,7 +549,8 @@ with tab_dict["📊 Jurnal & Grafice"]:
         st.markdown("<br>", unsafe_allow_html=True)
         sub_tab_glic, sub_tab_ta, sub_tab_puls, sub_tab_all = st.tabs(["🩸 Glicemie & Analiză Spike", "🫀 Tensiune Arterială", "💓 Puls", "📋 Toate Datele"])
         
-        x_labels_composed = [f"{d.strftime('%d.%m')} ({m})" for d, m in zip(view_df[date_col], view_df[moment_col])]
+        # Etichete pe axa X: doar data, fără înainte/după masă
+        x_labels_composed = [d.strftime('%d.%m') for d in view_df[date_col]]
 
         with sub_tab_glic:
             if col_glic in view_df.columns:
@@ -1078,13 +1078,23 @@ with tab_dict["📄 Raport PDF"]:
 
     def generate_pdf_chart_glic(x_vals, y_vals, moments_list, title, ylabel, color_hex):
         plt.figure(figsize=(8.0, 2.6))
-        plt.plot(x_vals, y_vals, marker="o", linestyle="-", color=color_hex, linewidth=2.2, markersize=5)
+        
+        # Desenăm segmentele liniei: dacă valoarea depășește pragul, linia devine roșie
+        for i in range(len(y_vals) - 1):
+            x_seg = [x_vals[i], x_vals[i+1]]
+            y_seg = [y_vals[i], y_vals[i+1]]
+            is_spike1 = is_glic_spike(y_vals[i], moments_list[i])
+            is_spike2 = is_glic_spike(y_vals[i+1], moments_list[i+1])
+            seg_color = "#ef4444" if (is_spike1 or is_spike2) else color_hex
+            plt.plot(x_seg, y_seg, linestyle="-", color=seg_color, linewidth=2.2)
+
         for xi, yi, m in zip(x_vals, y_vals, moments_list):
             if yi > 0:
                 is_spike = is_glic_spike(yi, m)
                 dot_color = "#ef4444" if is_spike else color_hex
                 plt.plot(xi, yi, marker="o", markersize=6, color=dot_color)
                 plt.annotate(str(int(yi)), (xi, yi), textcoords="offset points", xytext=(0, 6), ha="center", fontsize=7.5, fontweight="bold", bbox=dict(boxstyle="round,pad=0.15", fc="white", ec=dot_color, alpha=0.9))
+                
         plt.title(title, fontsize=10, fontweight="bold", color="#1e3a8a", pad=14)
         plt.ylabel(ylabel, fontsize=9, fontweight="bold")
         plt.xticks(rotation=35, fontsize=7.5, ha="right")
@@ -1100,8 +1110,21 @@ with tab_dict["📄 Raport PDF"]:
 
     def generate_pdf_chart_ta(x_vals, sis_vals, dia_vals, title):
         plt.figure(figsize=(8.0, 2.6))
-        plt.plot(x_vals, sis_vals, marker="o", linestyle="-", color="#ef4444", linewidth=2.2, markersize=5, label="Sistolică")
-        plt.plot(x_vals, dia_vals, marker="o", linestyle="-", color="#f59e0b", linewidth=2.2, markersize=5, label="Diastolică")
+        
+        # Liniile își schimbă culoarea în roșu pe segmentele unde apare un spike de tensiune
+        for i in range(len(sis_vals) - 1):
+            x_seg = [x_vals[i], x_vals[i+1]]
+            s_seg = [sis_vals[i], sis_vals[i+1]]
+            d_seg = [dia_vals[i], dia_vals[i+1]]
+            
+            is_spike1 = is_ta_spike(sis_vals[i], dia_vals[i])
+            is_spike2 = is_ta_spike(sis_vals[i+1], dia_vals[i+1])
+            
+            s_color = "#ef4444" if (is_spike1 or is_spike2) else "#ef4444"
+            d_color = "#ef4444" if (is_spike1 or is_spike2) else "#f59e0b"
+            
+            plt.plot(x_seg, s_seg, linestyle="-", color=s_color, linewidth=2.2)
+            plt.plot(x_seg, d_seg, linestyle="-", color=d_color, linewidth=2.2)
         
         for xi, s, d in zip(x_vals, sis_vals, dia_vals):
             if s > 0 and d > 0:
@@ -1120,7 +1143,6 @@ with tab_dict["📄 Raport PDF"]:
         plt.xticks(rotation=35, fontsize=7.5, ha="right")
         plt.yticks(fontsize=8)
         plt.grid(True, linestyle=":", alpha=0.6)
-        plt.legend(loc="upper right", fontsize=8)
         plt.tight_layout()
 
         img_buffer = io.BytesIO()
@@ -1131,13 +1153,22 @@ with tab_dict["📄 Raport PDF"]:
 
     def generate_pdf_chart_puls(x_vals, puls_vals, title):
         plt.figure(figsize=(8.0, 2.6))
-        plt.plot(x_vals, puls_vals, marker="o", linestyle="-", color="#10b981", linewidth=2.2, markersize=5)
+        
+        for i in range(len(puls_vals) - 1):
+            x_seg = [x_vals[i], x_vals[i+1]]
+            p_seg = [puls_vals[i], puls_vals[i+1]]
+            is_spike1 = is_puls_spike(puls_vals[i])
+            is_spike2 = is_puls_spike(puls_vals[i+1])
+            p_color = "#ef4444" if (is_spike1 or is_spike2) else "#10b981"
+            plt.plot(x_seg, p_seg, linestyle="-", color=p_color, linewidth=2.2)
+
         for xi, p in zip(x_vals, puls_vals):
             if p > 0:
                 is_spike = is_puls_spike(p)
                 p_color = "#ef4444" if is_spike else "#10b981"
                 plt.plot(xi, p, marker="o", markersize=6, color=p_color)
                 plt.annotate(str(int(p)), (xi, p), textcoords="offset points", xytext=(0, 6), ha="center", fontsize=7.5, fontweight="bold", bbox=dict(boxstyle="round,pad=0.15", fc="white", ec=p_color, alpha=0.9))
+                
         plt.title(title, fontsize=10, fontweight="bold", color="#1e3a8a", pad=14)
         plt.ylabel("bpm", fontsize=9, fontweight="bold")
         plt.xticks(rotation=35, fontsize=7.5, ha="right")
@@ -1164,7 +1195,8 @@ with tab_dict["📄 Raport PDF"]:
         story.append(Paragraph(date_text, ParagraphStyle("DateStyle", parent=styles["Normal"], alignment=1, spaceAfter=20)))
 
         if not data_frame.empty:
-            x_data = [f"{d.strftime('%d.%m')} ({m[:3]})" for d, m in zip(data_frame[date_col], data_frame[moment_col])]
+            # Axă X în PDF cu format curat (doar data)
+            x_data = [d.strftime('%d.%m') for d in data_frame[date_col]]
             moments_arr = data_frame[moment_col].tolist() if moment_col in data_frame.columns else [""] * len(data_frame)
             
             if include_glic and col_glic in data_frame.columns:

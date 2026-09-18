@@ -567,19 +567,16 @@ with tab_dict["📊 Jurnal & Grafice"]:
             if col_glic in view_df.columns:
                 glic_vals = pd.to_numeric(view_df[col_glic], errors="coerce").replace(0, None)
                 moments = view_df[moment_col].tolist() if moment_col in view_df.columns else [""] * len(view_df)
-                obs_list = view_df[col_obs].tolist() if col_obs in view_df.columns else [""] * len(view_df)
 
                 spike_colors = []
                 spike_texts = []
 
-                for v, m, obs in zip(glic_vals, moments, obs_list):
+                for v, m in zip(glic_vals, moments):
                     if is_glic_spike(v, m):
-                        cause = check_food_cause(obs)
                         spike_colors.append("#dc2626")
-                        spike_texts.append(f"⚠️ {int(v)}{cause}")
                     else:
                         spike_colors.append("#38bdf8")
-                        spike_texts.append(str(int(v)) if pd.notna(v) else "")
+                    spike_texts.append(str(int(v)) if pd.notna(v) else "")
 
                 fig_g = go.Figure()
                 fig_g.add_trace(go.Scatter(
@@ -764,7 +761,6 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
                 st.markdown("---")
                 st.markdown("##### ⚡ Asistent Inteligent Mese & Indice Glicemic (Sugestii instantanee)")
                 
-                # Câmp de căutare / filtrare instantanee fără diacritice (prefix startswith)
                 search_food_input = st.selectbox(
                     "🔍 Caută / Selectează rapid ingredient (afiseaza sugestii instant după primele litere)",
                     options=[""] + sorted(list(set([item for items in st.session_state.food_categories.values() for item in items]))),
@@ -782,7 +778,6 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
                         
                         for item in sorted(items):
                             item_clean = remove_diacritics(item).lower()
-                            # Dacă s-a selectat ceva din dropdown sau conține prefixul, bifăm sau afișăm inteligent
                             is_default_checked = (search_query_clean and item_clean.startswith(search_query_clean))
                             
                             if st.checkbox(item, value=is_default_checked, key=f"quick_{cat_name}_{item}_{session_form_key}"):
@@ -1060,7 +1055,6 @@ with tab_dict["⚙️ Setări"]:
                 if st.button("➕ Adaugă în Categorie (Fără Duplicate)"):
                     if new_food_item and new_food_item.strip():
                         item_clean = remove_diacritics(new_food_item).strip().lower()
-                        # Verificare anti-duplicat
                         existing_all = [remove_diacritics(x).lower() for x in st.session_state.food_categories[fc_cat]]
                         if item_clean in existing_all:
                             st.warning(f"⚠️ Ingredientul '{item_clean}' există deja în această categorie!")

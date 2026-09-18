@@ -391,6 +391,24 @@ def is_glic_spike(val, moment_zi=""):
     except:
         return False
 
+def is_ta_spike(sis_val, dia_val):
+    try:
+        s, d = float(sis_val), float(dia_val)
+        if s == 0 or d == 0 or pd.isna(s) or pd.isna(d): return False
+        max_s = st.session_state.settings.get("target_ta_sis", 120)
+        max_d = st.session_state.settings.get("target_ta_dia", 80)
+        return s > max_s or d > max_d
+    except:
+        return False
+
+def is_puls_spike(val):
+    try:
+        v = float(val)
+        if v == 0 or pd.isna(v): return False
+        return v < 60 or v > 100
+    except:
+        return False
+
 def evaluate_glic(val, moment_zi=""):
     try:
         v = float(val)
@@ -582,11 +600,31 @@ with tab_dict["📊 Jurnal & Grafice"]:
             if col_sis in view_df.columns and col_dia in view_df.columns:
                 sis_vals = pd.to_numeric(view_df[col_sis], errors="coerce").replace(0, None)
                 dia_vals = pd.to_numeric(view_df[col_dia], errors="coerce").replace(0, None)
+                
+                sis_colors = ["#ef4444" if is_ta_spike(s, d) else "#ef4444" for s, d in zip(sis_vals, dia_vals)]
+                dia_colors = ["#ef4444" if is_ta_spike(s, d) else "#f59e0b" for s, d in zip(sis_vals, dia_vals)]
+
                 fig_ta = go.Figure()
-                fig_ta.add_trace(go.Scatter(x=x_labels_composed, y=sis_vals, mode="lines+markers+text", name="Sistolică", line=dict(color="#ef4444", width=3), marker=dict(size=10), text=sis_vals, textposition="top center", textfont=dict(size=11, color="#ffffff"), texttemplate="<b>%{text}</b>", connectgaps=True))
-                fig_ta.add_trace(go.Scatter(x=x_labels_composed, y=dia_vals, mode="lines+markers+text", name="Diastolică", line=dict(color="#f59e0b", width=3), marker=dict(size=10), text=dia_vals, textposition="bottom center", textfont=dict(size=11, color="#ffffff"), texttemplate="<b>%{text}</b>", connectgaps=True))
+                fig_ta.add_trace(go.Scatter(
+                    x=x_labels_composed, y=sis_vals, mode="lines+markers+text", name="Sistolică", 
+                    line=dict(color="#ef4444", width=3), marker=dict(size=11, color=sis_colors), 
+                    text=sis_vals, textposition="top center", textfont=dict(size=11, color="#ffffff"), 
+                    texttemplate="<b>%{text}</b>", connectgaps=True
+                ))
+                fig_ta.add_trace(go.Scatter(
+                    x=x_labels_composed, y=dia_vals, mode="lines+markers+text", name="Diastolică", 
+                    line=dict(color="#f59e0b", width=3), marker=dict(size=11, color=dia_colors), 
+                    text=dia_vals, textposition="bottom center", textfont=dict(size=11, color="#ffffff"), 
+                    texttemplate="<b>%{text}</b>", connectgaps=True
+                ))
+                
+                max_s_target = st.session_state.settings.get("target_ta_sis", 120)
+                max_d_target = st.session_state.settings.get("target_ta_dia", 80)
+                fig_ta.add_hline(y=max_s_target, line_dash="dash", line_color="#ef4444", annotation_text=f"Prag Max Sistolică ({max_s_target})")
+                
                 fig_ta.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=40, r=40, t=50, b=80), xaxis=dict(tickangle=-35))
                 st.plotly_chart(fig_ta, use_container_width=True)
+                
                 cols_t = [date_col, moment_col, col_sis, col_dia, col_obs]
                 df_t_tab = view_df[cols_t].copy()
                 df_t_tab[date_col] = df_t_tab[date_col].dt.strftime("%d.%m.%Y")
@@ -600,10 +638,21 @@ with tab_dict["📊 Jurnal & Grafice"]:
         with sub_tab_puls:
             if col_puls in view_df.columns:
                 puls_vals = pd.to_numeric(view_df[col_puls], errors="coerce").replace(0, None)
+                puls_colors = ["#ef4444" if is_puls_spike(p) else "#10b981" for p in puls_vals]
+
                 fig_p = go.Figure()
-                fig_p.add_trace(go.Scatter(x=x_labels_composed, y=puls_vals, mode="lines+markers+text", name="Puls (bpm)", line=dict(color="#10b981", width=3), marker=dict(size=10), text=puls_vals, textposition="top center", textfont=dict(size=11, color="#ffffff"), texttemplate="<b>%{text}</b>", connectgaps=True))
+                fig_p.add_trace(go.Scatter(
+                    x=x_labels_composed, y=puls_vals, mode="lines+markers+text", name="Puls (bpm)", 
+                    line=dict(color="#10b981", width=3), marker=dict(size=11, color=puls_colors), 
+                    text=puls_vals, textposition="top center", textfont=dict(size=11, color="#ffffff"), 
+                    texttemplate="<b>%{text}</b>", connectgaps=True
+                ))
+                fig_p.add_hline(y=100, line_dash="dash", line_color="#ef4444", annotation_text="Limită Maximă Puls (100)")
+                fig_p.add_hline(y=60, line_dash="dash", line_color="#ef4444", annotation_text="Limită Minimă Puls (60)")
+                
                 fig_p.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=40, r=40, t=50, b=80), xaxis=dict(tickangle=-35))
                 st.plotly_chart(fig_p, use_container_width=True)
+                
                 cols_p = [date_col, moment_col, col_puls, col_obs]
                 df_p_tab = view_df[cols_p].copy()
                 df_p_tab[date_col] = df_p_tab[date_col].dt.strftime("%d.%m.%Y")
@@ -670,31 +719,6 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
                     return clean_obs(existing_row[col_obs])
                 return ""
 
-            st.markdown("##### ⚡ Asistent Inteligent Mese & Indice Glicemic (Cu Căutare Rapidă)")
-            
-            search_food_input = st.text_input("🔍 Caută rapid alimente / elemente în categorii", key="search_food_add_input")
-            
-            key_suffix = f"_{selected_date.strftime('%Y%m%d')}_{selected_moment}"
-            selected_quick_items = []
-            
-            cat_cols = st.columns(len(st.session_state.food_categories))
-            for idx, (cat_name, items) in enumerate(st.session_state.food_categories.items()):
-                with cat_cols[idx]:
-                    st.caption(cat_name)
-                    filtered_items = [i for i in items if search_food_input.strip().lower() in i.lower()] if search_food_input else items
-                    for item in filtered_items:
-                        if st.checkbox(item, key=f"quick_{cat_name}_{item}{key_suffix}"):
-                            selected_quick_items.append(item)
-
-            base_obs_initial = get_obs()
-            if selected_quick_items:
-                joined_quick = ", ".join(selected_quick_items)
-                if base_obs_initial:
-                    if joined_quick not in base_obs_initial:
-                        base_obs_initial = f"{base_obs_initial}, {joined_quick}"
-                else:
-                    base_obs_initial = joined_quick
-
             with st.form("form_add_overwrite"):
                 c1, c2 = st.columns(2)
                 with c1: glic_input = st.number_input("🩸 Glicemie (mg/dL) [0 = nemăsurat]", min_value=0, value=get_val(col_glic))
@@ -703,7 +727,32 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
                     dia_input = st.number_input("🫀 Tensiune Diastolică [0 = nemăsurat]", min_value=0, value=get_val(col_dia))
                     puls_input = st.number_input("💓 Puls [0 = nemăsurat]", min_value=0, value=get_val(col_puls))
 
-                obs_input = st.text_area("✍️ Notițe / Observații (poți edita/adăuga liber)", value=base_obs_initial)
+                st.markdown("---")
+                st.markdown("##### ⚡ Asistent Inteligent Mese & Indice Glicemic (După Introducerea Valorilor)")
+                search_food_input = st.text_input("🔍 Caută rapid alimente / elemente în categorii", key="search_food_add_input")
+                
+                key_suffix = f"_{selected_date.strftime('%Y%m%d')}_{selected_moment}"
+                selected_quick_items = []
+                
+                cat_cols = st.columns(len(st.session_state.food_categories))
+                for idx, (cat_name, items) in enumerate(st.session_state.food_categories.items()):
+                    with cat_cols[idx]:
+                        st.caption(cat_name)
+                        filtered_items = [i for i in items if search_food_input.strip().lower() in i.lower()] if search_food_input else items
+                        for item in filtered_items:
+                            if st.checkbox(item, key=f"quick_{cat_name}_{item}{key_suffix}"):
+                                selected_quick_items.append(item)
+
+                base_obs_initial = get_obs()
+                if selected_quick_items:
+                    joined_quick = ", ".join(selected_quick_items)
+                    if base_obs_initial:
+                        if joined_quick not in base_obs_initial:
+                            base_obs_initial = f"{base_obs_initial}, {joined_quick}"
+                    else:
+                        base_obs_initial = joined_quick
+
+                obs_input = st.text_area("✍️ Notițe / Observații (Completate sau editabile)", value=base_obs_initial)
                 submitted = st.form_submit_button("💾 Salvează / Suprascrie", type="primary", use_container_width=True)
 
                 if submitted:
@@ -718,7 +767,7 @@ with tab_dict["💊 Tratament"]:
 
     if is_admin:
         st.markdown("---")
-        st.markdown("#### ⚙️ Gestiune Listă Tratament (Administrator)")
+        st.markdown("#### ⚙️ Gestiune Listă Tratament & Ștergere (Administrator)")
         col_m1, col_m2, col_m3 = st.columns(3)
         
         with col_m1:
@@ -760,14 +809,17 @@ with tab_dict["💊 Tratament"]:
 
         with col_m3:
             with st.container(border=True):
-                st.markdown("##### 🗑️ Șterge")
+                st.markdown("##### 🗑️ Șterge Medicament")
                 if not st.session_state.meds_df.empty:
-                    to_delete = st.selectbox("Selectează de șters", st.session_state.meds_df["Medicament"].tolist())
-                    if st.button("Șterge Definitiv", type="secondary"):
-                        st.session_state.meds_df = st.session_state.meds_df[st.session_state.meds_df["Medicament"] != to_delete].reset_index(drop=True)
-                        add_history_entry("Ștergere", to_delete, "Eliminat din schemă.")
-                        st.success(f"{to_delete} șters!")
-                        trigger_rerun()
+                    with st.form("delete_med_form"):
+                        to_delete = st.selectbox("Selectează de șters", st.session_state.meds_df["Medicament"].tolist())
+                        btn_del_med = st.form_submit_button("Șterge Definitiv", type="secondary")
+                        if btn_del_med:
+                            st.session_state.meds_df = st.session_state.meds_df[st.session_state.meds_df["Medicament"] != to_delete].reset_index(drop=True)
+                            add_history_entry("Ștergere", to_delete, "Eliminat din schemă.")
+                            save_all_files()
+                            st.success(f"{to_delete} șters cu succes!")
+                            trigger_rerun()
 
 # ----------------- TAB: PROGRAMĂRI -----------------
 if is_admin and "📅 Programări" in tab_dict:
@@ -970,9 +1022,8 @@ with tab_dict["⚙️ Setări"]:
         st.markdown("#### ✉️ Configurare Server iCloud Mail & Test")
         st.session_state.settings["email_sender"] = st.text_input("Adresa ta de iCloud (expeditor, ex: nume@icloud.com)", value=st.session_state.settings.get("email_sender", ""))
         st.session_state.settings["email_password"] = st.text_input("Parolă specifică de aplicație iCloud (App-Specific Password)", type="password", value=st.session_state.settings.get("email_password", ""))
-        st.markdown("<small>💡 *Notă: Nu folosi parola ta principală Apple ID. Vezi mai jos ghidul de generare.*</small>", unsafe_allow_html=True)
+        st.markdown("<small>💡 *Notă: Nu folosi parola ta principală Apple ID. Vezi ghidul anterior de generare.*</small>", unsafe_allow_html=True)
         
-        # Buton dedicat pentru testarea conexiunii SMTP și eliminarea erorii de timeout
         if st.button("🔌 Testează Conexiunea iCloud (Trimite Email Test)", type="primary"):
             test_dest = st.session_state.settings.get("email_sender", "")
             if not test_dest:
@@ -1028,15 +1079,12 @@ with tab_dict["📄 Raport PDF"]:
     def generate_pdf_chart_glic(x_vals, y_vals, moments_list, title, ylabel, color_hex):
         plt.figure(figsize=(8.0, 2.6))
         plt.plot(x_vals, y_vals, marker="o", linestyle="-", color=color_hex, linewidth=2.2, markersize=5)
-        
-        # Puncte roșii pentru spike-uri pe grafic, exact ca în jurnal
         for xi, yi, m in zip(x_vals, y_vals, moments_list):
             if yi > 0:
                 is_spike = is_glic_spike(yi, m)
                 dot_color = "#ef4444" if is_spike else color_hex
                 plt.plot(xi, yi, marker="o", markersize=6, color=dot_color)
                 plt.annotate(str(int(yi)), (xi, yi), textcoords="offset points", xytext=(0, 6), ha="center", fontsize=7.5, fontweight="bold", bbox=dict(boxstyle="round,pad=0.15", fc="white", ec=dot_color, alpha=0.9))
-                
         plt.title(title, fontsize=10, fontweight="bold", color="#1e3a8a", pad=14)
         plt.ylabel(ylabel, fontsize=9, fontweight="bold")
         plt.xticks(rotation=35, fontsize=7.5, ha="right")
@@ -1050,14 +1098,43 @@ with tab_dict["📄 Raport PDF"]:
         img_buffer.seek(0)
         return img_buffer
 
-    def generate_pdf_chart_simple(x_vals, y_vals, title, ylabel, color_hex):
+    def generate_pdf_chart_ta(x_vals, sis_vals, dia_vals, title):
         plt.figure(figsize=(8.0, 2.6))
-        plt.plot(x_vals, y_vals, marker="o", linestyle="-", color=color_hex, linewidth=2.2, markersize=5)
-        for xi, yi in zip(x_vals, y_vals):
-            if yi > 0:
-                plt.annotate(str(int(yi)), (xi, yi), textcoords="offset points", xytext=(0, 6), ha="center", fontsize=7.5, fontweight="bold", bbox=dict(boxstyle="round,pad=0.15", fc="white", ec=color_hex, alpha=0.9))
+        plt.plot(x_vals, sis_vals, marker="o", linestyle="-", color="#ef4444", linewidth=2.2, markersize=5, label="Sistolică")
+        plt.plot(x_vals, dia_vals, marker="o", linestyle="-", color="#f59e0b", linewidth=2.2, markersize=5, label="Diastolică")
+        
+        for xi, s, d in zip(x_vals, sis_vals, dia_vals):
+            if s > 0 and d > 0:
+                is_spike = is_ta_spike(s, d)
+                s_color = "#ef4444" if is_spike else "#ef4444"
+                plt.plot(xi, s, marker="o", markersize=6, color=s_color)
+                plt.annotate(str(int(s)), (xi, s), textcoords="offset points", xytext=(0, 6), ha="center", fontsize=7, fontweight="bold", bbox=dict(boxstyle="round,pad=0.15", fc="white", ec=s_color, alpha=0.9))
+                
         plt.title(title, fontsize=10, fontweight="bold", color="#1e3a8a", pad=14)
-        plt.ylabel(ylabel, fontsize=9, fontweight="bold")
+        plt.ylabel("mmHg", fontsize=9, fontweight="bold")
+        plt.xticks(rotation=35, fontsize=7.5, ha="right")
+        plt.yticks(fontsize=8)
+        plt.grid(True, linestyle=":", alpha=0.6)
+        plt.legend(loc="upper right", fontsize=8)
+        plt.tight_layout()
+
+        img_buffer = io.BytesIO()
+        plt.savefig(img_buffer, format="png", dpi=220)
+        plt.close()
+        img_buffer.seek(0)
+        return img_buffer
+
+    def generate_pdf_chart_puls(x_vals, puls_vals, title):
+        plt.figure(figsize=(8.0, 2.6))
+        plt.plot(x_vals, puls_vals, marker="o", linestyle="-", color="#10b981", linewidth=2.2, markersize=5)
+        for xi, p in zip(x_vals, puls_vals):
+            if p > 0:
+                is_spike = is_puls_spike(p)
+                p_color = "#ef4444" if is_spike else "#10b981"
+                plt.plot(xi, p, marker="o", markersize=6, color=p_color)
+                plt.annotate(str(int(p)), (xi, p), textcoords="offset points", xytext=(0, 6), ha="center", fontsize=7.5, fontweight="bold", bbox=dict(boxstyle="round,pad=0.15", fc="white", ec=p_color, alpha=0.9))
+        plt.title(title, fontsize=10, fontweight="bold", color="#1e3a8a", pad=14)
+        plt.ylabel("bpm", fontsize=9, fontweight="bold")
         plt.xticks(rotation=35, fontsize=7.5, ha="right")
         plt.yticks(fontsize=8)
         plt.grid(True, linestyle=":", alpha=0.6)
@@ -1092,17 +1169,18 @@ with tab_dict["📄 Raport PDF"]:
                 story.append(Image(img_buf, width=470, height=150))
                 story.append(Spacer(1, 15))
                 
-            if include_ta and col_sis in data_frame.columns:
+            if include_ta and col_sis in data_frame.columns and col_dia in data_frame.columns:
                 s_vals = pd.to_numeric(data_frame[col_sis], errors='coerce').fillna(0).tolist()
-                story.append(Paragraph("Evolutie Tensiune Sistolica", styles["Heading2"]))
-                img_buf = generate_pdf_chart_simple(x_data, s_vals, "Tensiune Sistolica (mmHg)", "mmHg", "#ef4444")
+                d_vals = pd.to_numeric(data_frame[col_dia], errors='coerce').fillna(0).tolist()
+                story.append(Paragraph("Evolutie Tensiune Arteriala", styles["Heading2"]))
+                img_buf = generate_pdf_chart_ta(x_data, s_vals, d_vals, "Tensiune Arteriala (mmHg)")
                 story.append(Image(img_buf, width=470, height=150))
                 story.append(Spacer(1, 15))
                 
             if include_puls and col_puls in data_frame.columns:
                 p_vals = pd.to_numeric(data_frame[col_puls], errors='coerce').fillna(0).tolist()
                 story.append(Paragraph("Evolutie Puls", styles["Heading2"]))
-                img_buf = generate_pdf_chart_simple(x_data, p_vals, "Puls (bpm)", "bpm", "#10b981")
+                img_buf = generate_pdf_chart_puls(x_data, p_vals, "Puls (bpm)")
                 story.append(Image(img_buf, width=470, height=150))
                 story.append(Spacer(1, 15))
 

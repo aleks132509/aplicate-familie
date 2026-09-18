@@ -106,7 +106,9 @@ if "settings" not in st.session_state:
       "notif_enabled": True,
       "notif_days": 7,
       "target_glic_min": 70,
-      "target_glic_max": 120,
+      "target_glic_max": 120,  # Înainte de masă
+      "target_glic_post_min": 70,
+      "target_glic_post_max": 160,  # După masă
       "target_ta_sis": 120,
       "target_ta_dia": 80,
   }
@@ -171,7 +173,7 @@ st.sidebar.markdown("---")
 
 
 # ==========================================
-# GESTIONARE DATE LOCALE (SESSION STATE) - GOL
+# GESTIONARE DATE LOCALE (SESSION STATE) - GOL V2
 # ==========================================
 def get_initial_data():
   return pd.DataFrame(
@@ -187,10 +189,10 @@ def get_initial_data():
   )
 
 
-if "local_df" not in st.session_state:
-  st.session_state.local_df = get_initial_data()
+if "local_df_v2" not in st.session_state:
+  st.session_state.local_df_v2 = get_initial_data()
 
-df = st.session_state.local_df.copy()
+df = st.session_state.local_df_v2.copy()
 
 date_col = "Dată"
 moment_col = "Moment Zi"
@@ -208,7 +210,7 @@ if date_col in df.columns and not df.empty:
 
 def save_local_record(date_str, moment_str, glic_v, sis_v, dia_v, puls_v, obs_v):
   global df
-  current_df = st.session_state.local_df.copy()
+  current_df = st.session_state.local_df_v2.copy()
 
   if not current_df.empty and date_col in current_df.columns:
     mask = (current_df[date_col].astype(str) == date_str) & (
@@ -238,7 +240,7 @@ def save_local_record(date_str, moment_str, glic_v, sis_v, dia_v, puls_v, obs_v)
         [current_df, pd.DataFrame([new_record])], ignore_index=True
     )
 
-  st.session_state.local_df = current_df
+  st.session_state.local_df_v2 = current_df
 
 
 def format_table_column(series):
@@ -252,13 +254,20 @@ def format_table_column(series):
 # ==========================================
 # FUNCȚII EVALUARE MEDICALĂ & STYLING
 # ==========================================
-def evaluate_glic(val):
+def evaluate_glic(val, moment_zi=""):
   try:
     v = float(val)
     if v == 0 or pd.isna(v):
       return "Nemăsurat"
-    t_min = st.session_state.settings["target_glic_min"]
-    t_max = st.session_state.settings["target_glic_max"]
+
+    # Verificăm dacă este după masă sau înainte de masă
+    if "După masă" in str(moment_zi):
+      t_min = st.session_state.settings.get("target_glic_post_min", 70)
+      t_max = st.session_state.settings.get("target_glic_post_max", 160)
+    else:
+      t_min = st.session_state.settings.get("target_glic_min", 70)
+      t_max = st.session_state.settings.get("target_glic_max", 120)
+
     if t_min <= v <= t_max:
       return "🟢 Glicemie Normală"
     elif v < t_min:
@@ -494,7 +503,9 @@ with tab_dict["📊 Jurnal & Grafice"]:
         cols_g = [date_col, moment_col, col_glic]
         df_g_tab = df[cols_g].copy()
         df_g_tab[date_col] = df_g_tab[date_col].dt.strftime("%d.%m.%Y")
-        df_g_tab["Status Glicemie"] = df_g_tab[col_glic].apply(evaluate_glic)
+        df_g_tab["Status Glicemie"] = df_g_tab.apply(
+            lambda r: evaluate_glic(r[col_glic], r[moment_col]), axis=1
+        )
         df_g_tab[col_glic] = format_table_column(df_g_tab[col_glic])
         st.dataframe(
             apply_color_styling(df_g_tab, ["Status Glicemie"]),
@@ -610,7 +621,9 @@ with tab_dict["📊 Jurnal & Grafice"]:
       df_all = df.copy()
       df_all[date_col] = df_all[date_col].dt.strftime("%d.%m.%Y")
       if col_glic in df_all.columns:
-        df_all["St. Glicemie"] = df_all[col_glic].apply(evaluate_glic)
+        df_all["St. Glicemie"] = df_all.apply(
+            lambda r: evaluate_glic(r[col_glic], r[moment_col]), axis=1
+        )
         df_all[col_glic] = format_table_column(df_all[col_glic])
       if col_sis in df_all.columns and col_dia in df_all.columns:
         df_all["St. Tensiune"] = df_all.apply(
@@ -1005,7 +1018,9 @@ with tab_dict["📄 Raport PDF"]:
         df_pdf[date_col] = df_pdf[date_col].dt.strftime("%d.%m.%Y")
 
         if col_glic in df_pdf.columns:
-          df_pdf["St. Glicemie"] = df_pdf[col_glic].apply(evaluate_glic)
+          df_pdf["St. Glicemie"] = df_pdf.apply(
+              lambda r: evaluate_glic(r[col_glic], r[moment_col]), axis=1
+          )
           df_pdf[col_glic] = format_table_column(df_pdf[col_glic])
         if col_sis in df_pdf.columns and col_dia in df_pdf.columns:
           df_pdf["St. Tensiune"] = df_pdf.apply(
@@ -1148,13 +1163,23 @@ with tab_dict["⚙️ Setări"]:
     with st.container(border=True):
       st.markdown("#### 🎯 Valori Țintă Medicale")
       st.session_state.settings["target_glic_min"] = st.number_input(
-          "Glicemie Minimă Țintă (mg/dL)",
+          "Glicemie Min Țintă - Înainte de masă (mg/dL)",
           value=st.session_state.settings["target_glic_min"],
           disabled=not is_admin,
       )
       st.session_state.settings["target_glic_max"] = st.number_input(
-          "Glicemie Maximă Țintă (mg/dL)",
+          "Glicemie Max Țintă - Înainte de masă (mg/dL)",
           value=st.session_state.settings["target_glic_max"],
+          disabled=not is_admin,
+      )
+      st.session_state.settings["target_glic_post_min"] = st.number_input(
+          "Glicemie Min Țintă - După masă (mg/dL)",
+          value=st.session_state.settings.get("target_glic_post_min", 70),
+          disabled=not is_admin,
+      )
+      st.session_state.settings["target_glic_post_max"] = st.number_input(
+          "Glicemie Max Țintă - După masă (mg/dL)",
+          value=st.session_state.settings.get("target_glic_post_max", 160),
           disabled=not is_admin,
       )
       st.session_state.settings["target_ta_sis"] = st.number_input(

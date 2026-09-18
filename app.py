@@ -1292,12 +1292,25 @@ with tab_dict["📄 Raport PDF"]:
                     ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
                 ]
                 
+                # Stil dedicat pentru încadrarea automată a textului din coloana de observații în PDF
+                obs_style_pdf = ParagraphStyle(
+                    'ObsStylePDF',
+                    parent=styles['Normal'],
+                    fontName='Helvetica',
+                    fontSize=7.5,
+                    leading=9,
+                    textColor=colors.HexColor("#111827")
+                )
+
                 r_idx = 1
                 for _, row in data_frame.iterrows():
                     dt_str = row[date_col].strftime("%d.%m.%Y")
                     mm = remove_diacritics(str(row.get(moment_col, "")))
                     obs_val = clean_obs(row.get(col_obs, ""))
                     obs_str = remove_diacritics(obs_val)
+                    
+                    # Învelim observația într-un Paragraph pentru a forța word-wrap (încadrare în lățimea celulei)
+                    obs_paragraph = Paragraph(obs_str, obs_style_pdf)
                     
                     glic_v = row.get(col_glic, 0)
                     sis_v = row.get(col_sis, 0)
@@ -1308,7 +1321,7 @@ with tab_dict["📄 Raport PDF"]:
                     ta_str = f"{int(sis_v)}/{int(dia_v)}" if pd.notna(sis_v) and float(sis_v)>0 else ""
                     p_str = str(int(puls_v)) if pd.notna(puls_v) and float(puls_v)>0 else ""
                     
-                    table_data.append([dt_str, mm, g_str, ta_str, p_str, obs_str])
+                    table_data.append([dt_str, mm, g_str, ta_str, p_str, obs_paragraph])
                     
                     ev_g = evaluate_glic(glic_v, mm)
                     if "🟢" in ev_g: t_style.append(('TEXTCOLOR', (2, r_idx), (2, r_idx), colors.HexColor("#16a34a")))

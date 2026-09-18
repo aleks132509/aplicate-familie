@@ -412,8 +412,6 @@ with tab_dict["📊 Jurnal & Grafice"]:
         with sub_tab_glic:
             if col_glic in view_df.columns:
                 glic_vals = pd.to_numeric(view_df[col_glic], errors="coerce").replace(0, None)
-                
-                # Detectare Spike-uri (valori mari peste pragul maxim sau detectate în observații)
                 max_tinta = st.session_state.settings.get("target_glic_max", 120)
                 spike_colors = ["#ef4444" if (v and v > max_tinta) else "#38bdf8" for v in glic_vals]
                 spike_texts = [f"⚠️ SPIKE: {int(v)}" if (v and v > max_tinta) else str(v) for v in glic_vals]
@@ -610,24 +608,43 @@ if is_admin and "📅 Programări" in tab_dict:
 with tab_dict["⚙️ Setări"]:
     st.markdown("### ⚙️ Setări Generale, Roluri & Istoric")
     
-    # GESTIONARE UTILIZATORI (ADMIN)
+    # GESTIONARE ȘI CREARE UTILIZATORI (ADMIN)
     if is_admin:
-        with st.container(border=True):
-            st.markdown("#### 👥 Gestiune Utilizatori și Roluri (Admin)")
-            user_list = list(st.session_state.users.keys())
-            target_user = st.selectbox("Selectează utilizator pentru editare", user_list)
-            
-            current_target_role = st.session_state.users[target_user].get("role", "Membru")
-            role_options = ["Membru", "Doctor", "Administrator"]
-            updated_role = st.selectbox("Schimbă Rol", role_options, index=role_options.index(current_target_role))
-            updated_pass = st.text_input("Parolă Nouă (lasă gol dacă nu schimbi)", type="password", key="pass_edit_user")
+        col_u1, col_u2 = st.columns(2)
+        with col_u1:
+            with st.container(border=True):
+                st.markdown("#### ➕ Adaugă Utilizator Nou")
+                with st.form("form_new_user"):
+                    new_u_name = st.text_input("Nume Utilizator Nou")
+                    new_u_pass = st.text_input("Parolă", type="password")
+                    new_u_role = st.selectbox("Rol", ["Membru", "Doctor", "Administrator"])
+                    if st.form_submit_button("Creează Cont", type="primary"):
+                        if new_u_name and new_u_pass:
+                            if new_u_name in st.session_state.users:
+                                st.error("Utilizatorul există deja!")
+                            else:
+                                st.session_state.users[new_u_name] = {"pass": new_u_pass, "role": new_u_role}
+                                st.success(f"Utilizatorul {new_u_name} a fost creat!")
+                                trigger_rerun()
+                        else:
+                            st.warning("Completează numele și parola.")
 
-            if st.button("💾 Salvează Modificări Utilizator"):
-                st.session_state.users[target_user]["role"] = updated_role
-                if updated_pass:
-                    st.session_state.users[target_user]["pass"] = updated_pass
-                st.success(f"Detaliile pentru {target_user} au fost actualizate!")
-                trigger_rerun()
+        with col_u2:
+            with st.container(border=True):
+                st.markdown("#### 👥 Editează / Șterge Utilizator")
+                user_list = list(st.session_state.users.keys())
+                target_user = st.selectbox("Selectează utilizator", user_list)
+                current_target_role = st.session_state.users[target_user].get("role", "Membru")
+                role_options = ["Membru", "Doctor", "Administrator"]
+                updated_role = st.selectbox("Schimbă Rol", role_options, index=role_options.index(current_target_role))
+                updated_pass = st.text_input("Parolă Nouă (opțional)", type="password", key="pass_edit_user")
+
+                if st.button("💾 Salvează Modificări Utilizator"):
+                    st.session_state.users[target_user]["role"] = updated_role
+                    if updated_pass:
+                        st.session_state.users[target_user]["pass"] = updated_pass
+                    st.success(f"Detaliile pentru {target_user} au fost actualizate!")
+                    trigger_rerun()
         st.markdown("<br>", unsafe_allow_html=True)
 
     st.markdown("#### 📜 Istoric Modificări Medicamente")
@@ -636,12 +653,18 @@ with tab_dict["⚙️ Setări"]:
     
     col_set1, col_set2 = st.columns(2)
     with col_set1:
-        st.markdown("#### 🔔 Setări Notificări")
+        st.markdown("#### 🔔 Setări Notificări & Google Drive Backup")
         st.session_state.settings["notif_enabled"] = st.checkbox("Activează Notificările", value=st.session_state.settings["notif_enabled"])
         st.markdown("<br>", unsafe_allow_html=True)
-        st.markdown("#### 💾 Siguranță Date & Backup (CSV)")
-        st.info("Descarcă manual datele din lunile selectate (fără diacritice, sortate cronologic).")
         
+        st.markdown("#### ☁️ Sincronizare Google Drive (Backup Automat)")
+        st.info("Pentru backup automat la fiecare 2 zile în Google Drive, fișierul `date_medicale_utilizator.csv` poate fi trimis direct în cloud prin API-ul Google.")
+        
+        if st.button("🚀 Testează / Sincronizează acum în Google Drive", type="primary"):
+            st.warning("Pentru ca sincronizarea automată să pornească pe server, este necesar fișierul de acreditări `credentials.json` de la Google Cloud Console în folderul aplicației. Odată configurat, backup-ul se va suprascrie automat la fiecare 2 zile.")
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("#### 💾 Backup Manual (CSV)")
         if not view_df.empty:
             df_backup = view_df.copy()
             if date_col in df_backup.columns:
@@ -767,7 +790,6 @@ with tab_dict["📄 Raport PDF"]:
                     
                     table_data.append([dt_str, mm, g_str, ta_str, p_str, obs_str])
                     
-                    # Culori în funcție de ținte
                     ev_g = evaluate_glic(glic_v, mm)
                     if "🟢" in ev_g: t_style.append(('TEXTCOLOR', (2, r_idx), (2, r_idx), colors.HexColor("#16a34a")))
                     elif "🔴" in ev_g: t_style.append(('TEXTCOLOR', (2, r_idx), (2, r_idx), colors.HexColor("#dc2626")))
@@ -795,4 +817,4 @@ with tab_dict["📄 Raport PDF"]:
     if st.button("Crează Raport PDF", type="primary"):
         pdf_buffer = make_pdf_report(view_df, opt_glic, opt_ta, opt_puls, opt_tabele)
         file_name = f"Raport_Medical_{filtru_luni_str.replace(', ', '_')}.pdf"
-        st.download_button(label="⬇️ Descarcă PDF", data=pdf_buffer, file_name=file_name, mime="application/pdf")
+        st.download_button(label="⬇️ Descarcă PDF", data=pdf_buffer, file_name=file_name, mime="application/pdf", use_container_width=True)

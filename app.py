@@ -1,8 +1,10 @@
 import io
 import os
 import re
+import smtplib
 import unicodedata
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
+from email.message import EmailMessage
 import matplotlib
 
 matplotlib.use("Agg")
@@ -86,11 +88,12 @@ def trigger_rerun():
 
 
 # ==========================================
-# GESTIONARE FIȘIERE PERSISTENTE
+# GESTIONARE FIȘIERE PERSISTENTE & PROGRAMĂRI
 # ==========================================
 DATA_FILE = "date_medicale_utilizator.csv"
 MEDS_FILE = "medicamente.csv"
 MEDS_HIST_FILE = "istoric_medicamente.csv"
+PROG_FILE = "programari_medicale.csv"
 
 def get_initial_meds():
     if os.path.exists(MEDS_FILE):
@@ -108,9 +111,18 @@ def get_initial_history():
         return pd.read_csv(MEDS_HIST_FILE)
     return pd.DataFrame(columns=["Data_Ora", "Acțiune", "Medicament", "Detalii"])
 
-def save_meds():
+def get_initial_prog():
+    if os.path.exists(PROG_FILE):
+        return pd.read_csv(PROG_FILE)
+    return pd.DataFrame([
+        {"Dată": "2026-09-25", "Tip": "Analize de laborator", "Clinică": "Regina Maria", "Zile_Alerta": "1, 3, 7", "Observații": "Repetare analize Diabet"},
+        {"Dată": "2026-10-05", "Tip": "Consult Diabet", "Clinică": "Dr. Clenciu Craiova", "Zile_Alerta": "2, 5", "Observații": "Rețetă 3 luni"},
+    ])
+
+def save_all_files():
     st.session_state.meds_df.to_csv(MEDS_FILE, index=False)
     st.session_state.meds_hist_df.to_csv(MEDS_HIST_FILE, index=False)
+    st.session_state.prog_df.to_csv(PROG_FILE, index=False)
 
 def add_history_entry(actiune, medicament, detalii):
     new_entry = {
@@ -120,8 +132,28 @@ def add_history_entry(actiune, medicament, detalii):
         "Detalii": detalii
     }
     st.session_state.meds_hist_df = pd.concat([st.session_state.meds_hist_df, pd.DataFrame([new_entry])], ignore_index=True)
-    save_meds()
+    save_all_files()
 
+def trimite_email_alerta(destinatar, subiect, mesaj):
+    email_sender = st.session_state.settings.get("email_sender", "")
+    email_password = st.session_state.settings.get("email_password", "")
+    
+    if not email_sender or not email_password:
+        return False, "Datele de configurare email lipsesc din Setări."
+
+    try:
+        msg = EmailMessage()
+        msg.set_content(mesaj)
+        msg['Subject'] = subiect
+        msg['From'] = email_sender
+        msg['To'] = destinatar
+
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
+            smtp.login(email_sender, email_password)
+            smtp.send_message(msg)
+        return True, "Email trimis cu succes!"
+    except Exception as e:
+        return False, f"Erore trimitere: {str(e)}"
 
 # ==========================================
 # SESSION STATE INITIALIZATION
@@ -140,7 +172,9 @@ if "user" not in st.session_state:
 
 if "settings" not in st.session_state:
     st.session_state.settings = {
-        "notif_enabled": True, "notif_days": 7,
+        "notif_enabled": True, 
+        "email_sender": "",
+        "email_password": "",
         "target_glic_min": 70, "target_glic_max": 120,
         "target_glic_post_min": 70, "target_glic_post_max": 160,
         "target_ta_sis": 120, "target_ta_dia": 80,
@@ -150,6 +184,8 @@ if "meds_df" not in st.session_state:
     st.session_state.meds_df = get_initial_meds()
 if "meds_hist_df" not in st.session_state:
     st.session_state.meds_hist_df = get_initial_history()
+if "prog_df" not in st.session_state:
+    st.session_state.prog_df = get_initial_prog()
 
 # ==========================================
 # AUTENTIFICARE
@@ -251,7 +287,6 @@ def save_local_record(date_str, moment_str, glic_v, sis_v, dia_v, puls_v, obs_v)
         current_df = pd.concat([current_df, pd.DataFrame([new_record])], ignore_index=True)
 
     st.session_state.local_df_v2 = current_df
-
     try:
         df_to_save = current_df.copy()
         if pd.api.types.is_datetime64_any_dtype(df_to_save[date_col]):
@@ -266,8 +301,43 @@ def format_table_column(series):
     return series.astype(str).str.strip().replace(["0", "0.0", "nan", "None", "", "<NA>"], "Nemăsurat")
 
 # ==========================================
-# FUNCȚII EVALUARE MEDICALĂ & STYLING
+# EVALUARE SPIKE INTELIGENTĂ & CAUZĂ ALIMENTARĂ
 # ==========================================
+HIGH_GI_FOODS = [
+    "ciocolata", "ciocolată", "prajitura", "prăjitură", "prajituri", "prăjituri", 
+    "tort", "suc", "fanta", "cola", "pepsi", "dulciuri", "inghetata", "înghețată", 
+    "paine alba", "pâine albă", "pizza", "paste", "orez", "cartofi", "cartofi prajiti", 
+    "zahar", "zahăr", "miere", "bere", "patiserie", "gogosi", "gogoși", "covrigi", "croissant"
+]
+
+def check_food_cause(obs_text):
+    if not isinstance(obs_text, str) or not obs_text.strip():
+        return ""
+    obs_clean = remove_diacritics(obs_text.lower())
+    found_foods = []
+    for food in HIGH_GI_FOODS:
+        food_clean = remove_diacritics(food)
+        if re.search(r'\b' + re.escape(food_clean) + r'\b', obs_clean):
+            found_foods.append(food)
+    
+    if found_foods:
+        return f" (Cauză probabilă: {', '.join(set(found_foods))})"
+    elif len(obs_text.strip()) > 0:
+        return f" ({obs_text.strip()[:20]})"
+    return ""
+
+def is_glic_spike(val, moment_zi=""):
+    try:
+        v = float(val)
+        if v == 0 or pd.isna(v): return False
+        if "După masă" in str(moment_zi):
+            t_max = st.session_state.settings.get("target_glic_post_max", 160)
+        else:
+            t_max = st.session_state.settings.get("target_glic_min", 120)
+        return v > t_max
+    except:
+        return False
+
 def evaluate_glic(val, moment_zi=""):
     try:
         v = float(val)
@@ -406,15 +476,26 @@ with tab_dict["📊 Jurnal & Grafice"]:
             st.markdown(f'<div class="metric-card"><div class="metric-label">📅 TOTAL (FILTRU)</div><div class="metric-value">{len(view_df)}</div></div>', unsafe_allow_html=True)
 
         st.markdown("<br>", unsafe_allow_html=True)
-        sub_tab_glic, sub_tab_ta, sub_tab_puls, sub_tab_all = st.tabs(["🩸 Glicemie & Spike-uri", "🫀 Tensiune Arterială", "💓 Puls", "📋 Toate Datele"])
+        sub_tab_glic, sub_tab_ta, sub_tab_puls, sub_tab_all = st.tabs(["🩸 Glicemie & Analiză Spike", "🫀 Tensiune Arterială", "💓 Puls", "📋 Toate Datele"])
         x_data_strict = view_df[date_col].dt.strftime("%d.%m.%Y")
 
         with sub_tab_glic:
             if col_glic in view_df.columns:
                 glic_vals = pd.to_numeric(view_df[col_glic], errors="coerce").replace(0, None)
-                max_tinta = st.session_state.settings.get("target_glic_max", 120)
-                spike_colors = ["#ef4444" if (v and v > max_tinta) else "#38bdf8" for v in glic_vals]
-                spike_texts = [f"⚠️ SPIKE: {int(v)}" if (v and v > max_tinta) else str(v) for v in glic_vals]
+                moments = view_df[moment_col].tolist() if moment_col in view_df.columns else [""] * len(view_df)
+                obs_list = view_df[col_obs].tolist() if col_obs in view_df.columns else [""] * len(view_df)
+
+                spike_colors = []
+                spike_texts = []
+
+                for v, m, obs in zip(glic_vals, moments, obs_list):
+                    if is_glic_spike(v, m):
+                        cause = check_food_cause(obs)
+                        spike_colors.append("#ef4444")
+                        spike_texts.append(f"⚠️ SPIKE: {int(v)}{cause}")
+                    else:
+                        spike_colors.append("#38bdf8")
+                        spike_texts.append(str(int(v)) if pd.notna(v) else "")
 
                 fig_g = go.Figure()
                 fig_g.add_trace(go.Scatter(
@@ -425,7 +506,12 @@ with tab_dict["📊 Jurnal & Grafice"]:
                     textfont=dict(size=11, color="#ffffff"),
                     connectgaps=True
                 ))
-                fig_g.add_hline(y=max_tinta, line_dash="dash", line_color="#ef4444", annotation_text=f"Prag Maxim ({max_tinta})")
+                
+                max_post = st.session_state.settings.get("target_glic_post_max", 160)
+                max_pre = st.session_state.settings.get("target_glic_min", 120)
+                fig_g.add_hline(y=max_post, line_dash="dash", line_color="#ef4444", annotation_text=f"Prag Maxim După Masă ({max_post})")
+                fig_g.add_hline(y=max_pre, line_dash="dot", line_color="#f59e0b", annotation_text=f"Prag Maxim Înainte Masă ({max_pre})")
+                
                 fig_g.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=40, r=40, t=40, b=30))
                 st.plotly_chart(fig_g, use_container_width=True)
 
@@ -528,7 +614,7 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
                     dia_input = st.number_input("🫀 Tensiune Diastolică [0 = nemăsurat]", min_value=0, value=get_val(col_dia))
                     puls_input = st.number_input("💓 Puls (Apple Watch / alt dispozitiv) [0 = nemăsurat]", min_value=0, value=get_val(col_puls))
 
-                obs_input = st.text_area("✍️ Notițe / Observații (Ex: Ce ai mâncat, ciocolată, prăjituri, factor de stres...)", value=get_obs())
+                obs_input = st.text_area("✍️ Notițe / Observații (Ex: Ce ai mâncat: ciocolată, prăjituri, pizza...)", value=get_obs())
                 submitted = st.form_submit_button("💾 Salvează / Suprascrie", type="primary", use_container_width=True)
 
                 if submitted:
@@ -594,21 +680,77 @@ with tab_dict["💊 Tratament"]:
                         st.success(f"{to_delete} șters!")
                         trigger_rerun()
 
-# ----------------- TAB: PROGRAMĂRI -----------------
+# ----------------- TAB: PROGRAMĂRI (CU PERIOADE MULTIPLE & EMAIL) -----------------
 if is_admin and "📅 Programări" in tab_dict:
     with tab_dict["📅 Programări"]:
-        st.markdown("### 📅 Programări Medicale")
-        prog_df = pd.DataFrame([
-            {"Dată": "2026-09-25", "Tip": "Analize de laborator", "Clinică": "Regina Maria", "Observații": "Repetare analize Diabet"},
-            {"Dată": "2026-10-05", "Tip": "Consult Diabet", "Clinică": "Dr. Clenciu Craiova", "Observații": "Rețetă 3 luni"},
-        ])
-        st.dataframe(prog_df, use_container_width=True)
+        st.markdown("### 📅 Programări Medicale & Alerte Multiple")
+        st.dataframe(st.session_state.prog_df, use_container_width=True)
+
+        st.markdown("---")
+        col_p1, col_p2 = st.columns(2)
+
+        with col_p1:
+            with st.container(border=True):
+                st.markdown("#### ➕ Adaugă Programare Nouă")
+                with st.form("form_add_prog"):
+                    p_data = st.date_input("Data Programării", value=date.today())
+                    p_tip = st.text_input("Tip (ex: Analize, Consult)")
+                    p_clinica = st.text_input("Clinică / Doctor")
+                    p_alerta = st.text_input("Zile Alertă (ex: 1, 3, 7 zile înainte)", value="1, 3")
+                    p_obs = st.text_area("Observații / Pregătire")
+
+                    if st.form_submit_button("Salvează Programarea", type="primary"):
+                        if p_tip:
+                            new_p = pd.DataFrame([{
+                                "Dată": p_data.strftime("%Y-%m-%d"),
+                                "Tip": p_tip,
+                                "Clinică": p_clinica,
+                                "Zile_Alerta": p_alerta,
+                                "Observații": p_obs
+                            }])
+                            st.session_state.prog_df = pd.concat([st.session_state.prog_df, new_p], ignore_index=True)
+                            save_all_files()
+                            st.success("Programare salvată!")
+                            trigger_rerun()
+
+        with col_p2:
+            with st.container(border=True):
+                st.markdown("#### 🔔 Testează & Trimite Alerte pe Email Acum")
+                destinatar_test = st.text_input("Adresă email destinatar", value=st.session_state.settings.get("email_sender", ""))
+                
+                if st.button("📨 Trimite Notificări Programări pe Email", type="primary"):
+                    if not destinatar_test:
+                        st.error("Completează adresa de email în setări sau în câmpul de sus.")
+                    else:
+                        trimis_ok = 0
+                        azi = datetime.now().date()
+                        
+                        mesaj_final = "🔔 ALERTE PROGRAMĂRI MEDICALE - HEALTHTRACK PRO\n\n"
+                        for _, row in st.session_state.prog_df.iterrows():
+                            try:
+                                p_date = datetime.strptime(str(row["Dată"]), "%Y-%m-%d").date()
+                                zile_ramase = (p_date - azi).days
+                                zile_alerta_list = [int(x.strip()) for x in str(row["Zile_Alerta"]).split(",") if x.strip().isdigit()]
+                                
+                                if zile_ramase in zile_alerta_list or zile_ramase == 0:
+                                    mesaj_final += f"• {row['Tip']} la {row['Clinică']} pe data de {row['Dată']} (Au rămas {zile_ramase} zile!)\n"
+                                    trimis_ok += 1
+                            except:
+                                pass
+                        
+                        if trimis_ok > 0:
+                            succes, rez = trimite_email_alerta(destinatar_test, "🔔 Memento Programare Medicală", mesaj_final)
+                            if succes:
+                                st.success("Notificările au fost trimise cu succes pe email!")
+                            else:
+                                st.error(rez)
+                        else:
+                            st.info("Nicio programare nu se află în intervalul setat pentru alerte astăzi.")
 
 # ----------------- TAB: SETĂRI & ADMIN -----------------
 with tab_dict["⚙️ Setări"]:
-    st.markdown("### ⚙️ Setări Generale, Roluri & Istoric")
+    st.markdown("### ⚙️ Setări Generale, Credențiale Email & Utilizatori")
     
-    # GESTIONARE ȘI CREARE UTILIZATORI (ADMIN)
     if is_admin:
         col_u1, col_u2 = st.columns(2)
         with col_u1:
@@ -653,16 +795,11 @@ with tab_dict["⚙️ Setări"]:
     
     col_set1, col_set2 = st.columns(2)
     with col_set1:
-        st.markdown("#### 🔔 Setări Notificări & Google Drive Backup")
-        st.session_state.settings["notif_enabled"] = st.checkbox("Activează Notificările", value=st.session_state.settings["notif_enabled"])
-        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("#### ✉️ Configurare Server Trimis Email")
+        st.session_state.settings["email_sender"] = st.text_input("Adresa ta de Gmail (expeditor)", value=st.session_state.settings.get("email_sender", ""))
+        st.session_state.settings["email_password"] = st.text_input("Parolă aplicație Google (App Password)", type="password", value=st.session_state.settings.get("email_password", ""))
+        st.markdown("<small>💡 *Notă: Pentru Gmail, trebuie să generezi o **App Password** din setările contului tău Google.*</small>", unsafe_allow_html=True)
         
-        st.markdown("#### ☁️ Sincronizare Google Drive (Backup Automat)")
-        st.info("Pentru backup automat la fiecare 2 zile în Google Drive, fișierul `date_medicale_utilizator.csv` poate fi trimis direct în cloud prin API-ul Google.")
-        
-        if st.button("🚀 Testează / Sincronizează acum în Google Drive", type="primary"):
-            st.warning("Pentru ca sincronizarea automată să pornească pe server, este necesar fișierul de acreditări `credentials.json` de la Google Cloud Console în folderul aplicației. Odată configurat, backup-ul se va suprascrie automat la fiecare 2 zile.")
-
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("#### 💾 Backup Manual (CSV)")
         if not view_df.empty:
@@ -685,8 +822,9 @@ with tab_dict["⚙️ Setări"]:
 
     with col_set2:
         st.markdown("#### 🎯 Valori Țintă Medicale (pentru culori PDF/Ecrane)")
-        st.session_state.settings["target_glic_min"] = st.number_input("Glicemie Min Țintă", value=st.session_state.settings["target_glic_min"], disabled=not is_admin)
-        st.session_state.settings["target_glic_max"] = st.number_input("Glicemie Max Țintă", value=st.session_state.settings["target_glic_max"], disabled=not is_admin)
+        st.session_state.settings["target_glic_min"] = st.number_input("Glicemie Min Înainte Masă", value=st.session_state.settings["target_glic_min"], disabled=not is_admin)
+        st.session_state.settings["target_glic_max"] = st.number_input("Glicemie Max Înainte Masă", value=st.session_state.settings["target_glic_max"], disabled=not is_admin)
+        st.session_state.settings["target_glic_post_max"] = st.number_input("Glicemie Max După Masă", value=st.session_state.settings["target_glic_post_max"], disabled=not is_admin)
         st.session_state.settings["target_ta_sis"] = st.number_input("TA Sistolică Max Țintă", value=st.session_state.settings["target_ta_sis"], disabled=not is_admin)
         st.session_state.settings["target_ta_dia"] = st.number_input("TA Diastolică Max Țintă", value=st.session_state.settings["target_ta_dia"], disabled=not is_admin)
 

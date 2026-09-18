@@ -1,4 +1,5 @@
 import io
+import os
 import re
 import unicodedata
 from datetime import date, datetime
@@ -106,9 +107,9 @@ if "settings" not in st.session_state:
       "notif_enabled": True,
       "notif_days": 7,
       "target_glic_min": 70,
-      "target_glic_max": 120,  # Înainte de masă
+      "target_glic_max": 120,
       "target_glic_post_min": 70,
-      "target_glic_post_max": 160,  # După masă
+      "target_glic_post_max": 160,
       "target_ta_sis": 120,
       "target_ta_dia": 80,
   }
@@ -205,11 +206,24 @@ if st.sidebar.button("🚪 Deconectare", use_container_width=True):
 
 st.sidebar.markdown("---")
 
+# ==========================================
+# GESTIONARE DATE LOCALE CU PERSISTENȚĂ (CSV)
+# ==========================================
+DATA_FILE = "date_medicale_utilizator.csv"
 
-# ==========================================
-# GESTIONARE DATE LOCALE (SESSION STATE) - GOL V2
-# ==========================================
+
 def get_initial_data():
+  if os.path.exists(DATA_FILE):
+    try:
+      df_saved = pd.read_csv(DATA_FILE)
+      if "Dată" in df_saved.columns:
+        df_saved["Dată"] = pd.to_datetime(
+            df_saved["Dată"], format="%d.%m.%Y", errors="coerce"
+        )
+      return df_saved
+    except Exception:
+      pass
+
   return pd.DataFrame(
       columns=[
           "Dată",
@@ -275,6 +289,15 @@ def save_local_record(date_str, moment_str, glic_v, sis_v, dia_v, puls_v, obs_v)
     )
 
   st.session_state.local_df_v2 = current_df
+
+  # Salvare permanentă pe disc (nu se pierde la Clear Cache)
+  try:
+    df_to_save = current_df.copy()
+    if pd.api.types.is_datetime64_any_dtype(df_to_save[date_col]):
+      df_to_save[date_col] = df_to_save[date_col].dt.strftime("%d.%m.%Y")
+    df_to_save.to_csv(DATA_FILE, index=False)
+  except Exception as e:
+    print(f"Erore la salvarea fișierului: {e}")
 
 
 def format_table_column(series):
@@ -540,10 +563,11 @@ with tab_dict["📊 Jurnal & Grafice"]:
             lambda r: evaluate_glic(r[col_glic], r[moment_col]), axis=1
         )
         df_g_tab[col_glic] = format_table_column(df_g_tab[col_glic])
+        df_g_tab = df_g_tab[df_g_tab[col_glic] != "Nemăsurat"]
         st.dataframe(
             apply_color_styling(df_g_tab, ["Status Glicemie"]),
             use_container_width=True,
-            height=350,
+            height=1000,
         )
 
     with sub_tab_ta:
@@ -600,10 +624,17 @@ with tab_dict["📊 Jurnal & Grafice"]:
         )
         df_t_tab[col_sis] = format_table_column(df_t_tab[col_sis])
         df_t_tab[col_dia] = format_table_column(df_t_tab[col_dia])
+
+        # Excludem rândurile nemăsurate pentru Tensiune
+        df_t_tab = df_t_tab[
+            (df_t_tab[col_sis] != "Nemăsurat")
+            | (df_t_tab[col_dia] != "Nemăsurat")
+        ]
+
         st.dataframe(
             apply_color_styling(df_t_tab, ["Status Tensiune"]),
             use_container_width=True,
-            height=350,
+            height=1000,
         )
 
     with sub_tab_puls:
@@ -643,10 +674,14 @@ with tab_dict["📊 Jurnal & Grafice"]:
         df_p_tab[date_col] = df_p_tab[date_col].dt.strftime("%d.%m.%Y")
         df_p_tab["Status Puls"] = df_p_tab[col_puls].apply(evaluate_puls)
         df_p_tab[col_puls] = format_table_column(df_p_tab[col_puls])
+
+        # Excludem rândurile nemăsurate pentru Puls
+        df_p_tab = df_p_tab[df_p_tab[col_puls] != "Nemăsurat"]
+
         st.dataframe(
             apply_color_styling(df_p_tab, ["Status Puls"]),
             use_container_width=True,
-            height=350,
+            height=1000,
         )
 
     with sub_tab_all:
@@ -667,7 +702,7 @@ with tab_dict["📊 Jurnal & Grafice"]:
       if col_puls in df_all.columns:
         df_all["St. Puls"] = df_all[col_puls].apply(evaluate_puls)
         df_all[col_puls] = format_table_column(df_all[col_puls])
-      st.dataframe(df_all, use_container_width=True, height=450)
+      st.dataframe(df_all, use_container_width=True, height=1000)
 
 # ----------------- TAB: ADAUGĂ / SUPRASCRIE (ADMIN) -----------------
 if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
@@ -1216,6 +1251,20 @@ with tab_dict["⚙️ Setări"]:
           if own_pass:
             st.session_state.users[st.session_state.user]["pass"] = own_pass
             st.success("Parola ta a fost actualizată!")
+
+    # Opțiune de Backup / Siguranță suplimentară
+    with st.container(border=True):
+      st.markdown("#### 💾 Siguranță Date (Backup)")
+      if os.path.exists(DATA_FILE):
+        with open(DATA_FILE, "rb") as f:
+          st.download_button(
+              "📥 Descarcă Backup Bază de Date (CSV)",
+              f,
+              file_name="backup_date_medicale.csv",
+              mime="text/csv",
+          )
+      else:
+        st.info("Niciun fișier de backup generat momentan.")
 
   with s2:
     with st.container(border=True):

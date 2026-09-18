@@ -334,7 +334,7 @@ def save_to_google_sheet_or_local(
         ws.append_row(new_row)
       success_gspread = True
     except Exception:
-      pass  Continuăm cu salvarea locală în memorie în caz de eroare gspread
+      pass # Continuăm cu salvarea locală în memorie în caz de eroare gspread
 
   # Actualizăm obligatoriu și starea locală din sesiune ca să se vadă instant în grafice
   mask = (df[date_col].dt.strftime("%d.%m.%Y") == date_str) & (

@@ -171,32 +171,20 @@ st.sidebar.markdown("---")
 
 
 # ==========================================
-# GESTIONARE DATE LOCALE (SESSION STATE)
+# GESTIONARE DATE LOCALE (SESSION STATE) - GOL
 # ==========================================
 def get_initial_data():
-  return pd.DataFrame({
-      "Dată": [
-          "12.09.2026",
-          "12.09.2026",
-          "12.09.2026",
-          "13.09.2026",
-          "13.09.2026",
-          "13.09.2026",
-      ],
-      "Moment Zi": [
-          "Dimineața - Înainte de masă",
-          "Prânz - Înainte de masă",
-          "Seara - După masă",
-          "Dimineața - Înainte de masă",
-          "Prânz - După masă",
-          "Seara - Înainte de masă",
-      ],
-      "Glicemie": [105, 115, 135, 98, 140, 65],
-      "Sistolică": [122, 121, 124, 118, 126, 119],
-      "Diastolică": [78, 77, 81, 75, 82, 76],
-      "Puls": [72, 72, 74, 70, 76, 105],
-      "Observații": ["Ajeun", "Prânz OK", "Cină", "Ajeun", "Prânz", "Seară"],
-  })
+  return pd.DataFrame(
+      columns=[
+          "Dată",
+          "Moment Zi",
+          "Glicemie",
+          "Sistolică",
+          "Diastolică",
+          "Puls",
+          "Observații",
+      ]
+  )
 
 
 if "local_df" not in st.session_state:
@@ -204,7 +192,6 @@ if "local_df" not in st.session_state:
 
 df = st.session_state.local_df.copy()
 
-# Conversie sigură a coloanei de dată
 date_col = "Dată"
 moment_col = "Moment Zi"
 col_glic = "Glicemie"
@@ -212,7 +199,7 @@ col_sis = "Sistolică"
 col_dia = "Diastolică"
 col_puls = "Puls"
 
-if date_col in df.columns:
+if date_col in df.columns and not df.empty:
   df[date_col] = pd.to_datetime(
       df[date_col].astype(str).str.strip(), format="%d.%m.%Y", errors="coerce"
   )
@@ -221,13 +208,14 @@ if date_col in df.columns:
 
 def save_local_record(date_str, moment_str, glic_v, sis_v, dia_v, puls_v, obs_v):
   global df
-  # Lucrăm direct pe starea din sesiune ca să păstrăm consistența
   current_df = st.session_state.local_df.copy()
 
-  # Transformăm coloana de dată în format string pentru comparație sigură
-  mask = (current_df[date_col].astype(str) == date_str) & (
-      current_df[moment_col].astype(str) == moment_str
-  )
+  if not current_df.empty and date_col in current_df.columns:
+    mask = (current_df[date_col].astype(str) == date_str) & (
+        current_df[moment_col].astype(str) == moment_str
+    )
+  else:
+    mask = pd.Series([False] * len(current_df))
 
   if mask.any():
     current_df.loc[mask, col_glic] = glic_v
@@ -356,7 +344,12 @@ tab_dict = {title: tabs[i] for i, title in enumerate(tab_titles)}
 with tab_dict["📊 Jurnal & Grafice"]:
   st.markdown("### 📊 Tablou de Bord Medical")
 
-  if not df.empty and date_col in df.columns:
+  if df.empty:
+    st.info(
+        "📭 Nu există nicio înregistrare momentan. Folosește tabul **'➕ Adaugă /"
+        " Suprascrie'** pentru a introduce primele date!"
+    )
+  else:
     avg_glic_str = "Nemăsurat"
     if col_glic in df.columns:
       s_glic_all = (
@@ -460,14 +453,12 @@ with tab_dict["📊 Jurnal & Grafice"]:
 
     x_data_strict = df[date_col].dt.strftime("%d.%m.%Y")
 
-    # 1. TAB GLICEMIE
     with sub_tab_glic:
       st.markdown("#### 🩸 Evoluție și Tabel Dedicat - Glicemie")
       if col_glic in df.columns:
         glic_vals = pd.to_numeric(df[col_glic], errors="coerce").replace(
             0, None
         )
-
         fig_g = go.Figure()
         fig_g.add_trace(
             go.Scatter(
@@ -505,20 +496,17 @@ with tab_dict["📊 Jurnal & Grafice"]:
         df_g_tab[date_col] = df_g_tab[date_col].dt.strftime("%d.%m.%Y")
         df_g_tab["Status Glicemie"] = df_g_tab[col_glic].apply(evaluate_glic)
         df_g_tab[col_glic] = format_table_column(df_g_tab[col_glic])
-
         st.dataframe(
             apply_color_styling(df_g_tab, ["Status Glicemie"]),
             use_container_width=True,
             height=350,
         )
 
-    # 2. TAB TENSIUNE ARTERIALĂ
     with sub_tab_ta:
       st.markdown("#### 🫀 Evoluție și Tabel Dedicat - Tensiune Arterială")
       if col_sis in df.columns and col_dia in df.columns:
         sis_vals = pd.to_numeric(df[col_sis], errors="coerce").replace(0, None)
         dia_vals = pd.to_numeric(df[col_dia], errors="coerce").replace(0, None)
-
         fig_ta = go.Figure()
         fig_ta.add_trace(
             go.Scatter(
@@ -568,21 +556,18 @@ with tab_dict["📊 Jurnal & Grafice"]:
         )
         df_t_tab[col_sis] = format_table_column(df_t_tab[col_sis])
         df_t_tab[col_dia] = format_table_column(df_t_tab[col_dia])
-
         st.dataframe(
             apply_color_styling(df_t_tab, ["Status Tensiune"]),
             use_container_width=True,
             height=350,
         )
 
-    # 3. TAB PULS
     with sub_tab_puls:
       st.markdown("#### 💓 Evoluție și Tabel Dedicat - Puls")
       if col_puls in df.columns:
         puls_vals = pd.to_numeric(df[col_puls], errors="coerce").replace(
             0, None
         )
-
         fig_p = go.Figure()
         fig_p.add_trace(
             go.Scatter(
@@ -614,19 +599,16 @@ with tab_dict["📊 Jurnal & Grafice"]:
         df_p_tab[date_col] = df_p_tab[date_col].dt.strftime("%d.%m.%Y")
         df_p_tab["Status Puls"] = df_p_tab[col_puls].apply(evaluate_puls)
         df_p_tab[col_puls] = format_table_column(df_p_tab[col_puls])
-
         st.dataframe(
             apply_color_styling(df_p_tab, ["Status Puls"]),
             use_container_width=True,
             height=350,
         )
 
-    # 4. TAB TOATE DATELE
     with sub_tab_all:
       st.markdown("#### 📋 Tabel General Complet cu Statusuri")
       df_all = df.copy()
       df_all[date_col] = df_all[date_col].dt.strftime("%d.%m.%Y")
-
       if col_glic in df_all.columns:
         df_all["St. Glicemie"] = df_all[col_glic].apply(evaluate_glic)
         df_all[col_glic] = format_table_column(df_all[col_glic])
@@ -639,7 +621,6 @@ with tab_dict["📊 Jurnal & Grafice"]:
       if col_puls in df_all.columns:
         df_all["St. Puls"] = df_all[col_puls].apply(evaluate_puls)
         df_all[col_puls] = format_table_column(df_all[col_puls])
-
       st.dataframe(df_all, use_container_width=True, height=450)
 
 # ----------------- TAB: ADAUGĂ / SUPRASCRIE (ADMIN) -----------------
@@ -908,183 +889,185 @@ with tab_dict["📄 Raport PDF"]:
     story.append(Paragraph(date_text, styles["Normal"]))
     story.append(Spacer(1, 10))
 
-    x_labels = data_frame[date_col].dt.strftime("%d.%m.%Y").tolist()
+    if not data_frame.empty:
+      x_labels = data_frame[date_col].dt.strftime("%d.%m.%Y").tolist()
 
-    if (
-        include_glic
-        and col_glic in data_frame.columns
-        and not data_frame[col_glic].isna().all()
-    ):
-      y_g = pd.to_numeric(data_frame[col_glic], errors="coerce").fillna(0)
-      img_g = generate_pdf_chart(
-          x_labels, y_g, "Evolutie Glicemie (mg/dL)", "mg/dL", "#0284c7"
-      )
-      story.append(Image(img_g, width=500, height=150))
-      story.append(Spacer(1, 8))
-
-    if (
-        include_ta
-        and col_sis in data_frame.columns
-        and col_dia in data_frame.columns
-    ):
-      plt.figure(figsize=(7.5, 2.2))
-      y_s = pd.to_numeric(data_frame[col_sis], errors="coerce").fillna(0)
-      y_d = pd.to_numeric(data_frame[col_dia], errors="coerce").fillna(0)
-      plt.plot(
-          x_labels,
-          y_s,
-          marker="o",
-          color="#ef4444",
-          linewidth=2.2,
-          label="Sistol.",
-      )
-      plt.plot(
-          x_labels,
-          y_d,
-          marker="s",
-          color="#f59e0b",
-          linewidth=2.2,
-          label="Diastol.",
-      )
-      for xi, ys, yd in zip(x_labels, y_s, y_d):
-        if ys > 0:
-          plt.annotate(
-              str(int(ys)),
-              (xi, ys),
-              textcoords="offset points",
-              xytext=(0, 6),
-              ha="center",
-              fontsize=7.5,
-              fontweight="bold",
-              bbox=dict(
-                  boxstyle="round,pad=0.2",
-                  fc="white",
-                  ec="#ef4444",
-                  alpha=0.85,
-              ),
-          )
-        if yd > 0:
-          plt.annotate(
-              str(int(yd)),
-              (xi, yd),
-              textcoords="offset points",
-              xytext=(0, -12),
-              ha="center",
-              fontsize=7.5,
-              fontweight="bold",
-              bbox=dict(
-                  boxstyle="round,pad=0.2",
-                  fc="white",
-                  ec="#f59e0b",
-                  alpha=0.85,
-              ),
-          )
-      plt.title(
-          "Evolutie Tensiune Arteriala (mmHg)",
-          fontsize=10,
-          fontweight="bold",
-          color="#1e3a8a",
-          pad=12,
-      )
-      plt.ylabel("mmHg", fontsize=9, fontweight="bold")
-      plt.xticks(rotation=20, fontsize=8)
-      plt.yticks(fontsize=8)
-      plt.legend(loc="upper left", fontsize=8)
-      plt.grid(True, linestyle=":", alpha=0.6)
-      plt.tight_layout()
-
-      img_ta_buf = io.BytesIO()
-      plt.savefig(img_ta_buf, format="png", dpi=200)
-      plt.close()
-      img_ta_buf.seek(0)
-
-      story.append(Image(img_ta_buf, width=500, height=150))
-      story.append(Spacer(1, 8))
-
-    if (
-        include_puls
-        and col_puls in data_frame.columns
-        and not data_frame[col_puls].isna().all()
-    ):
-      y_p = pd.to_numeric(data_frame[col_puls], errors="coerce").fillna(0)
-      img_p = generate_pdf_chart(
-          x_labels, y_p, "Evolutie Puls (bpm)", "bpm", "#10b981"
-      )
-      story.append(Image(img_p, width=500, height=150))
-      story.append(Spacer(1, 8))
-
-    if include_tables and not data_frame.empty:
-      story.append(Spacer(1, 6))
-      story.append(
-          Paragraph("<b>Tabel Centralizator Date</b>", styles["Heading2"])
-      )
-      story.append(Spacer(1, 4))
-
-      df_pdf = data_frame.copy()
-      df_pdf[date_col] = df_pdf[date_col].dt.strftime("%d.%m.%Y")
-
-      if col_glic in df_pdf.columns:
-        df_pdf["St. Glicemie"] = df_pdf[col_glic].apply(evaluate_glic)
-        df_pdf[col_glic] = format_table_column(df_pdf[col_glic])
-      if col_sis in df_pdf.columns and col_dia in df_pdf.columns:
-        df_pdf["St. Tensiune"] = df_pdf.apply(
-            lambda r: evaluate_ta(r[col_sis], r[col_dia]), axis=1
+      if (
+          include_glic
+          and col_glic in data_frame.columns
+          and not data_frame[col_glic].isna().all()
+      ):
+        y_g = pd.to_numeric(data_frame[col_glic], errors="coerce").fillna(0)
+        img_g = generate_pdf_chart(
+            x_labels, y_g, "Evolutie Glicemie (mg/dL)", "mg/dL", "#0284c7"
         )
-        df_pdf[col_sis] = format_table_column(df_pdf[col_sis])
-        df_pdf[col_dia] = format_table_column(df_pdf[col_dia])
-      if col_puls in df_pdf.columns:
-        df_pdf["St. Puls"] = df_pdf[col_puls].apply(evaluate_puls)
-        df_pdf[col_puls] = format_table_column(df_pdf[col_puls])
+        story.append(Image(img_g, width=500, height=150))
+        story.append(Spacer(1, 8))
 
-      clean_cols = [remove_diacritics(c) for c in df_pdf.columns]
-      table_data = [clean_cols]
+      if (
+          include_ta
+          and col_sis in data_frame.columns
+          and col_dia in data_frame.columns
+      ):
+        plt.figure(figsize=(7.5, 2.2))
+        y_s = pd.to_numeric(data_frame[col_sis], errors="coerce").fillna(0)
+        y_d = pd.to_numeric(data_frame[col_dia], errors="coerce").fillna(0)
+        plt.plot(
+            x_labels,
+            y_s,
+            marker="o",
+            color="#ef4444",
+            linewidth=2.2,
+            label="Sistol.",
+        )
+        plt.plot(
+            x_labels,
+            y_d,
+            marker="s",
+            color="#f59e0b",
+            linewidth=2.2,
+            label="Diastol.",
+        )
+        for xi, ys, yd in zip(x_labels, y_s, y_d):
+          if ys > 0:
+            plt.annotate(
+                str(int(ys)),
+                (xi, ys),
+                textcoords="offset points",
+                xytext=(0, 6),
+                ha="center",
+                fontsize=7.5,
+                fontweight="bold",
+                bbox=dict(
+                    boxstyle="round,pad=0.2",
+                    fc="white",
+                    ec="#ef4444",
+                    alpha=0.85,
+                ),
+            )
+          if yd > 0:
+            plt.annotate(
+                str(int(yd)),
+                (xi, yd),
+                textcoords="offset points",
+                xytext=(0, -12),
+                ha="center",
+                fontsize=7.5,
+                fontweight="bold",
+                bbox=dict(
+                    boxstyle="round,pad=0.2",
+                    fc="white",
+                    ec="#f59e0b",
+                    alpha=0.85,
+                ),
+            )
+        plt.title(
+            "Evolutie Tensiune Arteriala (mmHg)",
+            fontsize=10,
+            fontweight="bold",
+            color="#1e3a8a",
+            pad=12,
+        )
+        plt.ylabel("mmHg", fontsize=9, fontweight="bold")
+        plt.xticks(rotation=20, fontsize=8)
+        plt.yticks(fontsize=8)
+        plt.legend(loc="upper left", fontsize=8)
+        plt.grid(True, linestyle=":", alpha=0.6)
+        plt.tight_layout()
 
-      t_style = [
-          ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e3a8a")),
-          ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
-          ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-          ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-          ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-          ("FONTSIZE", (0, 0), (-1, -1), 6.5),
-          ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
-      ]
+        img_ta_buf = io.BytesIO()
+        plt.savefig(img_ta_buf, format="png", dpi=200)
+        plt.close()
+        img_ta_buf.seek(0)
+        story.append(Image(img_ta_buf, width=500, height=150))
+        story.append(Spacer(1, 8))
 
-      for r_idx, (_, row) in enumerate(df_pdf.iterrows(), start=1):
-        clean_row = [remove_diacritics(str(v)) for v in row.values]
-        table_data.append(clean_row)
+      if (
+          include_puls
+          and col_puls in data_frame.columns
+          and not data_frame[col_puls].isna().all()
+      ):
+        y_p = pd.to_numeric(data_frame[col_puls], errors="coerce").fillna(0)
+        img_p = generate_pdf_chart(
+            x_labels, y_p, "Evolutie Puls (bpm)", "bpm", "#10b981"
+        )
+        story.append(Image(img_p, width=500, height=150))
+        story.append(Spacer(1, 8))
 
-        for c_idx, val in enumerate(row.values):
-          val_str = str(val)
-          if "🟢" in val_str:
-            t_style.append((
-                "BACKGROUND",
-                (c_idx, r_idx),
-                (c_idx, r_idx),
-                colors.HexColor("#d1fae5"),
-            ))
-            t_style.append((
-                "TEXTCOLOR",
-                (c_idx, r_idx),
-                (c_idx, r_idx),
-                colors.HexColor("#065f46"),
-            ))
-          elif "🔴" in val_str:
-            t_style.append((
-                "BACKGROUND",
-                (c_idx, r_idx),
-                (c_idx, r_idx),
-                colors.HexColor("#fee2e2"),
-            ))
-            t_style.append((
-                "TEXTCOLOR",
-                (c_idx, r_idx),
-                (c_idx, r_idx),
-                colors.HexColor("#991b1b"),
-            ))
+      if include_tables:
+        story.append(Spacer(1, 6))
+        story.append(
+            Paragraph("<b>Tabel Centralizator Date</b>", styles["Heading2"])
+        )
+        story.append(Spacer(1, 4))
 
-      t = Table(table_data)
-      t.setStyle(TableStyle(t_style))
-      story.append(t)
+        df_pdf = data_frame.copy()
+        df_pdf[date_col] = df_pdf[date_col].dt.strftime("%d.%m.%Y")
+
+        if col_glic in df_pdf.columns:
+          df_pdf["St. Glicemie"] = df_pdf[col_glic].apply(evaluate_glic)
+          df_pdf[col_glic] = format_table_column(df_pdf[col_glic])
+        if col_sis in df_pdf.columns and col_dia in df_pdf.columns:
+          df_pdf["St. Tensiune"] = df_pdf.apply(
+              lambda r: evaluate_ta(r[col_sis], r[col_dia]), axis=1
+          )
+          df_pdf[col_sis] = format_table_column(df_pdf[col_sis])
+          df_pdf[col_dia] = format_table_column(df_pdf[col_dia])
+        if col_puls in df_pdf.columns:
+          df_pdf["St. Puls"] = df_pdf[col_puls].apply(evaluate_puls)
+          df_pdf[col_puls] = format_table_column(df_pdf[col_puls])
+
+        clean_cols = [remove_diacritics(c) for c in df_pdf.columns]
+        table_data = [clean_cols]
+
+        t_style = [
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e3a8a")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 6.5),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
+        ]
+
+        for r_idx, (_, row) in enumerate(df_pdf.iterrows(), start=1):
+          clean_row = [remove_diacritics(str(v)) for v in row.values]
+          table_data.append(clean_row)
+
+          for c_idx, val in enumerate(row.values):
+            val_str = str(val)
+            if "🟢" in val_str:
+              t_style.append((
+                  "BACKGROUND",
+                  (c_idx, r_idx),
+                  (c_idx, r_idx),
+                  colors.HexColor("#d1fae5"),
+              ))
+              t_style.append((
+                  "TEXTCOLOR",
+                  (c_idx, r_idx),
+                  (c_idx, r_idx),
+                  colors.HexColor("#065f46"),
+              ))
+            elif "🔴" in val_str:
+              t_style.append((
+                  "BACKGROUND",
+                  (c_idx, r_idx),
+                  (c_idx, r_idx),
+                  colors.HexColor("#fee2e2"),
+              ))
+              t_style.append((
+                  "TEXTCOLOR",
+                  (c_idx, r_idx),
+                  (c_idx, r_idx),
+                  colors.HexColor("#991b1b"),
+              ))
+
+        t = Table(table_data)
+        t.setStyle(TableStyle(t_style))
+        story.append(t)
+    else:
+      story.append(Paragraph("Nu există date înregistrate.", styles["Normal"]))
 
     doc.build(story)
     buffer.seek(0)
@@ -1135,7 +1118,6 @@ with tab_dict["⚙️ Setări"]:
         target_user = st.selectbox(
             "Selectează utilizator pentru editare", user_list
         )
-
         updated_role = st.selectbox(
             "Schimbă Rol",
             ["Membru", "Doctor", "Administrator"],

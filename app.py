@@ -252,10 +252,21 @@ col_sis = "Sistolică"
 col_dia = "Diastolică"
 col_puls = "Puls"
 
+# --- FIX: nu re-parsa forțat cu formatul "%d.%m.%Y" dacă e deja datetime ---
+# Bug-ul original: după ce se salva o înregistrare, coloana Dată devenea
+# datetime64; la următorul rerun, .astype(str) o transforma în ceva gen
+# "2026-09-18 00:00:00", care nu se potrivea cu formatul strict "%d.%m.%Y",
+# deci to_datetime întorcea NaT pentru toate rândurile, iar dropna() le
+# ștergea pe toate -> tabelul și graficele rămâneau goale.
 if date_col in df.columns and not df.empty:
-  df[date_col] = pd.to_datetime(
-      df[date_col].astype(str).str.strip(), format="%d.%m.%Y", errors="coerce"
-  )
+  if pd.api.types.is_datetime64_any_dtype(df[date_col]):
+    df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
+  else:
+    df[date_col] = pd.to_datetime(
+        df[date_col].astype(str).str.strip(),
+        format="%d.%m.%Y",
+        errors="coerce",
+    )
   df = df.dropna(subset=[date_col])
   df = df.sort_values(by=date_col, ascending=True).reset_index(drop=True)
 

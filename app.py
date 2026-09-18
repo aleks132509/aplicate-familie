@@ -14,13 +14,6 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 import streamlit as st
 
-try:
-  import gspread
-  from google.oauth2.service_account import Credentials
-  HAS_GSPREAD = True
-except ImportError:
-  HAS_GSPREAD = False
-
 # ==========================================
 # CONFIGURARE PAGINĂ & THEME (DARK MODE)
 # ==========================================
@@ -118,11 +111,6 @@ if "settings" not in st.session_state:
       "target_ta_dia": 80,
   }
 
-if "local_df_override" not in st.session_state:
-  st.session_state.local_df_override = None
-
-GOOGLE_SHEET_URL = st.secrets.get("GOOGLE_SHEET_URL", "")
-
 # ==========================================
 # AUTENTIFICARE
 # ==========================================
@@ -183,9 +171,9 @@ st.sidebar.markdown("---")
 
 
 # ==========================================
-# DATE DEMO (STANDARDIZATE)
+# GESTIONARE DATE LOCALE (SESSION STATE)
 # ==========================================
-def get_mock_data():
+def get_initial_data():
   return pd.DataFrame({
       "Dată": [
           "12.09.2026",
@@ -211,146 +199,46 @@ def get_mock_data():
   })
 
 
-# ==========================================
-# ÎNCĂRCARE & CURĂȚARE DATE
-# ==========================================
-def load_and_clean_data(url):
-  if not url:
-    return get_mock_data()
+if "local_df" not in st.session_state:
+  st.session_state.local_df = get_initial_data()
 
-  try:
-    df_raw = pd.read_csv(url, dtype=str, header=None)
-    if df_raw.empty:
-      return get_mock_data()
+df = st.session_state.local_df.copy()
 
-    header_row_idx = None
-    for idx, row in df_raw.iterrows():
-      row_str = remove_diacritics(
-          " ".join([str(v) for v in row.dropna() if str(v) != "nan"])
-      ).lower()
-      if any(k in row_str for k in ["data", "glic", "tens", "sist", "puls"]):
-        header_row_idx = idx
-        break
-
-    if header_row_idx is not None:
-      df_clean = pd.read_csv(url, skiprows=header_row_idx, dtype=str)
-    else:
-      df_clean = pd.read_csv(url, dtype=str)
-
-    df_clean.columns = [str(c).strip() for c in df_clean.columns]
-    valid_cols = [
-        c for c in df_clean.columns if "unnamed" not in c.lower() and c != ""
-    ]
-    df_clean = df_clean[valid_cols].dropna(how="all")
-
-    if df_clean.empty:
-      return get_mock_data()
-
-    return df_clean
-
-  except Exception:
-    return get_mock_data()
-
-
-# Inițializare DataFrame de bază sau din memorie
-if st.session_state.local_df_override is None:
-  base_df = load_and_clean_data(GOOGLE_SHEET_URL)
-  st.session_state.local_df_override = base_df.copy()
-
-df = st.session_state.local_df_override.copy()
-
-if len(df.columns) >= 6:
-  df.columns = [
-      "Dată",
-      "Moment Zi",
-      "Glicemie",
-      "Sistolică",
-      "Diastolică",
-      "Puls",
-  ] + list(df.columns[6:])
-
-date_col = "Dată" if "Dată" in df.columns else df.columns[0]
-moment_col = "Moment Zi" if "Moment Zi" in df.columns else df.columns[1]
-col_glic = "Glicemie" if "Glicemie" in df.columns else df.columns[2]
-col_sis = "Sistolică" if "Sistolică" in df.columns else df.columns[3]
-col_dia = "Diastolică" if "Diastolică" in df.columns else df.columns[4]
-col_puls = "Puls" if "Puls" in df.columns else df.columns[5]
+# Conversie sigură a coloanei de dată
+date_col = "Dată"
+moment_col = "Moment Zi"
+col_glic = "Glicemie"
+col_sis = "Sistolică"
+col_dia = "Diastolică"
+col_puls = "Puls"
 
 if date_col in df.columns:
-  # Asigurăm conversia sigură a datelor în obiecte datetime
   df[date_col] = pd.to_datetime(
       df[date_col].astype(str).str.strip(), format="%d.%m.%Y", errors="coerce"
   )
-  if df[date_col].isna().all():
-    df[date_col] = pd.to_datetime(
-        df[date_col], dayfirst=True, errors="coerce"
-    )
-  # Sortare sigură fără a pierde rânduri valide
   df = df.sort_values(by=date_col, ascending=True).reset_index(drop=True)
 
 
-def save_to_google_sheet_or_local(
-    date_str, moment_str, glic_v, sis_v, dia_v, puls_v, obs_v
-):
+def save_local_record(date_str, moment_str, glic_v, sis_v, dia_v, puls_v, obs_v):
   global df
-  success_gspread = False
+  # Lucrăm direct pe starea din sesiune ca să păstrăm consistența
+  current_df = st.session_state.local_df.copy()
 
-  if HAS_GSPREAD and "gcp_service_account" in st.secrets:
-    try:
-      scopes = ["https://www.googleapis.com/auth/spreadsheets"]
-      creds = Credentials.from_service_account_info(
-          dict(st.secrets["gcp_service_account"]), scopes=scopes
-      )
-      client = gspread.authorize(creds)
-      sheet_url = st.secrets["GOOGLE_SHEET_URL"]
-      sh = client.open_by_url(sheet_url)
-      ws = sh.get_worksheet(0)
-
-      records = ws.get_all_values()
-      row_to_update = None
-      if records:
-        for idx, row in enumerate(records[1:], start=2):
-          if (
-              len(row) >= 2
-              and row[0].strip() == date_str
-              and row[1].strip() == moment_str
-          ):
-            row_to_update = idx
-            break
-
-      new_row = [
-          date_str,
-          moment_str,
-          str(glic_v) if glic_v > 0 else "0",
-          str(sis_v) if sis_v > 0 else "0",
-          str(dia_v) if dia_v > 0 else "0",
-          str(puls_v) if puls_v > 0 else "0",
-          obs_v,
-      ]
-
-      if row_to_update:
-        ws.update(f"A{row_to_update}:G{row_to_update}", [new_row])
-      else:
-        ws.append_row(new_row)
-      success_gspread = True
-    except Exception:
-      pass # Continuăm cu salvarea locală în memorie în caz de eroare gspread
-
-  # Actualizăm obligatoriu și starea locală din sesiune ca să se vadă instant în grafice
-  mask = (df[date_col].dt.strftime("%d.%m.%Y") == date_str) & (
-      df[moment_col].astype(str) == moment_str
+  # Transformăm coloana de dată în format string pentru comparație sigură
+  mask = (current_df[date_col].astype(str) == date_str) & (
+      current_df[moment_col].astype(str) == moment_str
   )
 
   if mask.any():
-    df.loc[mask, col_glic] = glic_v
-    df.loc[mask, col_sis] = sis_v
-    df.loc[mask, col_dia] = dia_v
-    df.loc[mask, col_puls] = puls_v
-    if "Observații" in df.columns:
-      df.loc[mask, "Observații"] = obs_v
+    current_df.loc[mask, col_glic] = glic_v
+    current_df.loc[mask, col_sis] = sis_v
+    current_df.loc[mask, col_dia] = dia_v
+    current_df.loc[mask, col_puls] = puls_v
+    if "Observații" in current_df.columns:
+      current_df.loc[mask, "Observații"] = obs_v
   else:
     new_record = {
-        date_col: pd.to_datetime(date_str, format="%d.%m.%Y"),
+        date_col: date_str,
         moment_col: moment_str,
         col_glic: glic_v,
         col_sis: sis_v,
@@ -358,11 +246,11 @@ def save_to_google_sheet_or_local(
         col_puls: puls_v,
         "Observații": obs_v,
     }
-    df = pd.concat([df, pd.DataFrame([new_record])], ignore_index=True)
+    current_df = pd.concat(
+        [current_df, pd.DataFrame([new_record])], ignore_index=True
+    )
 
-  # Salvăm permanent în session_state ca să nu se piardă la navigare sau rerun
-  st.session_state.local_df_override = df.copy()
-  return True
+  st.session_state.local_df = current_df
 
 
 def format_table_column(series):
@@ -851,7 +739,7 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
 
         if submitted:
           d_str = selected_date.strftime("%d.%m.%Y")
-          saved = save_to_google_sheet_or_local(
+          save_local_record(
               d_str,
               selected_moment,
               glic_input,
@@ -860,12 +748,11 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
               puls_input,
               obs_input,
           )
-          if saved:
-            st.session_state["success_message"] = (
-                f"✅ Înregistrarea pentru {d_str} ({selected_moment}) a fost"
-                " salvată cu succes!"
-            )
-            trigger_rerun()
+          st.session_state["success_message"] = (
+              f"✅ Înregistrarea pentru {d_str} ({selected_moment}) a fost"
+              " salvată cu succes!"
+          )
+          trigger_rerun()
 
 # ----------------- TAB: TRATAMENT -----------------
 with tab_dict["💊 Tratament"]:

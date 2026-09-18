@@ -585,7 +585,11 @@ with tab_dict["📊 Jurnal & Grafice"]:
                 fig_g.add_hline(y=max_post, line_dash="dash", line_color="#ef4444", annotation_text=f"Prag Maxim După Masă ({max_post})")
                 fig_g.add_hline(y=max_pre, line_dash="dot", line_color="#f59e0b", annotation_text=f"Prag Maxim Înainte Masă ({max_pre})")
                 
-                fig_g.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=40, r=40, t=50, b=80), xaxis=dict(tickangle=-35))
+                # Scală dinamică adaptată dacă valorile trec de 200
+                max_glic_data = glic_vals.max() if not glic_vals.dropna().empty else 200
+                upper_limit_g = max(200, int(max_glic_data) + 30)
+                
+                fig_g.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=40, r=40, t=50, b=80), xaxis=dict(tickangle=-35), yaxis=dict(range=[0, upper_limit_g]))
                 st.plotly_chart(fig_g, use_container_width=True)
 
                 cols_g = [date_col, moment_col, col_glic, col_obs]
@@ -602,13 +606,14 @@ with tab_dict["📊 Jurnal & Grafice"]:
                 sis_vals = pd.to_numeric(view_df[col_sis], errors="coerce").replace(0, None)
                 dia_vals = pd.to_numeric(view_df[col_dia], errors="coerce").replace(0, None)
                 
-                sis_colors = ["#ef4444" if is_ta_spike(s, d) else "#ef4444" for s, d in zip(sis_vals, dia_vals)]
+                # Culoare bază sistolică: #db2777 (magenta/roz închis), devine roșu intens la spike
+                sis_colors = ["#ef4444" if is_ta_spike(s, d) else "#db2777" for s, d in zip(sis_vals, dia_vals)]
                 dia_colors = ["#ef4444" if is_ta_spike(s, d) else "#f59e0b" for s, d in zip(sis_vals, dia_vals)]
 
                 fig_ta = go.Figure()
                 fig_ta.add_trace(go.Scatter(
                     x=x_labels_composed, y=sis_vals, mode="lines+markers+text", name="Sistolică", 
-                    line=dict(color="#ef4444", width=3), marker=dict(size=11, color=sis_colors), 
+                    line=dict(color="#db2777", width=3), marker=dict(size=11, color=sis_colors), 
                     text=sis_vals, textposition="top center", textfont=dict(size=11, color="#ffffff"), 
                     texttemplate="<b>%{text}</b>", connectgaps=True
                 ))
@@ -947,7 +952,7 @@ if is_admin and "📅 Programări" in tab_dict:
 
 # ----------------- TAB: SETĂRI & ADMIN -----------------
 with tab_dict["⚙️ Setări"]:
-    st.markdown("### ⚙️ Setări Generale, Test Conexiune iCloud & Elemente Mese")
+    st.markdown("### ⚙️ Setări Generale, Test Conexiune iCloud & Gestiune Utilizatori")
     
     if is_admin:
         col_u1, col_u2 = st.columns(2)
@@ -973,18 +978,35 @@ with tab_dict["⚙️ Setări"]:
             with st.container(border=True):
                 st.markdown("#### 👥 Editează / Șterge Utilizator")
                 user_list = list(st.session_state.users.keys())
-                target_user = st.selectbox("Selectează utilizator", user_list)
-                current_target_role = st.session_state.users[target_user].get("role", "Membru")
-                role_options = ["Membru", "Doctor", "Administrator"]
-                updated_role = st.selectbox("Schimbă Rol", role_options, index=role_options.index(current_target_role))
-                updated_pass = st.text_input("Parolă Nouă (opțional)", type="password", key="pass_edit_user")
+                target_user = st.selectbox("Selectează utilizator", user_list, key="sel_user_manage")
+                
+                with st.form("form_manage_user"):
+                    current_target_role = st.session_state.users[target_user].get("role", "Membru")
+                    role_options = ["Membru", "Doctor", "Administrator"]
+                    updated_role = st.selectbox("Schimbă Rol", role_options, index=role_options.index(current_target_role))
+                    updated_pass = st.text_input("Parolă Nouă (opțional)", type="password", key="pass_edit_user")
+                    
+                    c_ub1, c_ub2 = st.columns(2)
+                    with c_ub1:
+                        btn_save_u = st.form_submit_button("💾 Salvează Modificări", type="primary")
+                    with c_ub2:
+                        btn_del_u = st.form_submit_button("🗑️ Șterge Utilizator", type="secondary")
+                        
+                    if btn_save_u:
+                        st.session_state.users[target_user]["role"] = updated_role
+                        if updated_pass:
+                            st.session_state.users[target_user]["pass"] = updated_pass
+                        st.success(f"Detaliile pentru {target_user} au fost actualizate!")
+                        trigger_rerun()
+                        
+                    if btn_del_u:
+                        if target_user == "Alex" and len(st.session_state.users) <= 1:
+                            st.error("Nu poți șterge administratorul principal dacă este singurul cont!")
+                        else:
+                            del st.session_state.users[target_user]
+                            st.success(f"Utilizatorul {target_user} a fost șters cu succes!")
+                            trigger_rerun()
 
-                if st.button("💾 Salvează Modificări Utilizator"):
-                    st.session_state.users[target_user]["role"] = updated_role
-                    if updated_pass:
-                        st.session_state.users[target_user]["pass"] = updated_pass
-                    st.success(f"Detaliile pentru {target_user} au fost actualizate!")
-                    trigger_rerun()
         st.markdown("<br>", unsafe_allow_html=True)
 
         with st.container(border=True):
@@ -1077,41 +1099,40 @@ with tab_dict["📄 Raport PDF"]:
         opt_tabele = st.checkbox("Include Tabelul Centralizator (Curat, Fără Diacritice/Nan) 📋", value=True)
 
     def generate_pdf_chart_glic(x_vals, y_vals, moments_list, title, ylabel, color_hex):
-        plt.figure(figsize=(8.0, 2.6))
+        # Lățime generoasă și înălțime optimizată pentru a separa valorile (stil tip interval/candlestick aerisit)
+        plt.figure(figsize=(8.5, 2.8))
         
-        # Desenăm segmentele liniei: dacă valoarea depășește pragul, linia devine roșie
         for i in range(len(y_vals) - 1):
             x_seg = [x_vals[i], x_vals[i+1]]
             y_seg = [y_vals[i], y_vals[i+1]]
             is_spike1 = is_glic_spike(y_vals[i], moments_list[i])
             is_spike2 = is_glic_spike(y_vals[i+1], moments_list[i+1])
             seg_color = "#ef4444" if (is_spike1 or is_spike2) else color_hex
-            plt.plot(x_seg, y_seg, linestyle="-", color=seg_color, linewidth=2.2)
+            plt.plot(x_seg, y_seg, linestyle="-", color=seg_color, linewidth=2.5)
 
         for xi, yi, m in zip(x_vals, y_vals, moments_list):
             if yi > 0:
                 is_spike = is_glic_spike(yi, m)
                 dot_color = "#ef4444" if is_spike else color_hex
-                plt.plot(xi, yi, marker="o", markersize=6, color=dot_color)
-                plt.annotate(str(int(yi)), (xi, yi), textcoords="offset points", xytext=(0, 6), ha="center", fontsize=7.5, fontweight="bold", bbox=dict(boxstyle="round,pad=0.15", fc="white", ec=dot_color, alpha=0.9))
-                
-        plt.title(title, fontsize=10, fontweight="bold", color="#1e3a8a", pad=14)
-        plt.ylabel(ylabel, fontsize=9, fontweight="bold")
-        plt.xticks(rotation=35, fontsize=7.5, ha="right")
-        plt.yticks(fontsize=8)
-        plt.grid(True, linestyle=":", alpha=0.6)
+                plt.plot(xi, yi, marker="o", markersize=7, color=dot_color)
+                plt.annotate(str(int(yi)), (xi, yi), textcoords="offset points", xytext=(0, 7), ha="center", fontsize=8, fontweight="bold", bbox=dict(boxstyle="round,pad=0.2", fc="white", ec=dot_color, alpha=0.95))
+        
+        plt.title(title, fontsize=11, fontweight="bold", color="#1e3a8a", pad=15)
+        plt.ylabel(ylabel, fontsize=9.5, fontweight="bold")
+        plt.xticks(rotation=25, fontsize=8, ha="right")
+        plt.yticks(fontsize=8.5)
+        plt.grid(True, linestyle=":", alpha=0.7)
         plt.tight_layout()
 
         img_buffer = io.BytesIO()
-        plt.savefig(img_buffer, format="png", dpi=220)
+        plt.savefig(img_buffer, format="png", dpi=240)
         plt.close()
         img_buffer.seek(0)
         return img_buffer
 
     def generate_pdf_chart_ta(x_vals, sis_vals, dia_vals, title):
-        plt.figure(figsize=(8.0, 2.6))
+        plt.figure(figsize=(8.5, 2.8))
         
-        # Liniile își schimbă culoarea în roșu pe segmentele unde apare un spike de tensiune
         for i in range(len(sis_vals) - 1):
             x_seg = [x_vals[i], x_vals[i+1]]
             s_seg = [sis_vals[i], sis_vals[i+1]]
@@ -1120,39 +1141,39 @@ with tab_dict["📄 Raport PDF"]:
             is_spike1 = is_ta_spike(sis_vals[i], dia_vals[i])
             is_spike2 = is_ta_spike(sis_vals[i+1], dia_vals[i+1])
             
-            s_color = "#ef4444" if (is_spike1 or is_spike2) else "#ef4444"
+            s_color = "#ef4444" if (is_spike1 or is_spike2) else "#db2777"
             d_color = "#ef4444" if (is_spike1 or is_spike2) else "#f59e0b"
             
-            plt.plot(x_seg, s_seg, linestyle="-", color=s_color, linewidth=2.2)
-            plt.plot(x_seg, d_seg, linestyle="-", color=d_color, linewidth=2.2)
+            plt.plot(x_seg, s_seg, linestyle="-", color=s_color, linewidth=2.5)
+            plt.plot(x_seg, d_seg, linestyle="-", color=d_color, linewidth=2.5)
         
         for xi, s, d in zip(x_vals, sis_vals, dia_vals):
             if s > 0 and d > 0:
                 is_spike = is_ta_spike(s, d)
-                s_color = "#ef4444" if is_spike else "#ef4444"
+                s_color = "#ef4444" if is_spike else "#db2777"
                 d_color = "#ef4444" if is_spike else "#f59e0b"
                 
-                plt.plot(xi, s, marker="o", markersize=6, color=s_color)
-                plt.annotate(str(int(s)), (xi, s), textcoords="offset points", xytext=(0, 6), ha="center", fontsize=7, fontweight="bold", bbox=dict(boxstyle="round,pad=0.15", fc="white", ec=s_color, alpha=0.9))
+                plt.plot(xi, s, marker="o", markersize=7, color=s_color)
+                plt.annotate(f"S:{int(s)}", (xi, s), textcoords="offset points", xytext=(0, 8), ha="center", fontsize=7.5, fontweight="bold", bbox=dict(boxstyle="round,pad=0.2", fc="white", ec=s_color, alpha=0.95))
                 
-                plt.plot(xi, d, marker="o", markersize=6, color=d_color)
-                plt.annotate(str(int(d)), (xi, d), textcoords="offset points", xytext=(0, -10), ha="center", fontsize=7, fontweight="bold", bbox=dict(boxstyle="round,pad=0.15", fc="white", ec=d_color, alpha=0.9))
+                plt.plot(xi, d, marker="o", markersize=7, color=d_color)
+                plt.annotate(f"D:{int(d)}", (xi, d), textcoords="offset points", xytext=(0, -12), ha="center", fontsize=7.5, fontweight="bold", bbox=dict(boxstyle="round,pad=0.2", fc="white", ec=d_color, alpha=0.95))
                 
-        plt.title(title, fontsize=10, fontweight="bold", color="#1e3a8a", pad=14)
-        plt.ylabel("mmHg", fontsize=9, fontweight="bold")
-        plt.xticks(rotation=35, fontsize=7.5, ha="right")
-        plt.yticks(fontsize=8)
-        plt.grid(True, linestyle=":", alpha=0.6)
+        plt.title(title, fontsize=11, fontweight="bold", color="#1e3a8a", pad=15)
+        plt.ylabel("mmHg", fontsize=9.5, fontweight="bold")
+        plt.xticks(rotation=25, fontsize=8, ha="right")
+        plt.yticks(fontsize=8.5)
+        plt.grid(True, linestyle=":", alpha=0.7)
         plt.tight_layout()
 
         img_buffer = io.BytesIO()
-        plt.savefig(img_buffer, format="png", dpi=220)
+        plt.savefig(img_buffer, format="png", dpi=240)
         plt.close()
         img_buffer.seek(0)
         return img_buffer
 
     def generate_pdf_chart_puls(x_vals, puls_vals, title):
-        plt.figure(figsize=(8.0, 2.6))
+        plt.figure(figsize=(8.5, 2.8))
         
         for i in range(len(puls_vals) - 1):
             x_seg = [x_vals[i], x_vals[i+1]]
@@ -1160,24 +1181,24 @@ with tab_dict["📄 Raport PDF"]:
             is_spike1 = is_puls_spike(puls_vals[i])
             is_spike2 = is_puls_spike(puls_vals[i+1])
             p_color = "#ef4444" if (is_spike1 or is_spike2) else "#10b981"
-            plt.plot(x_seg, p_seg, linestyle="-", color=p_color, linewidth=2.2)
+            plt.plot(x_seg, p_seg, linestyle="-", color=p_color, linewidth=2.5)
 
         for xi, p in zip(x_vals, puls_vals):
             if p > 0:
                 is_spike = is_puls_spike(p)
                 p_color = "#ef4444" if is_spike else "#10b981"
-                plt.plot(xi, p, marker="o", markersize=6, color=p_color)
-                plt.annotate(str(int(p)), (xi, p), textcoords="offset points", xytext=(0, 6), ha="center", fontsize=7.5, fontweight="bold", bbox=dict(boxstyle="round,pad=0.15", fc="white", ec=p_color, alpha=0.9))
+                plt.plot(xi, p, marker="o", markersize=7, color=p_color)
+                plt.annotate(str(int(p)), (xi, p), textcoords="offset points", xytext=(0, 7), ha="center", fontsize=8, fontweight="bold", bbox=dict(boxstyle="round,pad=0.2", fc="white", ec=p_color, alpha=0.95))
                 
-        plt.title(title, fontsize=10, fontweight="bold", color="#1e3a8a", pad=14)
-        plt.ylabel("bpm", fontsize=9, fontweight="bold")
-        plt.xticks(rotation=35, fontsize=7.5, ha="right")
-        plt.yticks(fontsize=8)
-        plt.grid(True, linestyle=":", alpha=0.6)
+        plt.title(title, fontsize=11, fontweight="bold", color="#1e3a8a", pad=15)
+        plt.ylabel("bpm", fontsize=9.5, fontweight="bold")
+        plt.xticks(rotation=25, fontsize=8, ha="right")
+        plt.yticks(fontsize=8.5)
+        plt.grid(True, linestyle=":", alpha=0.7)
         plt.tight_layout()
 
         img_buffer = io.BytesIO()
-        plt.savefig(img_buffer, format="png", dpi=220)
+        plt.savefig(img_buffer, format="png", dpi=240)
         plt.close()
         img_buffer.seek(0)
         return img_buffer
@@ -1195,7 +1216,6 @@ with tab_dict["📄 Raport PDF"]:
         story.append(Paragraph(date_text, ParagraphStyle("DateStyle", parent=styles["Normal"], alignment=1, spaceAfter=20)))
 
         if not data_frame.empty:
-            # Axă X în PDF cu format curat (doar data)
             x_data = [d.strftime('%d.%m') for d in data_frame[date_col]]
             moments_arr = data_frame[moment_col].tolist() if moment_col in data_frame.columns else [""] * len(data_frame)
             
@@ -1203,7 +1223,7 @@ with tab_dict["📄 Raport PDF"]:
                 g_vals = pd.to_numeric(data_frame[col_glic], errors='coerce').fillna(0).tolist()
                 story.append(Paragraph("Evolutie Glicemie", styles["Heading2"]))
                 img_buf = generate_pdf_chart_glic(x_data, g_vals, moments_arr, "Glicemie (mg/dL)", "mg/dL", "#38bdf8")
-                story.append(Image(img_buf, width=470, height=150))
+                story.append(Image(img_buf, width=470, height=155))
                 story.append(Spacer(1, 15))
                 
             if include_ta and col_sis in data_frame.columns and col_dia in data_frame.columns:
@@ -1211,14 +1231,14 @@ with tab_dict["📄 Raport PDF"]:
                 d_vals = pd.to_numeric(data_frame[col_dia], errors='coerce').fillna(0).tolist()
                 story.append(Paragraph("Evolutie Tensiune Arteriala", styles["Heading2"]))
                 img_buf = generate_pdf_chart_ta(x_data, s_vals, d_vals, "Tensiune Arteriala (mmHg)")
-                story.append(Image(img_buf, width=470, height=150))
+                story.append(Image(img_buf, width=470, height=155))
                 story.append(Spacer(1, 15))
                 
             if include_puls and col_puls in data_frame.columns:
                 p_vals = pd.to_numeric(data_frame[col_puls], errors='coerce').fillna(0).tolist()
                 story.append(Paragraph("Evolutie Puls", styles["Heading2"]))
                 img_buf = generate_pdf_chart_puls(x_data, p_vals, "Puls (bpm)")
-                story.append(Image(img_buf, width=470, height=150))
+                story.append(Image(img_buf, width=470, height=155))
                 story.append(Spacer(1, 15))
 
             if include_tables:

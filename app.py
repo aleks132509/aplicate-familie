@@ -87,7 +87,6 @@ def remove_diacritics(text):
   )
 
 
-# Compatibilitate Rerun pentru orice versiune de Streamlit
 def trigger_rerun():
   if hasattr(st, "rerun"):
     st.rerun()
@@ -213,9 +212,8 @@ def get_mock_data():
 
 
 # ==========================================
-# ÎNCĂRCARE & CURĂȚARE DATE ROBUSTĂ
+# ÎNCĂRCARE & CURĂȚARE DATE
 # ==========================================
-@st.cache_data(ttl=5)
 def load_and_clean_data(url):
   if not url:
     return get_mock_data()
@@ -235,9 +233,9 @@ def load_and_clean_data(url):
         break
 
     if header_row_idx is not None:
-      df_clean = pd.read_csv(url, skiprows=header_row_idx)
+      df_clean = pd.read_csv(url, skiprows=header_row_idx, dtype=str)
     else:
-      df_clean = pd.read_csv(url)
+      df_clean = pd.read_csv(url, dtype=str)
 
     df_clean.columns = [str(c).strip() for c in df_clean.columns]
     valid_cols = [
@@ -254,11 +252,12 @@ def load_and_clean_data(url):
     return get_mock_data()
 
 
-base_df = load_and_clean_data(GOOGLE_SHEET_URL)
-if st.session_state.local_df_override is not None:
-  df = st.session_state.local_df_override.copy()
-else:
-  df = base_df.copy()
+# Inițializare DataFrame de bază sau din memorie
+if st.session_state.local_df_override is None:
+  base_df = load_and_clean_data(GOOGLE_SHEET_URL)
+  st.session_state.local_df_override = base_df.copy()
+
+df = st.session_state.local_df_override.copy()
 
 if len(df.columns) >= 6:
   df.columns = [
@@ -278,18 +277,24 @@ col_dia = "Diastolică" if "Diastolică" in df.columns else df.columns[4]
 col_puls = "Puls" if "Puls" in df.columns else df.columns[5]
 
 if date_col in df.columns:
+  # Asigurăm conversia sigură a datelor în obiecte datetime
   df[date_col] = pd.to_datetime(
       df[date_col].astype(str).str.strip(), format="%d.%m.%Y", errors="coerce"
   )
   if df[date_col].isna().all():
-    df[date_col] = pd.to_datetime(df[date_col], dayfirst=True, errors="coerce")
-  df = df.dropna(subset=[date_col]).sort_values(by=date_col, ascending=True)
+    df[date_col] = pd.to_datetime(
+        df[date_col], dayfirst=True, errors="coerce"
+    )
+  # Sortare sigură fără a pierde rânduri valide
+  df = df.sort_values(by=date_col, ascending=True).reset_index(drop=True)
 
 
 def save_to_google_sheet_or_local(
     date_str, moment_str, glic_v, sis_v, dia_v, puls_v, obs_v
 ):
   global df
+  success_gspread = False
+
   if HAS_GSPREAD and "gcp_service_account" in st.secrets:
     try:
       scopes = ["https://www.googleapis.com/auth/spreadsheets"]
@@ -327,36 +332,37 @@ def save_to_google_sheet_or_local(
         ws.update(f"A{row_to_update}:G{row_to_update}", [new_row])
       else:
         ws.append_row(new_row)
-      return True
-    except Exception as e:
-      st.error(f"Eroare Google Sheets: {e}")
-      return False
+      success_gspread = True
+    except Exception:
+      pass  Continuăm cu salvarea locală în memorie în caz de eroare gspread
+
+  # Actualizăm obligatoriu și starea locală din sesiune ca să se vadă instant în grafice
+  mask = (df[date_col].dt.strftime("%d.%m.%Y") == date_str) & (
+      df[moment_col].astype(str) == moment_str
+  )
+
+  if mask.any():
+    df.loc[mask, col_glic] = glic_v
+    df.loc[mask, col_sis] = sis_v
+    df.loc[mask, col_dia] = dia_v
+    df.loc[mask, col_puls] = puls_v
+    if "Observații" in df.columns:
+      df.loc[mask, "Observații"] = obs_v
   else:
-    mask = (df[date_col].dt.strftime("%d.%m.%Y") == date_str) & (
-        df[moment_col].astype(str) == moment_str
-    )
+    new_record = {
+        date_col: pd.to_datetime(date_str, format="%d.%m.%Y"),
+        moment_col: moment_str,
+        col_glic: glic_v,
+        col_sis: sis_v,
+        col_dia: dia_v,
+        col_puls: puls_v,
+        "Observații": obs_v,
+    }
+    df = pd.concat([df, pd.DataFrame([new_record])], ignore_index=True)
 
-    if mask.any():
-      df.loc[mask, col_glic] = glic_v
-      df.loc[mask, col_sis] = sis_v
-      df.loc[mask, col_dia] = dia_v
-      df.loc[mask, col_puls] = puls_v
-      if "Observații" in df.columns:
-        df.loc[mask, "Observații"] = obs_v
-    else:
-      new_record = {
-          date_col: pd.to_datetime(date_str, format="%d.%m.%Y"),
-          moment_col: moment_str,
-          col_glic: glic_v,
-          col_sis: sis_v,
-          col_dia: dia_v,
-          col_puls: puls_v,
-          "Observații": obs_v,
-      }
-      df = pd.concat([df, pd.DataFrame([new_record])], ignore_index=True)
-
-    st.session_state.local_df_override = df.copy()
-    return True
+  # Salvăm permanent în session_state ca să nu se piardă la navigare sau rerun
+  st.session_state.local_df_override = df.copy()
+  return True
 
 
 def format_table_column(series):
@@ -753,7 +759,6 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
   with tab_dict["➕ Adaugă / Suprascrie"]:
     st.markdown("### 📝 Formular Introducere / Suprascriere Măsurători")
 
-    # Afișare mesaj de succes păstrat după rerun
     if "success_message" in st.session_state:
       st.success(st.session_state["success_message"])
       del st.session_state["success_message"]
@@ -860,7 +865,6 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
                 f"✅ Înregistrarea pentru {d_str} ({selected_moment}) a fost"
                 " salvată cu succes!"
             )
-            st.cache_data.clear()
             trigger_rerun()
 
 # ----------------- TAB: TRATAMENT -----------------

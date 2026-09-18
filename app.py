@@ -188,8 +188,8 @@ def add_history_entry(actiune, medicament, detalii):
     save_all_files()
 
 def trimite_email_cu_atasament(destinatar, subiect, mesaj, file_path, file_name):
-    email_sender = st.session_state.settings.get("email_sender", "")
-    email_password = st.session_state.settings.get("email_password", "")
+    email_sender = st.session_state.settings.get("email_sender", "").strip()
+    email_password = st.session_state.settings.get("email_password", "").strip()
     
     if not email_sender or not email_password:
         return False, "Datele de configurare email lipsesc din Setări."
@@ -204,45 +204,46 @@ def trimite_email_cu_atasament(destinatar, subiect, mesaj, file_path, file_name)
         if os.path.exists(file_path):
             with open(file_path, "rb") as f:
                 file_data = f.read()
-                file_type = "text/csv"
             msg.add_attachment(file_data, maintype="application", subtype="octet-stream", filename=file_name)
 
-        with smtplib.SMTP_SSL('smtp.mail.me.com', 465, timeout=15) as smtp:
+        with smtplib.SMTP_SSL('smtp.mail.me.com', 465, timeout=10) as smtp:
             smtp.login(email_sender, email_password)
             smtp.send_message(msg)
         return True, "Email trimis cu succes prin iCloud!"
     except Exception as e:
         return False, f"Erore trimitere iCloud: {str(e)}"
 
-# Verificare automată backup la fiecare 2 zile
+# Backup automat însigurat împotriva blocajelor de rețea
 def verifica_si_fa_backup_automat():
-    email_dest = st.session_state.settings.get("email_sender", "")
-    if not email_dest:
-        return 
+    try:
+        email_dest = st.session_state.settings.get("email_sender", "").strip()
+        if not email_dest:
+            return 
 
-    azi = datetime.now().date()
-    ultima_data = None
-    if os.path.exists(BACKUP_LOG_FILE):
-        try:
-            with open(BACKUP_LOG_FILE, "r") as f:
-                ultima_data_str = f.read().strip()
-                ultima_data = datetime.strptime(ultima_data_str, "%Y-%m-%d").date()
-        except:
-            pass
+        azi = datetime.now().date()
+        ultima_data = None
+        if os.path.exists(BACKUP_LOG_FILE):
+            try:
+                with open(BACKUP_LOG_FILE, "r") as f:
+                    ultima_data_str = f.read().strip()
+                    ultima_data = datetime.strptime(ultima_data_str, "%Y-%m-%d").date()
+            except:
+                pass
 
-    # Dacă nu s-a făcut niciodată sau au trecut >= 2 zile
-    if ultima_data is None or (azi - ultima_data).days >= 2:
-        if os.path.exists(DATA_FILE):
-            succes, _ = trimite_email_cu_atasament(
-                destinatar=email_dest,
-                subiect="💾 [Backup Automat] HealthTrack Pro - Date Medicale",
-                mesaj=f"Salut!\n\nAcesta este backup-ul tău automat generat la data de {azi.strftime('%d.%m.%Y')}.\nFișierul CSV cu toate datele medicale este atașat acestui mesaj.\n\nHealthTrack Pro System",
-                file_path=DATA_FILE,
-                file_name="backup_date_medicale.csv"
-            )
-            if succes:
-                with open(BACKUP_LOG_FILE, "w") as f:
-                    f.write(azi.strftime("%Y-%m-%d"))
+        if ultima_data is None or (azi - ultima_data).days >= 2:
+            if os.path.exists(DATA_FILE):
+                succes, _ = trimite_email_cu_atasament(
+                    destinatar=email_dest,
+                    subiect="💾 [Backup Automat] HealthTrack Pro - Date Medicale",
+                    mesaj=f"Salut!\n\nAcesta este backup-ul tău automat generat la data de {azi.strftime('%d.%m.%Y')}.\nFișierul CSV cu toate datele medicale este atașat acestui mesaj.\n\nHealthTrack Pro System",
+                    file_path=DATA_FILE,
+                    file_name="backup_date_medicale.csv"
+                )
+                if succes:
+                    with open(BACKUP_LOG_FILE, "w") as f:
+                        f.write(azi.strftime("%Y-%m-%d"))
+    except:
+        pass
 
 # ==========================================
 # SESSION STATE INITIALIZATION
@@ -311,7 +312,6 @@ current_user_info = st.session_state.users.get(st.session_state.user, {"role": "
 current_role = current_user_info.get("role", "Membru")
 is_admin = current_role == "Administrator"
 
-# Rulăm verificarea și la deschiderea aplicației dacă utilizatorul este deja logat
 verifica_si_fa_backup_automat()
 
 # ==========================================

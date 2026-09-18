@@ -136,18 +136,18 @@ def get_initial_prog():
 
 def get_initial_foods():
     default_foods = {
-        "🔴 Indice Glicemic Ridicat (Dulciuri / Făinoase / Fast-Food / Băuturi cu zahăr)": [
-            "ciocolată", "prăjitură", "tort", "înghețată", "zahăr", "miere", "biscuiți",
-            "pâine albă", "pizza", "paste albe", "cartofi prăjiți", "covrigi", "napolitane",
-            "croissant", "gogoși", "patiserie", "cornuri", "suc", "cola", "fanta", "pepsi", "bere", "energizant"
+        "🔴 Indice Glicemic Ridicat": [
+            "ciocolata", "prajitura", "tort", "inghetata", "zahar", "miere", "biscuiti",
+            "paine alba", "pizza", "paste albe", "cartofi prajiti", "covrigi", "napolitane",
+            "croissant", "gogosi", "patiserie", "cornuri", "suc", "cola", "fanta", "pepsi", "bere", "energizant"
         ],
-        "🟡 Indice Glicemic Mediu (Cereale / Paste integrale / Legume amidonoase)": [
-            "pâine integrală", "paste integrale", "orez integral", "orez basmati", "orez alb",
-            "fulgi de ovăz", "fulgi de mei", "fulgi de secară", "cartofi fierți", "porumb", "mălai (mămăligă)", "mazăre", "fasole boabe"
+        "🟡 Indice Glicemic Mediu": [
+            "paine integrala", "paste integrale", "orez integral", "orez basmati", "orez alb",
+            "fulgi de ovaz", "fulgi de mei", "fulgi de secara", "cartofi fierti", "porumb", "malai (mamaliga)", "mazare", "fasole boabe"
         ],
-        "🟢 Indice Glicemic Scăzut / Altele (Fără impact major sau băuturi zero)": [
-            "cola 0", "pepsi zero", "apă minerală", "cafea fără zahăr", "ceai neîndulcit", 
-            "stres", "oboseală", "după efort fizic", "masă copioasă", "salată verde", "castraveți", "roșii"
+        "🟢 Indice Glicemic Scazut / Altele": [
+            "cola 0", "pepsi zero", "apa minerala", "cafea fara zahăr", "ceai neindulcit", 
+            "stres", "oboseala", "dupa efort fizic", "masa copioasa", "salata verde", "castraveti", "rosii"
         ]
     }
     if os.path.exists(FOODS_FILE):
@@ -156,9 +156,9 @@ def get_initial_foods():
             categories = {}
             for _, row in df_f.iterrows():
                 cat = row["Categorie"]
-                item = row["Element"]
+                item = remove_diacritics(str(row["Element"])).strip().lower()
                 if cat not in categories: categories[cat] = []
-                categories[cat].append(item)
+                if item not in categories[cat]: categories[cat].append(item)
             return categories
         except:
             pass
@@ -173,7 +173,7 @@ def save_custom_foods():
     rows = []
     for cat, items in st.session_state.food_categories.items():
         for item in items:
-            rows.append({"Categorie": cat, "Element": item})
+            rows.append({"Categorie": cat, "Element": remove_diacritics(item).strip().lower()})
     pd.DataFrame(rows).to_csv(FOODS_FILE, index=False)
 
 def add_history_entry(actiune, medicament, detalii):
@@ -276,6 +276,8 @@ is_admin = current_role == "Administrator"
 # ==========================================
 # DATE MEDICALE
 # ==========================================
+DATA_FILE = "date_medicale_utilizator.csv"
+
 def get_initial_data():
     if os.path.exists(DATA_FILE):
         try:
@@ -760,36 +762,35 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
                     puls_input = st.number_input("💓 Puls [0 = nemăsurat]", min_value=0, value=get_val(col_puls))
 
                 st.markdown("---")
-                st.markdown("##### ⚡ Asistent Inteligent Mese & Indice Glicemic")
+                st.markdown("##### ⚡ Asistent Inteligent Mese & Indice Glicemic (Sugestii instantanee)")
                 
-                # Câmp de căutare fără diacritice, care filtrează elementele care începe cu termenul căutat (prefix)
-                search_food_input = st.text_input("🔍 Caută rapid alimente (afișează elementele care încep cu termenul introdus)", key="search_food_add_input")
+                # Câmp de căutare / filtrare instantanee fără diacritice (prefix startswith)
+                search_food_input = st.selectbox(
+                    "🔍 Caută / Selectează rapid ingredient (afiseaza sugestii instant după primele litere)",
+                    options=[""] + sorted(list(set([item for items in st.session_state.food_categories.values() for item in items]))),
+                    key="search_food_dropdown_instant"
+                )
                 
                 selected_quick_items = []
                 cat_cols = st.columns(len(st.session_state.food_categories))
                 
-                search_query_clean = remove_diacritics(search_food_input.strip().lower())
+                search_query_clean = remove_diacritics(str(search_food_input).strip().lower())
 
                 for idx, (cat_name, items) in enumerate(st.session_state.food_categories.items()):
                     with cat_cols[idx]:
                         st.caption(cat_name)
                         
-                        # Filtrare strictă: elementul trebuie să înceapă cu textul căutat (după eliminarea diacriticelor)
-                        if search_query_clean:
-                            filtered_items = [
-                                i for i in items 
-                                if remove_diacritics(i.lower()).startswith(search_query_clean)
-                            ]
-                        else:
-                            filtered_items = items
+                        for item in sorted(items):
+                            item_clean = remove_diacritics(item).lower()
+                            # Dacă s-a selectat ceva din dropdown sau conține prefixul, bifăm sau afișăm inteligent
+                            is_default_checked = (search_query_clean and item_clean.startswith(search_query_clean))
                             
-                        for item in filtered_items:
-                            if st.checkbox(item, key=f"quick_{cat_name}_{item}_{session_form_key}"):
+                            if st.checkbox(item, value=is_default_checked, key=f"quick_{cat_name}_{item}_{session_form_key}"):
                                 selected_quick_items.append(item)
 
                 base_obs_initial = get_obs()
                 if selected_quick_items:
-                    joined_quick = ", ".join(selected_quick_items)
+                    joined_quick = ", ".join(sorted(list(set(selected_quick_items))))
                     if base_obs_initial:
                         if joined_quick not in base_obs_initial:
                             base_obs_initial = f"{base_obs_initial}, {joined_quick}"
@@ -798,7 +799,6 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
 
                 obs_input = st.text_area("✍️ Notițe / Observații", value=base_obs_initial)
                 
-                # Salvare exclusiv la apăsarea butonului dedicat (nu se salvează la Enter în alte câmpuri)
                 submitted = st.form_submit_button("💾 Salvează / Suprascrie", type="primary", use_container_width=True)
 
                 if submitted:
@@ -1051,38 +1051,35 @@ with tab_dict["⚙️ Setări"]:
         st.markdown("<br>", unsafe_allow_html=True)
 
         with st.container(border=True):
-            st.markdown("#### 🍎 Gestiune Elemente Mese & Indice Glicemic (Căutare fără diacritice)")
+            st.markdown("#### 🍎 Gestiune Elemente Mese & Indice Glicemic (Fără duplicate / Fără diacritice)")
             fc_cat = st.selectbox("Selectează Categoria", list(st.session_state.food_categories.keys()))
             
             c_f1, c_f2 = st.columns(2)
             with c_f1:
-                new_food_item = st.text_input("Adaugă element nou (ex: paine, cola 0 etc.)")
-                if st.button("➕ Adaugă în Categorie"):
+                new_food_item = st.text_input("Adaugă ingredient nou (ex: paine integrala etc.)")
+                if st.button("➕ Adaugă în Categorie (Fără Duplicate)"):
                     if new_food_item and new_food_item.strip():
-                        item_clean = new_food_item.strip().lower()
-                        if item_clean not in st.session_state.food_categories[fc_cat]:
+                        item_clean = remove_diacritics(new_food_item).strip().lower()
+                        # Verificare anti-duplicat
+                        existing_all = [remove_diacritics(x).lower() for x in st.session_state.food_categories[fc_cat]]
+                        if item_clean in existing_all:
+                            st.warning(f"⚠️ Ingredientul '{item_clean}' există deja în această categorie!")
+                        else:
                             st.session_state.food_categories[fc_cat].append(item_clean)
                             save_custom_foods()
-                            st.success(f"Elementul '{item_clean}' a fost adăugat!")
+                            st.success(f"Ingredientul '{item_clean}' a fost adăugat cu succes!")
                             trigger_rerun()
             with c_f2:
-                search_del_item = st.text_input("🔍 Caută element de șters", key="search_del_food_input")
-                search_del_clean = remove_diacritics(search_del_item.strip().lower())
-                
-                items_to_show = [
-                    i for i in st.session_state.food_categories[fc_cat] 
-                    if search_del_clean in remove_diacritics(i.lower())
-                ] if search_del_clean else st.session_state.food_categories[fc_cat]
-                
-                if items_to_show:
-                    del_food_item = st.selectbox("Selectează element existent", items_to_show, key="del_food_select")
-                    if st.button("🗑️ Șterge Elementul Selectat"):
+                all_items_flat = sorted(list(set(st.session_state.food_categories[fc_cat])))
+                if all_items_flat:
+                    del_food_item = st.selectbox("Selectează ingredient existent de șters", all_items_flat, key="del_food_select")
+                    if st.button("🗑️ Șterge Ingredientul Selectat"):
                         st.session_state.food_categories[fc_cat].remove(del_food_item)
                         save_custom_foods()
-                        st.success(f"Elementul '{del_food_item}' a fost șters!")
+                        st.success(f"Ingredientul '{del_food_item}' a fost șters!")
                         trigger_rerun()
                 else:
-                    st.info("Niciun element găsit după căutare.")
+                    st.info("Niciun element în categorie.")
 
     st.markdown("---")
     col_set1, col_set2 = st.columns(2)

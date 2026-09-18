@@ -87,6 +87,14 @@ def remove_diacritics(text):
   )
 
 
+# Compatibilitate Rerun pentru orice versiune de Streamlit
+def trigger_rerun():
+  if hasattr(st, "rerun"):
+    st.rerun()
+  else:
+    st.experimental_rerun()
+
+
 # Session State Initialization
 if "users" not in st.session_state:
   st.session_state.users = {
@@ -146,7 +154,7 @@ if not st.session_state.logged_in:
         if user_data and user_data["pass"] == password:
           st.session_state.logged_in = True
           st.session_state.user = username
-          st.rerun()
+          trigger_rerun()
         else:
           st.error("Utilizator sau parolă incorectă!")
   st.stop()
@@ -170,7 +178,7 @@ st.sidebar.markdown("<br>", unsafe_allow_html=True)
 if st.sidebar.button("🚪 Deconectare", use_container_width=True):
   st.session_state.logged_in = False
   st.session_state.user = None
-  st.rerun()
+  trigger_rerun()
 
 st.sidebar.markdown("---")
 
@@ -744,6 +752,12 @@ with tab_dict["📊 Jurnal & Grafice"]:
 if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
   with tab_dict["➕ Adaugă / Suprascrie"]:
     st.markdown("### 📝 Formular Introducere / Suprascriere Măsurători")
+
+    # Afișare mesaj de succes păstrat după rerun
+    if "success_message" in st.session_state:
+      st.success(st.session_state["success_message"])
+      del st.session_state["success_message"]
+
     st.info(
         "💡 **Weekend vs Săptămână:** Dacă selectezi o zi de sâmbătă sau"
         " duminică, apar automat opțiunile pentru **Prânz** la mijloc (6"
@@ -842,12 +856,12 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
               obs_input,
           )
           if saved:
-            st.success(
+            st.session_state["success_message"] = (
                 f"✅ Înregistrarea pentru {d_str} ({selected_moment}) a fost"
                 " salvată cu succes!"
             )
             st.cache_data.clear()
-            st.rerun()
+            trigger_rerun()
 
 # ----------------- TAB: TRATAMENT -----------------
 with tab_dict["💊 Tratament"]:

@@ -99,6 +99,7 @@ MEDS_FILE = "medicamente.csv"
 MEDS_HIST_FILE = "istoric_medicamente.csv"
 PROG_FILE = "programari_medicale.csv"
 FOODS_FILE = "alimente_custom.csv"
+BACKUP_LOG_FILE = "ultimul_backup_auto.txt"
 
 def get_initial_meds():
     if os.path.exists(MEDS_FILE):
@@ -186,7 +187,7 @@ def add_history_entry(actiune, medicament, detalii):
     st.session_state.meds_hist_df = pd.concat([st.session_state.meds_hist_df, pd.DataFrame([new_entry])], ignore_index=True)
     save_all_files()
 
-def trimite_email_alerta(destinatar, subiect, mesaj):
+def trimite_email_cu_atasament(destinatar, subiect, mesaj, file_path, file_name):
     email_sender = st.session_state.settings.get("email_sender", "")
     email_password = st.session_state.settings.get("email_password", "")
     
@@ -200,12 +201,48 @@ def trimite_email_alerta(destinatar, subiect, mesaj):
         msg['From'] = email_sender
         msg['To'] = destinatar
 
+        if os.path.exists(file_path):
+            with open(file_path, "rb") as f:
+                file_data = f.read()
+                file_type = "text/csv"
+            msg.add_attachment(file_data, maintype="application", subtype="octet-stream", filename=file_name)
+
         with smtplib.SMTP_SSL('smtp.mail.me.com', 465, timeout=15) as smtp:
             smtp.login(email_sender, email_password)
             smtp.send_message(msg)
         return True, "Email trimis cu succes prin iCloud!"
     except Exception as e:
         return False, f"Erore trimitere iCloud: {str(e)}"
+
+# Verificare automată backup la fiecare 2 zile
+def verifica_si_fa_backup_automat():
+    email_dest = st.session_state.settings.get("email_sender", "")
+    if not email_dest:
+        return 
+
+    azi = datetime.now().date()
+    ultima_data = None
+    if os.path.exists(BACKUP_LOG_FILE):
+        try:
+            with open(BACKUP_LOG_FILE, "r") as f:
+                ultima_data_str = f.read().strip()
+                ultima_data = datetime.strptime(ultima_data_str, "%Y-%m-%d").date()
+        except:
+            pass
+
+    # Dacă nu s-a făcut niciodată sau au trecut >= 2 zile
+    if ultima_data is None or (azi - ultima_data).days >= 2:
+        if os.path.exists(DATA_FILE):
+            succes, _ = trimite_email_cu_atasament(
+                destinatar=email_dest,
+                subiect="💾 [Backup Automat] HealthTrack Pro - Date Medicale",
+                mesaj=f"Salut!\n\nAcesta este backup-ul tău automat generat la data de {azi.strftime('%d.%m.%Y')}.\nFișierul CSV cu toate datele medicale este atașat acestui mesaj.\n\nHealthTrack Pro System",
+                file_path=DATA_FILE,
+                file_name="backup_date_medicale.csv"
+            )
+            if succes:
+                with open(BACKUP_LOG_FILE, "w") as f:
+                    f.write(azi.strftime("%Y-%m-%d"))
 
 # ==========================================
 # SESSION STATE INITIALIZATION
@@ -264,6 +301,7 @@ if not st.session_state.logged_in:
                 if user_data and user_data["pass"] == password:
                     st.session_state.logged_in = True
                     st.session_state.user = username
+                    verifica_si_fa_backup_automat()
                     trigger_rerun()
                 else:
                     st.error("Utilizator sau parolă incorectă!")
@@ -273,11 +311,12 @@ current_user_info = st.session_state.users.get(st.session_state.user, {"role": "
 current_role = current_user_info.get("role", "Membru")
 is_admin = current_role == "Administrator"
 
+# Rulăm verificarea și la deschiderea aplicației dacă utilizatorul este deja logat
+verifica_si_fa_backup_automat()
+
 # ==========================================
 # DATE MEDICALE
 # ==========================================
-DATA_FILE = "date_medicale_utilizator.csv"
-
 def get_initial_data():
     if os.path.exists(DATA_FILE):
         try:
@@ -978,7 +1017,7 @@ if is_admin and "📅 Programări" in tab_dict:
                                 pass
                         
                         if trimis_ok > 0:
-                            succes, rez = trimite_email_alerta(destinatar_auto, "🔔 Notificare Programare Medicală", mesaj_final)
+                            succes, rez = trimite_email_cu_atasament(destinatar_auto, "🔔 Notificare Programare Medicală", mesaj_final, DATA_FILE, "dummy.csv")
                             if succes:
                                 st.success("Notificările automate au fost trimise prin iCloud!")
                             else:
@@ -1088,9 +1127,9 @@ with tab_dict["⚙️ Setări"]:
             if not test_dest:
                 st.error("Completează mai întâi adresa de email a expeditorului.")
             else:
-                success_t, msg_t = trimite_email_alerta(test_dest, "🧪 Test Conexiune HealthTrack Pro", "Salut! Conexiunea SMTP cu serverul iCloud funcționează perfect și timeout-ul a fost extins.")
+                success_t, msg_t = trimite_email_cu_atasament(test_dest, "🧪 Test Conexiune HealthTrack Pro", "Salut! Conexiunea SMTP cu serverul iCloud funcționează perfect și timeout-ul a fost extins.", DATA_FILE, "backup_test.csv")
                 if success_t:
-                    st.success("✅ Conexiune reușită! Emailul de test a fost trimis prin iCloud.")
+                    st.success("✅ Conexiune reușită! Emailul de test cu fișierul de date atașat a fost trimis prin iCloud.")
                 else:
                     st.error(f"❌ {msg_t}")
 
@@ -1292,7 +1331,6 @@ with tab_dict["📄 Raport PDF"]:
                     ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
                 ]
                 
-                # Stil dedicat pentru încadrarea automată a textului din coloana de observații în PDF
                 obs_style_pdf = ParagraphStyle(
                     'ObsStylePDF',
                     parent=styles['Normal'],
@@ -1309,7 +1347,6 @@ with tab_dict["📄 Raport PDF"]:
                     obs_val = clean_obs(row.get(col_obs, ""))
                     obs_str = remove_diacritics(obs_val)
                     
-                    # Învelim observația într-un Paragraph pentru a forța word-wrap (încadrare în lățimea celulei)
                     obs_paragraph = Paragraph(obs_str, obs_style_pdf)
                     
                     glic_v = row.get(col_glic, 0)

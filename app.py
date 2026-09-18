@@ -93,7 +93,7 @@ def trigger_rerun():
         st.experimental_rerun()
 
 # ==========================================
-# GESTIONARE FIȘIERE PERSISTENTE
+# GESTIONARE FIȘIERE PERSISTENTE & SALVARE
 # ==========================================
 DATA_FILE = "date_medicale_utilizator.csv"
 MEDS_FILE = "medicamente.csv"
@@ -167,16 +167,27 @@ def get_initial_foods():
     return default_foods
 
 def save_all_files():
-    st.session_state.meds_df.to_csv(MEDS_FILE, index=False)
-    st.session_state.meds_hist_df.to_csv(MEDS_HIST_FILE, index=False)
-    st.session_state.prog_df.to_csv(PROG_FILE, index=False)
+    """Buton/Funcție optimizată pentru salvare sigură în fișiere."""
+    try:
+        st.session_state.meds_df.to_csv(MEDS_FILE, index=False)
+        st.session_state.meds_hist_df.to_csv(MEDS_HIST_FILE, index=False)
+        st.session_state.prog_df.to_csv(PROG_FILE, index=False)
+        return True
+    except Exception as e:
+        print(f"Erore la salvarea fișierelor: {e}")
+        return False
 
 def save_custom_foods():
-    rows = []
-    for cat, items in st.session_state.food_categories.items():
-        for item in items:
-            rows.append({"Categorie": cat, "Element": remove_diacritics(item).strip().lower()})
-    pd.DataFrame(rows).to_csv(FOODS_FILE, index=False)
+    try:
+        rows = []
+        for cat, items in st.session_state.food_categories.items():
+            for item in items:
+                rows.append({"Categorie": cat, "Element": remove_diacritics(item).strip().lower()})
+        pd.DataFrame(rows).to_csv(FOODS_FILE, index=False)
+        return True
+    except Exception as e:
+        print(f"Erore la salvarea alimentelor: {e}")
+        return False
 
 def add_history_entry(actiune, medicament, detalii):
     new_entry = {
@@ -213,7 +224,6 @@ def trimite_email_cu_atasament(destinatar, subiect, mesaj, file_path, file_name)
     if not email_sender or not email_password:
         return False, "Datele de configurare email lipsesc din Setări."
 
-    # Încercăm mai întâi portul 587 (STARTTLS), apoi portul 465 (SSL)
     configs = [
         {"port": 587, "use_ssl": False},
         {"port": 465, "use_ssl": True}
@@ -307,6 +317,10 @@ if "logged_in" not in st.session_state:
 if "user" not in st.session_state:
     st.session_state.user = None
 
+# Inițializare activitate pentru deconectare automată (auto-logout)
+if "last_activity" not in st.session_state:
+    st.session_state.last_activity = time.time()
+
 if "settings" not in st.session_state:
     st.session_state.settings = {
         "notif_enabled": True, 
@@ -330,6 +344,19 @@ if "action_history_stack" not in st.session_state:
     st.session_state.action_history_stack = []
 
 # ==========================================
+# VERIFICARE DECONECTARE AUTOMATĂ (AUTO-LOGOUT)
+# ==========================================
+INACTIVITY_TIMEOUT = 1200  # 20 minute de inactivitate
+if st.session_state.logged_in:
+    if time.time() - st.session_state.get("last_activity", time.time()) > INACTIVITY_TIMEOUT:
+        st.session_state.logged_in = False
+        st.session_state.user = None
+        st.warning("⏱️ Sesiunea a expirat din motive de securitate (inactivitate). Te-ai deconectat automat.")
+        trigger_rerun()
+    else:
+        st.session_state.last_activity = time.time()
+
+# ==========================================
 # AUTENTIFICARE
 # ==========================================
 if not st.session_state.logged_in:
@@ -349,6 +376,7 @@ if not st.session_state.logged_in:
                 if user_data and user_data["pass"] == password:
                     st.session_state.logged_in = True
                     st.session_state.user = username
+                    st.session_state.last_activity = time.time()
                     verifica_si_fa_backup_automat()
                     trigger_rerun()
                 else:
@@ -448,8 +476,10 @@ def save_local_record(date_str, moment_str, glic_v, sis_v, dia_v, puls_v, obs_v)
         else:
             df_to_save[date_col] = pd.to_datetime(df_to_save[date_col], errors="coerce").dt.strftime("%d.%m.%Y")
         df_to_save.to_csv(DATA_FILE, index=False)
+        return True
     except Exception as e:
-        print(f"Erore: {e}")
+        print(f"Erore salvare locală: {e}")
+        return False
 
 def format_table_column(series):
     return series.astype(str).str.strip().replace(["0", "0.0", "nan", "None", "", "<NA>"], "")
@@ -910,6 +940,7 @@ with tab_dict["💊 Tratament"]:
                             new_row = pd.DataFrame([{"Medicament": m_nume, "Doză": m_doza, "Orar": m_orar, "Administrare": m_admin}])
                             st.session_state.meds_df = pd.concat([st.session_state.meds_df, new_row], ignore_index=True)
                             add_history_entry("Adăugare", m_nume, f"Doză: {m_doza}, Orar: {m_orar}")
+                            save_all_files()
                             st.success(f"{m_nume} adăugat!")
                             trigger_rerun()
 
@@ -931,6 +962,7 @@ with tab_dict["💊 Tratament"]:
                             st.session_state.meds_df.loc[idx, "Orar"] = e_orar
                             st.session_state.meds_df.loc[idx, "Administrare"] = e_admin
                             add_history_entry("Modificare", med_to_edit, f"Doză: -> {e_doza}")
+                            save_all_files()
                             st.success("Actualizat!")
                             trigger_rerun()
 

@@ -984,16 +984,28 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
 
             existing_row = pd.DataFrame()
             date_str = selected_date.strftime("%d.%m.%Y")
+            has_real_record = False
+
             if not df.empty and date_col in df.columns and moment_col in df.columns:
                 match = df[(parse_flexible_date(df[date_col]).dt.strftime("%d.%m.%Y") == date_str) & (df[moment_col] == selected_moment)]
                 if not match.empty:
-                    existing_row = match.iloc[0]
-                    st.warning(f"⚠️ Există deja o înregistrare pentru {date_str} - {selected_moment}. Salvarea va SUPRASCRIE.")
-                else:
-                    st.info(f"ℹ️ Nu există înregistrare anterioară pentru {date_str} - {selected_moment}. Câmpurile vor porni de la 0.")
+                    row_candidate = match.iloc[0]
+                    g_check = float(row_candidate.get(col_glic, 0) or 0)
+                    s_check = float(row_candidate.get(col_sis, 0) or 0)
+                    d_check = float(row_candidate.get(col_dia, 0) or 0)
+                    p_check = float(row_candidate.get(col_puls, 0) or 0)
+                    o_check = clean_obs(row_candidate.get(col_obs, ""))
+                    if g_check > 0 or s_check > 0 or d_check > 0 or p_check > 0 or o_check:
+                        existing_row = row_candidate
+                        has_real_record = True
+
+            if has_real_record:
+                st.warning(f"⚠️ Există deja o înregistrare cu valori pentru {date_str} - {selected_moment}. Valorile existente au fost încărcate pentru editare/suprascriere.")
+            else:
+                st.info(f"ℹ️ Nu există o înregistrare anterioară cu valori pentru {date_str} - {selected_moment}. Câmpurile pornesc de la 0.")
 
             def get_val(col_name):
-                if not existing_row.empty and col_name in existing_row:
+                if has_real_record and not existing_row.empty and col_name in existing_row:
                     try:
                         v = float(existing_row[col_name])
                         return int(v) if not pd.isna(v) else 0
@@ -1002,7 +1014,7 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
                 return 0
 
             def get_obs():
-                if not existing_row.empty and col_obs in existing_row:
+                if has_real_record and not existing_row.empty and col_obs in existing_row:
                     return clean_obs(existing_row[col_obs])
                 return ""
 
@@ -1068,11 +1080,10 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
             combined_parts = non_food_parts + sorted(list(set(checked_foods_live)))
             new_computed_obs = ", ".join([p for p in combined_parts if p])
             
-            # Forțăm actualizarea stării widgetului de text_area pentru a reflecta instant modificările
-            if "inp_obs" in st.session_state:
-                del st.session_state["inp_obs"]
+            # Actualizăm direct starea în session_state înainte de afișare
+            st.session_state["inp_obs"] = new_computed_obs
 
-            st.text_area("✍️ Notițe / Observații (Se actualizează instant la bifare/debifare)", value=new_computed_obs, key="inp_obs")
+            st.text_area("✍️ Notițe / Observații (Se actualizează instant la bifare/debifare)", key="inp_obs")
 
             def handle_save_action():
                 g_val = st.session_state.get("inp_glic", 0)

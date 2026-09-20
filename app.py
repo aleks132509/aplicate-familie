@@ -546,6 +546,8 @@ def save_local_record(date_str, moment_str, glic_v, sis_v, dia_v, puls_v, obs_v)
         }
         current_df = pd.concat([current_df, pd.DataFrame([new_record])], ignore_index=True)
 
+    # Asigurăm sortarea uniformă a datelor
+    current_df[date_col] = pd.to_datetime(current_df[date_col], errors="coerce")
     dates_unique = sorted(current_df[date_col].dropna().unique())
     full_rows = []
     for d in dates_unique:

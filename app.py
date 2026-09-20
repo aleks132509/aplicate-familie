@@ -1039,7 +1039,8 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
                 non_food_parts = [p for p in existing_parts if remove_diacritics(p).lower() not in all_known_foods]
                 
                 final_parts = non_food_parts + sorted(list(set(checked_foods)))
-                o_val = ", ".join(final_parts)
+                o_val = ", ".join([p for p in final_parts if p])
+                st.session_state["inp_obs"] = o_val
 
                 save_local_record(date_str, selected_moment, g_val, s_val, d_val, p_val, o_val)
                 st.session_state["success_message"] = "✅ Salvare / Suprascrie efectuată cu succes!"

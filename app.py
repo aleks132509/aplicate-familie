@@ -214,8 +214,9 @@ def get_chronological_backup_df():
         return pd.DataFrame()
     try:
         df_b = pd.read_csv(DATA_FILE)
-        if "Dată" in df_b.columns:
-            df_b["Dată_dt"] = pd.to_datetime(df_b["Dată"].astype(str).str.strip(), format="%d.%m.%Y", errors="coerce")
+        date_col_name = 'Data' if 'Data' in df_b.columns else 'Dată'
+        if date_col_name in df_b.columns:
+            df_b["Dată_dt"] = pd.to_datetime(df_b[date_col_name].astype(str).str.strip(), format="%d.%m.%Y", errors="coerce")
             df_b = df_b.dropna(subset=["Dată_dt"]).sort_values(by="Dată_dt", ascending=True).drop(columns=["Dată_dt"])
         for col in df_b.columns:
             if df_b[col].dtype == object:
@@ -411,7 +412,7 @@ def get_initial_data():
         except Exception:
             pass
 
-    # Istoric complet începând cu 12.09.2026 incluzând toate momentele și valoarea de 150 din 19.09.2026
+    # Istoric complet 12.09.2026 - 20.09.2026 cu toate cele 6 momente
     initial_data = [
         {"Dată": "12.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 137, "Sistolică": 108, "Diastolică": 61, "Puls": 0, "Observații": "Prima zi cu tratament"},
         {"Dată": "12.09.2026", "Moment Zi": "Dimineața - După masă", "Glicemie": 0, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},

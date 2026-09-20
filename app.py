@@ -288,6 +288,12 @@ def get_chronological_backup_df():
             df_b["Dată_dt"] = parse_flexible_date(df_b[date_col_name])
             df_b["Moment_Cat"] = pd.Categorical(df_b["Moment Zi"], categories=moment_order, ordered=True)
             df_b = df_b.dropna(subset=["Dată_dt"]).sort_values(by=["Dată_dt", "Moment_Cat"]).drop(columns=["Dată_dt", "Moment_Cat"])
+        
+        # Filtrare exclusivă: păstrăm doar rândurile unde Glicemia > 0
+        if "Glicemie" in df_b.columns:
+            df_b["Glicemie_num"] = pd.to_numeric(df_b["Glicemie"], errors="coerce").fillna(0)
+            df_b = df_b[df_b["Glicemie_num"] > 0].drop(columns=["Glicemie_num"])
+
         for col in df_b.columns:
             if df_b[col].dtype == object:
                 df_b[col] = df_b[col].apply(lambda x: remove_diacritics(str(x)) if pd.notna(x) else x)
@@ -379,7 +385,7 @@ def verifica_si_fa_backup_automat():
                 succes, _ = trimite_email_cu_multiple_atasamente(
                     destinatar=email_dest,
                     subiect=f"💾 [Backup Zilnic Automat] HealthTrack Pro - {azi.strftime('%d.%m.%Y')}",
-                    mesaj=f"Salut!\n\nAcesta este backup-ul tău zilnic automat generat la data de {azi.strftime('%d.%m.%Y')}.\nSunt atașate fișierele CSV cu datele medicale, schema de tratament și programările medicale.\n\nHealthTrack Pro System",
+                    mesaj=f"Salut!\n\nAcesta este backup-ul tău zilnic automat generat la data de {azi.strftime('%d.%m.%Y')}.\nSunt atașate fișierele CSV cu datele medicale (filtrate doar cu valori măsurate), schema de tratament și programările medicale.\n\nHealthTrack Pro System",
                     file_paths_dict=attachments
                 )
                 if os.path.exists(temp_backup_file):
@@ -392,7 +398,7 @@ def verifica_si_fa_backup_automat():
         pass
 
 # ==========================================
-# SESSION STATE INITIALIZATION
+# SESSION STATE INITIALIZATION & PERSISTENȚĂ LOGARE
 # ==========================================
 if "users" not in st.session_state:
     st.session_state.users = {
@@ -422,7 +428,7 @@ if "action_history_stack" not in st.session_state:
     st.session_state.action_history_stack = []
 
 # ==========================================
-# AUTENTIFICARE CU OPȚIUNE "ȚINE-Mă MINTE"
+# AUTENTIFICARE CU PERSISTENȚĂ ÎN SESIUNE
 # ==========================================
 if not st.session_state.logged_in:
     st.markdown("<br><br><br>", unsafe_allow_html=True)
@@ -511,7 +517,7 @@ def get_initial_data():
         mask = (df_template["Dată_dt"] == d_dt) & (df_template["Moment Zi"] == m_val)
         if mask.any():
             for col in ["Glicemie", "Sistolică", "Diastolică", "Puls"]:
-                if col in r_def and r_def[col] > 0:
+                if col in r_def:
                     df_template.loc[mask, col] = r_def[col]
             if r_def.get("Observații"):
                 df_template.loc[mask, "Observații"] = r_def["Observații"]
@@ -533,7 +539,7 @@ def get_initial_data():
                     mask = (df_template["Dată_dt"] == d_dt) & (df_template["Moment Zi"] == m_val)
                     if mask.any():
                         for col in ["Glicemie", "Sistolică", "Diastolică", "Puls"]:
-                            if col in row and pd.notna(row[col]) and float(row[col]) > 0:
+                            if col in row and pd.notna(row[col]):
                                 df_template.loc[mask, col] = row[col]
                         obs_val = clean_obs(row.get("Observații", ""))
                         if obs_val:
@@ -810,15 +816,21 @@ with tab_dict["📊 Jurnal & Grafice"]:
             st.markdown(f'<div class="metric-card"><div class="metric-label">📅 TOTAL (FILTRU)</div><div class="metric-value">{len(view_df)}</div></div>', unsafe_allow_html=True)
 
         st.markdown("<br>", unsafe_allow_html=True)
-        sub_tab_glic, sub_tab_ta, sub_tab_puls, sub_tab_all = st.tabs(["🩸 Glicemie & Analiză Spike", "🫀 Tensiune Arterială", "💓 Puls", "📋 Toate Datele"])
+        sub_tab_glic, sub_tab_ta, sub_tab_puls, sub_tab_all = st.tabs(["🩸 Glicemie & Analiză Spike", "🫀 Tensiune Arterială", "💓 Puls", "📋 Toate Datele (Doar Măsurate)"])
         
-        x_labels_composed = [f"{d.strftime('%d.%m')} ({m[:3]})" for d, m in zip(view_df[date_col], view_df[moment_col])]
+        # Filtrare exclusivă pentru tabelele vizuale (doar unde glicemia > 0)
+        view_df_measured = view_df.copy()
+        if col_glic in view_df_measured.columns:
+            view_df_measured["Glic_num"] = pd.to_numeric(view_df_measured[col_glic], errors="coerce").fillna(0)
+            view_df_measured = view_df_measured[view_df_measured["Glic_num"] > 0].drop(columns=["Glic_num"])
+
+        x_labels_composed = [f"{d.strftime('%d.%m')} ({m[:3]})" for d, m in zip(view_df_measured[date_col], view_df_measured[moment_col])]
 
         with sub_tab_glic:
             st.markdown("ℹ️ **Legendă Glicemie:** 🔵 Albastru = Valoare în intervalul optim | 🔴 Roșu = Valoare crescută / Spike peste prag.")
-            if col_glic in view_df.columns:
-                glic_vals = pd.to_numeric(view_df[col_glic], errors="coerce").replace(0, None)
-                moments = view_df[moment_col].tolist() if moment_col in view_df.columns else [""] * len(view_df)
+            if col_glic in view_df_measured.columns:
+                glic_vals = pd.to_numeric(view_df_measured[col_glic], errors="coerce").replace(0, None)
+                moments = view_df_measured[moment_col].tolist() if moment_col in view_df_measured.columns else [""] * len(view_df_measured)
 
                 spike_colors = []
                 spike_texts = []
@@ -853,7 +865,7 @@ with tab_dict["📊 Jurnal & Grafice"]:
                 st.plotly_chart(fig_g, use_container_width=True)
 
                 cols_g = [date_col, moment_col, col_glic, col_obs]
-                df_g_tab = view_df[cols_g].copy()
+                df_g_tab = view_df_measured[cols_g].copy()
                 df_g_tab[date_col] = df_g_tab[date_col].dt.strftime("%d.%m.%Y")
                 df_g_tab["Status Glicemie"] = df_g_tab.apply(lambda r: evaluate_glic(r[col_glic], r[moment_col]), axis=1)
                 df_g_tab[col_glic] = format_table_column(df_g_tab[col_glic])
@@ -863,9 +875,9 @@ with tab_dict["📊 Jurnal & Grafice"]:
 
         with sub_tab_ta:
             st.markdown("ℹ️ **Legendă Tensiune:** 🔵 Albastru/Indigo = Tensiune Sistolică normală | 🟠 Portocaliu = Diastolică | 🔴 Roșu = Valori de Tensiune Crescută.")
-            if col_sis in view_df.columns and col_dia in view_df.columns:
-                sis_vals = pd.to_numeric(view_df[col_sis], errors="coerce").replace(0, None)
-                dia_vals = pd.to_numeric(view_df[col_dia], errors="coerce").replace(0, None)
+            if col_sis in view_df_measured.columns and col_dia in view_df_measured.columns:
+                sis_vals = pd.to_numeric(view_df_measured[col_sis], errors="coerce").replace(0, None)
+                dia_vals = pd.to_numeric(view_df_measured[col_dia], errors="coerce").replace(0, None)
                 
                 sis_colors = ["#dc2626" if is_ta_spike(s, d) else "#2563eb" for s, d in zip(sis_vals, dia_vals)]
                 dia_colors = ["#dc2626" if is_ta_spike(s, d) else "#f59e0b" for s, d in zip(sis_vals, dia_vals)]
@@ -891,7 +903,7 @@ with tab_dict["📊 Jurnal & Grafice"]:
                 st.plotly_chart(fig_ta, use_container_width=True)
                 
                 cols_t = [date_col, moment_col, col_sis, col_dia, col_obs]
-                df_t_tab = view_df[cols_t].copy()
+                df_t_tab = view_df_measured[cols_t].copy()
                 df_t_tab[date_col] = df_t_tab[date_col].dt.strftime("%d.%m.%Y")
                 df_t_tab["Status Tensiune"] = df_t_tab.apply(lambda r: evaluate_ta(r[col_sis], r[col_dia]), axis=1)
                 df_t_tab[col_sis] = format_table_column(df_t_tab[col_sis])
@@ -902,8 +914,8 @@ with tab_dict["📊 Jurnal & Grafice"]:
 
         with sub_tab_puls:
             st.markdown("ℹ️ **Legendă Puls:** 🟢 Verde = Interval normal (60-100 bpm) | 🔴 Roșu = Puls în afara limitelor.")
-            if col_puls in view_df.columns:
-                puls_vals = pd.to_numeric(view_df[col_puls], errors="coerce").replace(0, None)
+            if col_puls in view_df_measured.columns:
+                puls_vals = pd.to_numeric(view_df_measured[col_puls], errors="coerce").replace(0, None)
                 puls_colors = ["#dc2626" if is_puls_spike(p) else "#10b981" for p in puls_vals]
 
                 fig_p = go.Figure()
@@ -920,7 +932,7 @@ with tab_dict["📊 Jurnal & Grafice"]:
                 st.plotly_chart(fig_p, use_container_width=True)
                 
                 cols_p = [date_col, moment_col, col_puls, col_obs]
-                df_p_tab = view_df[cols_p].copy()
+                df_p_tab = view_df_measured[cols_p].copy()
                 df_p_tab[date_col] = df_p_tab[date_col].dt.strftime("%d.%m.%Y")
                 df_p_tab["Status Puls"] = df_p_tab[col_puls].apply(evaluate_puls)
                 df_p_tab[col_puls] = format_table_column(df_p_tab[col_puls])
@@ -929,7 +941,7 @@ with tab_dict["📊 Jurnal & Grafice"]:
                 st.dataframe(apply_color_styling(df_p_tab, ["Status Puls"]), use_container_width=True, hide_index=True)
 
         with sub_tab_all:
-            df_all = view_df.copy()
+            df_all = view_df_measured.copy()
             df_all[date_col] = df_all[date_col].dt.strftime("%d.%m.%Y")
             if col_glic in df_all.columns:
                 df_all["St. Glicemie"] = df_all.apply(lambda r: evaluate_glic(r[col_glic], r[moment_col]), axis=1)
@@ -966,7 +978,6 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
 
         with st.container(border=True):
             selected_date = st.date_input("📅 Selectează Data", value=date.today(), key="input_date_picker")
-            
             selected_moment = st.selectbox("🍽️ Momentul Măsurătorii", moment_order, key="input_moment_select")
 
             existing_row = pd.DataFrame()
@@ -1383,7 +1394,7 @@ with tab_dict["⚙️ Setări"]:
                 success_t, msg_t = trimite_email_cu_multiple_atasamente(
                     test_dest, 
                     "🧪 Test Forțat / Backup Complet HealthTrack Pro", 
-                    "Salut! Acesta este un email de test forțat cu toate cele 3 fișiere atașate (date medicale, tratament și programări).", 
+                    "Salut! Acesta este un email de test forțat cu toate cele 3 fișiere atașate (date medicale filtrate doar cu valori, tratament și programări).", 
                     attachments
                 )
                 
@@ -1423,7 +1434,7 @@ with tab_dict["📄 Raport PDF"]:
         opt_ta = st.checkbox("Include Grafic Tensiune Arterială 🫀", value=True)
     with col_opt2:
         opt_puls = st.checkbox("Include Grafic Puls 💓", value=True)
-        opt_tabele = st.checkbox("Include Tabelul Centralizator (Curat, Fără Diacritice/Nan) 📋", value=True)
+        opt_tabele = st.checkbox("Include Tabelul Centralizator (Curat, Doar Valori Măsurate) 📋", value=True)
 
     def generate_pdf_chart_glic(x_vals, y_vals, moments_list, title, ylabel, color_hex):
         plt.figure(figsize=(9.5, 3.4))
@@ -1552,33 +1563,38 @@ with tab_dict["📄 Raport PDF"]:
         story.append(Paragraph(date_text, ParagraphStyle("DateStyle", parent=styles["Normal"], alignment=1, spaceAfter=15)))
 
         if not data_frame.empty:
-            x_data = [f"{d.strftime('%d.%m')} ({m[:3]})" for d, m in zip(data_frame[date_col], data_frame[moment_col])]
-            moments_arr = data_frame[moment_col].tolist() if moment_col in data_frame.columns else [""] * len(data_frame)
+            df_pdf_measured = data_frame.copy()
+            if col_glic in df_pdf_measured.columns:
+                df_pdf_measured["G_num"] = pd.to_numeric(df_pdf_measured[col_glic], errors="coerce").fillna(0)
+                df_pdf_measured = df_pdf_measured[df_pdf_measured["G_num"] > 0].drop(columns=["G_num"])
+
+            x_data = [f"{d.strftime('%d.%m')} ({m[:3]})" for d, m in zip(df_pdf_measured[date_col], df_pdf_measured[moment_col])]
+            moments_arr = df_pdf_measured[moment_col].tolist() if moment_col in df_pdf_measured.columns else [""] * len(df_pdf_measured)
             
-            if include_glic and col_glic in data_frame.columns:
-                g_vals = pd.to_numeric(data_frame[col_glic], errors='coerce').fillna(0).tolist()
+            if include_glic and col_glic in df_pdf_measured.columns:
+                g_vals = pd.to_numeric(df_pdf_measured[col_glic], errors='coerce').fillna(0).tolist()
                 story.append(Paragraph("Evolutie Glicemie", styles["Heading2"]))
                 img_buf = generate_pdf_chart_glic(x_data, g_vals, moments_arr, "Glicemie (mg/dL)", "mg/dL", "#38bdf8")
                 story.append(Image(img_buf, width=480, height=170))
                 story.append(Spacer(1, 10))
                 
-            if include_ta and col_sis in data_frame.columns and col_dia in data_frame.columns:
-                s_vals = pd.to_numeric(data_frame[col_sis], errors='coerce').fillna(0).tolist()
-                d_vals = pd.to_numeric(data_frame[col_dia], errors='coerce').fillna(0).tolist()
+            if include_ta and col_sis in df_pdf_measured.columns and col_dia in df_pdf_measured.columns:
+                s_vals = pd.to_numeric(df_pdf_measured[col_sis], errors='coerce').fillna(0).tolist()
+                d_vals = pd.to_numeric(df_pdf_measured[col_dia], errors='coerce').fillna(0).tolist()
                 story.append(Paragraph("Evolutie Tensiune Arteriala", styles["Heading2"]))
                 img_buf = generate_pdf_chart_ta(x_data, s_vals, d_vals, "Tensiune Arteriala (mmHg)")
                 story.append(Image(img_buf, width=480, height=170))
                 story.append(Spacer(1, 10))
                 
-            if include_puls and col_puls in data_frame.columns:
-                p_vals = pd.to_numeric(data_frame[col_puls], errors='coerce').fillna(0).tolist()
+            if include_puls and col_puls in df_pdf_measured.columns:
+                p_vals = pd.to_numeric(df_pdf_measured[col_puls], errors='coerce').fillna(0).tolist()
                 story.append(Paragraph("Evolutie Puls", styles["Heading2"]))
                 img_buf = generate_pdf_chart_puls(x_data, p_vals, "Puls (bpm)")
                 story.append(Image(img_buf, width=480, height=170))
                 story.append(Spacer(1, 10))
 
             if include_tables:
-                story.append(Paragraph("Date Tabelare si Observatii", styles["Heading2"]))
+                story.append(Paragraph("Date Tabelare si Observatii (Doar Inregistrari cu Valori)", styles["Heading2"]))
                 table_data = [["Data", "Moment", "Glic", "TA", "Puls", "Observatii"]]
                 
                 t_style = [
@@ -1602,7 +1618,7 @@ with tab_dict["📄 Raport PDF"]:
                 )
 
                 r_idx = 1
-                for _, row in data_frame.iterrows():
+                for _, row in df_pdf_measured.iterrows():
                     dt_str = row[date_col].strftime("%d.%m.%Y")
                     mm = remove_diacritics(str(row.get(moment_col, "")))
                     obs_val = clean_obs(row.get(col_obs, ""))

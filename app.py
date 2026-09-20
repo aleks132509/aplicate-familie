@@ -291,7 +291,6 @@ def get_chronological_backup_df():
             df_b["Moment_Cat"] = pd.Categorical(df_b["Moment Zi"], categories=moment_order, ordered=True)
             df_b = df_b.dropna(subset=["Dată_dt"]).sort_values(by=["Dată_dt", "Moment_Cat"]).drop(columns=["Dată_dt", "Moment_Cat"])
         
-        # Filtrare exclusivă: păstrăm doar rândurile unde Glicemia > 0
         if "Glicemie" in df_b.columns:
             df_b["Glicemie_num"] = pd.to_numeric(df_b["Glicemie"], errors="coerce").fillna(0)
             df_b = df_b[df_b["Glicemie_num"] > 0].drop(columns=["Glicemie_num"])
@@ -1017,7 +1016,6 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
                     if k.startswith("quick_"):
                         del st.session_state[k]
 
-            # Lista completă de alimente din baza de date
             all_known_foods = sorted(list(set([remove_diacritics(item).lower() for items in st.session_state.food_categories.values() for item in items])))
 
             def handle_save_action():
@@ -1034,7 +1032,6 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
                         if st.session_state.get(chk_key, False):
                             checked_foods.append(item.strip().lower())
                 
-                # Curățăm și reconstruim textul observațiilor
                 existing_parts = [p.strip() for p in o_val.split(",") if p.strip()]
                 non_food_parts = [p for p in existing_parts if remove_diacritics(p).lower() not in all_known_foods]
                 
@@ -1074,8 +1071,8 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
                     st.caption(cat_name)
                     for item in sorted(items):
                         item_clean = remove_diacritics(item).lower()
-                        
                         chk_key = f"quick_{cat_name}_{item}_{session_form_key}"
+                        
                         if chk_key not in st.session_state:
                             is_already_present = item_clean in existing_obs_text
                             is_default_checked = is_already_present or (search_query_clean and item_clean.startswith(search_query_clean))
@@ -1659,7 +1656,7 @@ with tab_dict["📄 Raport PDF"]:
                     if "🟢" in ev_p: t_style.append(('TEXTCOLOR', (4, r_idx), (4, r_idx), colors.HexColor("#16a34a")))
                     elif "🔴" in ev_p: t_style.append(('TEXTCOLOR', (4, r_idx), (4, r_idx), colors.HexColor("#dc2626")))
                     
-                    r_idx += 1
+                    r_idx += `1`
                 
                 t = Table(table_data, colWidths=[60, 115, 35, 55, 35, 200])
                 t.setStyle(TableStyle(t_style))

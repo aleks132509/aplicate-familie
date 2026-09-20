@@ -1040,7 +1040,7 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
             
             cat_cols = st.columns(len(st.session_state.food_categories))
             search_query_clean = remove_diacritics(str(search_food_input).strip().lower())
-            existing_obs_text = clean_obs(st.session_state.get("inp_obs", get_obs())).lower()
+            base_obs_text = clean_obs(st.session_state.get("inp_obs", get_obs())).lower()
 
             checked_foods_live = []
             for idx, (cat_name, items) in enumerate(st.session_state.food_categories.items()):
@@ -1053,7 +1053,7 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
                             chk_key = f"quick_{cat_name}_{item_str}_{session_form_key}"
                             
                             if chk_key not in st.session_state:
-                                is_already_present = item_clean in existing_obs_text
+                                is_already_present = item_clean in base_obs_text
                                 is_default_checked = is_already_present or (search_query_clean and item_clean.startswith(search_query_clean))
                                 st.session_state[chk_key] = bool(is_default_checked)
 
@@ -1068,6 +1068,10 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
             combined_parts = non_food_parts + sorted(list(set(checked_foods_live)))
             new_computed_obs = ", ".join([p for p in combined_parts if p])
             
+            # Forțăm actualizarea stării widgetului de text_area pentru a reflecta instant modificările
+            if "inp_obs" in st.session_state:
+                del st.session_state["inp_obs"]
+
             st.text_area("✍️ Notițe / Observații (Se actualizează instant la bifare/debifare)", value=new_computed_obs, key="inp_obs")
 
             def handle_save_action():

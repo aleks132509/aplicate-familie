@@ -177,14 +177,27 @@ def save_persisted_settings(settings_dict):
 
 def get_initial_meds():
     if os.path.exists(MEDS_FILE):
-        return pd.read_csv(MEDS_FILE)
-    return pd.DataFrame([
-        {"Medicament": "Glucophage", "Doză": "1000 mg", "Orar": "Dimineața / Seara", "Administrare": "După masă"},
-        {"Medicament": "Lagosa", "Doză": "150 mg", "Orar": "Dimineața / Seara", "Administrare": "După masă"},
-        {"Medicament": "Diaprel MR", "Doză": "60 mg (1/2)", "Orar": "Dimineața", "Administrare": "Înainte de masă"},
-        {"Medicament": "Atacand", "Doză": "8 mg", "Orar": "Seara", "Administrare": "După masă"},
-        {"Medicament": "Nebilet", "Doză": "5 mg", "Orar": "Dimineața", "Administrare": "După masă"},
+        try:
+            df_m = pd.read_csv(MEDS_FILE)
+            if not df_m.empty:
+                return df_m
+        except:
+            pass
+            
+    df_init_m = pd.DataFrame([
+        {"Medicament": "Glucophage", "Doză": "1000 mg", "Orar / Frecvență": "Dimineața și seara, dupa masa", "Observații": ""},
+        {"Medicament": "Lagosa", "Doză": "150 mg", "Orar / Frecvență": "Dimineața și seara, dupa masa", "Observații": ""},
+        {"Medicament": "Lipantil Nano", "Doză": "145 mg", "Orar / Frecvență": "Pranz, dupa masa", "Observații": ""},
+        {"Medicament": "Sortis", "Doză": "20 mg", "Orar / Frecvență": "Seara, dupa masa", "Observații": ""},
+        {"Medicament": "Omacor", "Doză": "1000 mg", "Orar / Frecvență": "Dimineața, la prânz și seara, dupa masa", "Observații": ""},
+        {"Medicament": "Diaprel MR", "Doză": "60 mg", "Orar / Frecvență": "Dimineața, inainte masa", "Observații": "1/2 din doza"},
+        {"Medicament": "Larginina", "Doză": "1000 mg", "Orar / Frecvență": "Pranz, dupa masa", "Observații": "10 zile pe luna"},
+        {"Medicament": "Atacand", "Doză": "8 mg", "Orar / Frecvență": "Seara, dupa masa", "Observații": ""},
+        {"Medicament": "Nebilet", "Doză": "5 mg", "Orar / Frecvență": "Dimineața, dupa masa", "Observații": ""},
+        {"Medicament": "Aspenter", "Doză": "75 mg", "Orar / Frecvență": "Pranz, dupa masa", "Observații": ""},
     ])
+    df_init_m.to_csv(MEDS_FILE, index=False)
+    return df_init_m
 
 def get_initial_history():
     if os.path.exists(MEDS_HIST_FILE):
@@ -195,19 +208,23 @@ def get_initial_prog():
     if os.path.exists(PROG_FILE):
         try:
             df_p = pd.read_csv(PROG_FILE)
-            if "Ora" not in df_p.columns: df_p["Ora"] = "10:00"
-            if "Efectuat" not in df_p.columns: df_p["Efectuat"] = "Nu"
-            if "Clinică" not in df_p.columns: df_p["Clinică"] = "-"
-            if "Zile_Alerta" not in df_p.columns: df_p["Zile_Alerta"] = "1, 3"
-            if "Observații" not in df_p.columns: df_p["Observații"] = ""
-            return df_p
+            if not df_p.empty:
+                if "Ora" not in df_p.columns: df_p["Ora"] = "10:00"
+                if "Efectuat" not in df_p.columns: df_p["Efectuat"] = "Nu"
+                if "Clinică" not in df_p.columns: df_p["Clinică"] = "-"
+                if "Zile_Alerta" not in df_p.columns: df_p["Zile_Alerta"] = "1, 3"
+                if "Observații" not in df_p.columns: df_p["Observații"] = ""
+                return df_p
         except:
             pass
             
-    return pd.DataFrame([
-        {"Dată": "2026-09-25", "Ora": "09:00", "Tip": "Analize de laborator", "Clinică": "Regina Maria", "Zile_Alerta": "1, 3, 7", "Efectuat": "Nu", "Observații": "Repetare analize Diabet"},
-        {"Dată": "2026-10-05", "Ora": "14:30", "Tip": "Consult Diabet", "Clinică": "Dr. Clenciu Craiova", "Zile_Alerta": "2, 5", "Efectuat": "Nu", "Observații": "Rețetă 3 luni"},
+    df_init_p = pd.DataFrame([
+        {"Dată": "2026-10-05", "Ora": "10:00", "Tip": "Eliberare reteta", "Clinică": "Medic de familie", "Zile_Alerta": "1, 3", "Efectuat": "Nu", "Observații": "Ridicare reteta lunara"},
+        {"Dată": "2026-11-29", "Ora": "09:00", "Tip": "Analize de laborator", "Clinică": "Regina Maria", "Zile_Alerta": "1, 3, 7", "Efectuat": "Nu", "Observații": "Repetare analize Diabet"},
+        {"Dată": "2026-12-05", "Ora": "14:30", "Tip": "Consult Diabet", "Clinică": "Dr. Clenciu Craiova", "Zile_Alerta": "2, 5", "Efectuat": "Nu", "Observații": "Reteta 3 luni"},
     ])
+    df_init_p.to_csv(PROG_FILE, index=False)
+    return df_init_p
 
 def get_initial_foods():
     default_foods = {
@@ -281,7 +298,7 @@ def get_chronological_backup_df():
     except:
         return pd.DataFrame()
 
-def trimite_email_cu_atasament(destinatar, subiect, mesaj, file_path, file_name):
+def trimite_email_cu_multiple_atasamente(destinatar, subiect, mesaj, file_paths_dict):
     email_sender = st.session_state.settings.get("email_sender", "").strip()
     email_password = st.session_state.settings.get("email_password", "").strip()
     
@@ -306,10 +323,11 @@ def trimite_email_cu_atasament(destinatar, subiect, mesaj, file_path, file_name)
                 msg['From'] = email_sender
                 msg['To'] = destinatar
 
-                if os.path.exists(file_path):
-                    with open(file_path, "rb") as f:
-                        file_data = f.read()
-                    msg.add_attachment(file_data, maintype="application", subtype="octet-stream", filename=file_name)
+                for f_name, f_path in file_paths_dict.items():
+                    if os.path.exists(f_path):
+                        with open(f_path, "rb") as f:
+                            file_data = f.read()
+                        msg.add_attachment(file_data, maintype="application", subtype="octet-stream", filename=f_name)
 
                 if use_ssl:
                     with smtplib.SMTP_SSL('smtp.mail.me.com', port, timeout=30) as smtp:
@@ -321,7 +339,7 @@ def trimite_email_cu_atasament(destinatar, subiect, mesaj, file_path, file_name)
                         smtp.login(email_sender, email_password)
                         smtp.send_message(msg)
                         
-                return True, "Email trimis cu succes prin iCloud!"
+                return True, "Email cu toate fișierele de backup trimis cu succes prin iCloud!"
             except Exception as e:
                 last_error = str(e)
                 time.sleep(1)
@@ -350,12 +368,19 @@ def verifica_si_fa_backup_automat():
                 temp_backup_file = "temp_backup_cron.csv"
                 df_cron.to_csv(temp_backup_file, index=False)
                 
-                succes, _ = trimite_email_cu_atasament(
+                attachments = {
+                    "backup_date_medicale.csv": temp_backup_file,
+                }
+                if os.path.exists(MEDS_FILE):
+                    attachments["medicamente.csv"] = MEDS_FILE
+                if os.path.exists(PROG_FILE):
+                    attachments["programari_medicale.csv"] = PROG_FILE
+
+                succes, _ = trimite_email_cu_multiple_atasamente(
                     destinatar=email_dest,
                     subiect=f"💾 [Backup Zilnic Automat] HealthTrack Pro - {azi.strftime('%d.%m.%Y')}",
-                    mesaj=f"Salut!\n\nAcesta este backup-ul tău zilnic automat generat la data de {azi.strftime('%d.%m.%Y')}.\nFișierul CSV cu toate datele medicale este atașat acestui mesaj.\n\nHealthTrack Pro System",
-                    file_path=temp_backup_file,
-                    file_name="backup_date_medicale.csv"
+                    mesaj=f"Salut!\n\nAcesta este backup-ul tău zilnic automat generat la data de {azi.strftime('%d.%m.%Y')}.\nSunt atașate fișierele CSV cu datele medicale, schema de tratament și programările medicale.\n\nHealthTrack Pro System",
+                    file_paths_dict=attachments
                 )
                 if os.path.exists(temp_backup_file):
                     os.remove(temp_backup_file)
@@ -1058,13 +1083,14 @@ with tab_dict["💊 Tratament"]:
                 with st.form("add_med_form"):
                     m_nume = st.text_input("Nume")
                     m_doza = st.text_input("Doză")
-                    m_orar = st.text_input("Orar")
-                    m_admin = st.selectbox("Moment", ["Înainte de masă", "După masă", "Oriunde"])
+                    m_orar = st.text_input("Orar / Frecvență")
+                    m_obs_med = st.text_input("Observații")
                     if st.form_submit_button("Adaugă", type="primary"):
                         if m_nume:
-                            new_row = pd.DataFrame([{"Medicament": m_nume, "Doză": m_doza, "Orar": m_orar, "Administrare": m_admin}])
+                            new_row = pd.DataFrame([{"Medicament": m_nume, "Doză": m_doza, "Orar / Frecvență": m_orar, "Observații": m_obs_med}])
                             st.session_state.meds_df = pd.concat([st.session_state.meds_df, new_row], ignore_index=True)
                             add_history_entry("Adăugare", m_nume, f"Doză: {m_doza}, Orar: {m_orar}")
+                            save_all_files()
                             st.success(f"{m_nume} adăugat!")
                             trigger_rerun()
 
@@ -1076,16 +1102,15 @@ with tab_dict["💊 Tratament"]:
                     med_data = st.session_state.meds_df[st.session_state.meds_df["Medicament"] == med_to_edit].iloc[0]
                     with st.form("edit_med_form"):
                         e_doza = st.text_input("Doză", value=med_data["Doză"])
-                        e_orar = st.text_input("Orar", value=med_data["Orar"])
-                        admin_opts = ["Înainte de masă", "După masă", "Oriunde"]
-                        idx_admin = admin_opts.index(med_data["Administrare"]) if med_data["Administrare"] in admin_opts else 0
-                        e_admin = st.selectbox("Moment nou", admin_opts, index=idx_admin)
+                        e_orar = st.text_input("Orar / Frecvență", value=med_data["Orar / Frecvență"])
+                        e_obs_med = st.text_input("Observații", value=med_data.get("Observații", ""))
                         if st.form_submit_button("Salvează Modificarea", type="primary"):
                             idx = st.session_state.meds_df.index[st.session_state.meds_df["Medicament"] == med_to_edit][0]
                             st.session_state.meds_df.loc[idx, "Doză"] = e_doza
-                            st.session_state.meds_df.loc[idx, "Orar"] = e_orar
-                            st.session_state.meds_df.loc[idx, "Administrare"] = e_admin
+                            st.session_state.meds_df.loc[idx, "Orar / Frecvență"] = e_orar
+                            st.session_state.meds_df.loc[idx, "Observații"] = e_obs_med
                             add_history_entry("Modificare", med_to_edit, f"Doză: -> {e_doza}")
+                            save_all_files()
                             st.success("Actualizat!")
                             trigger_rerun()
 
@@ -1219,9 +1244,13 @@ if is_admin and "📅 Programări" in tab_dict:
                                 pass
                         
                         if trimis_ok > 0:
-                            succes, rez = trimite_email_cu_atasament(destinatar_auto, "🔔 Notificare Programare Medicală", mesaj_final, DATA_FILE, "dummy.csv")
+                            succes, rez = trimite_email_cu_multiple_atasamente(destinatar_auto, "🔔 Notificare Programare Medicală", mesaj_final, {
+                                "date_medicale.csv": DATA_FILE,
+                                "medicamente.csv": MEDS_FILE,
+                                "programari_medicale.csv": PROG_FILE
+                            })
                             if succes:
-                                st.success("Notificările automate au fost trimise prin iCloud!")
+                                st.success("Notificările automate au fost trimise prin iCloud împreună cu fișierele!")
                             else:
                                 st.error(rez)
                         else:
@@ -1333,17 +1362,30 @@ with tab_dict["⚙️ Setări"]:
         st.markdown("<small>💡 *Notă: Nu folosi parola ta principală Apple ID. Generează o App-Specific Password din portalul tău Apple ID.*</small>", unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
 
-        if st.button("🔌 Forțează Trimite Backup Zilnic Acum", type="primary"):
+        if st.button("🔌 Forțează Trimite Backup Complet Acum (Toate Fișierele)", type="primary"):
             test_dest = st.session_state.settings.get("email_sender", "")
             if not test_dest:
                 st.error("Completează și salvează mai întâi adresa de email a expeditorului.")
             else:
-                df_test_cron = get_chronological_backup_df()
                 temp_test_file = "temp_test_backup.csv"
+                df_test_cron = get_chronological_backup_df()
                 if not df_test_cron.empty:
                     df_test_cron.to_csv(temp_test_file, index=False)
                 
-                success_t, msg_t = trimite_email_cu_atasament(test_dest, "🧪 Test Forțat / Backup Zilnic HealthTrack Pro", "Salut! Acesta este un email de test forțat cu fișierul de date cronologic atașat.", temp_test_file, "backup_date_medicale.csv")
+                attachments = {
+                    "backup_date_medicale.csv": temp_test_file,
+                }
+                if os.path.exists(MEDS_FILE):
+                    attachments["medicamente.csv"] = MEDS_FILE
+                if os.path.exists(PROG_FILE):
+                    attachments["programari_medicale.csv"] = PROG_FILE
+
+                success_t, msg_t = trimite_email_cu_multiple_atasamente(
+                    test_dest, 
+                    "🧪 Test Forțat / Backup Complet HealthTrack Pro", 
+                    "Salut! Acesta este un email de test forțat cu toate cele 3 fișiere atașate (date medicale, tratament și programări).", 
+                    attachments
+                )
                 
                 if os.path.exists(temp_test_file):
                     os.remove(temp_test_file)
@@ -1351,12 +1393,12 @@ with tab_dict["⚙️ Setări"]:
                 if success_t:
                     with open(BACKUP_LOG_FILE, "w") as f:
                         f.write(datetime.now().strftime("%Y-%m-%d"))
-                    st.success("✅ Emailul de backup zilnic a fost trimis cu succes prin iCloud!")
+                    st.success("✅ Emailul de backup complet a fost trimis cu succes prin iCloud!")
                 else:
                     st.error(f"❌ {msg_t}")
 
         st.markdown("<br>", unsafe_allow_html=True)
-        st.markdown("#### 💾 Backup Manual (CSV Cronologic)")
+        st.markdown("#### 💾 Backup Manual (CSV Cronologic Date Medicale)")
         df_backup_cron = get_chronological_backup_df()
         if not df_backup_cron.empty:
             csv_data = df_backup_cron.to_csv(index=False).encode('utf-8')

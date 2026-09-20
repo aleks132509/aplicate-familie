@@ -5,6 +5,7 @@ import re
 import smtplib
 import time
 import unicodedata
+import base64
 from datetime import date, datetime, timedelta
 from email.message import EmailMessage
 import matplotlib
@@ -510,7 +511,7 @@ def get_initial_data():
         {"Dată": "18.09.2026", "Moment Zi": "Seara - După masă", "Glicemie": 112, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
         {"Dată": "19.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 95, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
         {"Dată": "19.09.2026", "Moment Zi": "Seara - După masă", "Glicemie": 150, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
-        {"Dată": "20.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 122, "Sistolică": 120, "Diastolică": 78, "Puls": 70, "Observații": "cartofi prajiti"}
+        {"Dată": "20.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 122, "Sistolică": 120, "Diastolică": 78, "Puls": 70, "Observații": ""}
     ]
 
     for r_def in initial_defaults:
@@ -1676,4 +1677,14 @@ with tab_dict["📄 Raport PDF"]:
     if st.button("Crează Raport PDF", type="primary"):
         pdf_buffer = make_pdf_report(view_df, opt_glic, opt_ta, opt_puls, opt_tabele)
         file_name = f"Raport_Medical_{filtru_luni_str.replace(', ', '_')}.pdf"
-        st.download_button(label="⬇️ Descarcă PDF", data=pdf_buffer, file_name=file_name, mime="application/pdf", use_container_width=True)
+        
+        b64_pdf = base64.b64encode(pdf_buffer.getvalue()).decode('utf-8')
+        href = f'''
+        <div style="text-align: center; margin-top: 15px;">
+            <a href="data:application/pdf;base64,{b64_pdf}" download="{file_name}" target="_blank" style="display:inline-block; padding: 14px 24px; background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); color: white; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
+                📥 Descarcă / Deschide Raport PDF (Fereastră Nouă)
+            </a>
+        </div>
+        '''
+        st.markdown(href, unsafe_allow_html=True)
+        st.success("✅ Raportul PDF a fost generat! Apasă pe butonul de mai sus pentru al descărca sau vizualiza în siguranță, fără ca aplicația să se închidă.")

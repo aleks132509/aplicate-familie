@@ -1020,35 +1020,6 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
 
             all_known_foods = sorted(list(set([remove_diacritics(str(item)).lower() for items in st.session_state.food_categories.values() for item in items if pd.notna(item)])))
 
-            def handle_save_action():
-                g_val = st.session_state.get("inp_glic", 0)
-                s_val = st.session_state.get("inp_sis", 0)
-                d_val = st.session_state.get("inp_dia", 0)
-                p_val = st.session_state.get("inp_puls", 0)
-                o_val = st.session_state.get("inp_obs", "")
-                
-                checked_foods = []
-                for cat_name, items in st.session_state.food_categories.items():
-                    for item in items:
-                        if pd.notna(item):
-                            chk_key = f"quick_{cat_name}_{str(item)}_{session_form_key}"
-                            if st.session_state.get(chk_key, False):
-                                checked_foods.append(str(item).strip().lower())
-                
-                existing_parts = [p.strip() for p in o_val.split(",") if p.strip()]
-                non_food_parts = [p for p in existing_parts if remove_diacritics(p).lower() not in all_known_foods]
-                
-                final_parts = non_food_parts + sorted(list(set(checked_foods)))
-                o_val = ", ".join([p for p in final_parts if p])
-                st.session_state["inp_obs"] = o_val
-
-                save_local_record(date_str, selected_moment, g_val, s_val, d_val, p_val, o_val)
-                st.session_state["success_message"] = "✅ Salvare / Suprascrie efectuată cu succes!"
-                trigger_rerun()
-
-            st.button("💾 Salvează / Suprascrie (Sus)", type="primary", use_container_width=True, on_click=handle_save_action, key="top_save_btn")
-            st.markdown("---")
-
             c1, c2 = st.columns(2)
             with c1: 
                 st.number_input("🩸 Glicemie (mg/dL) [0 = nemăsurat]", min_value=0, key="inp_glic")
@@ -1058,7 +1029,7 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
                 st.number_input("💓 Puls [0 = nemăsurat]", min_value=0, key="inp_puls")
 
             st.markdown("---")
-            st.markdown("##### ⚡ Asistent Inteligent Mese & Indice Glicemic (Sugestii instantanee)")
+            st.markdown("##### ⚡ Asistent Inteligent Mese & Indice Glicemic (Actualizare Instantanee)")
             
             valid_food_options = sorted(list(set([str(item) for items in st.session_state.food_categories.values() for item in items if pd.notna(item)])))
             search_food_input = st.selectbox(
@@ -1071,6 +1042,7 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
             search_query_clean = remove_diacritics(str(search_food_input).strip().lower())
             existing_obs_text = clean_obs(st.session_state.get("inp_obs", get_obs())).lower()
 
+            checked_foods_live = []
             for idx, (cat_name, items) in enumerate(st.session_state.food_categories.items()):
                 with cat_cols[idx]:
                     st.caption(cat_name)
@@ -1085,12 +1057,32 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
                                 is_default_checked = is_already_present or (search_query_clean and item_clean.startswith(search_query_clean))
                                 st.session_state[chk_key] = bool(is_default_checked)
 
-                            st.checkbox(item_str, key=chk_key)
+                            if st.checkbox(item_str, key=chk_key):
+                                checked_foods_live.append(item_str.strip().lower())
 
-            st.text_area("✍️ Notițe / Observații", key="inp_obs")
+            # Sincronizare instantanee a observațiilor în funcție de bife
+            current_obs_val = st.session_state.get("inp_obs", "")
+            existing_parts = [p.strip() for p in current_obs_val.split(",") if p.strip()]
+            non_food_parts = [p for p in existing_parts if remove_diacritics(p).lower() not in all_known_foods]
             
+            combined_parts = non_food_parts + sorted(list(set(checked_foods_live)))
+            new_computed_obs = ", ".join([p for p in combined_parts if p])
+            
+            st.text_area("✍️ Notițe / Observații (Se actualizează instant la bifare/debifare)", value=new_computed_obs, key="inp_obs")
+
+            def handle_save_action():
+                g_val = st.session_state.get("inp_glic", 0)
+                s_val = st.session_state.get("inp_sis", 0)
+                d_val = st.session_state.get("inp_dia", 0)
+                p_val = st.session_state.get("inp_puls", 0)
+                o_val = st.session_state.get("inp_obs", "")
+
+                save_local_record(date_str, selected_moment, g_val, s_val, d_val, p_val, o_val)
+                st.session_state["success_message"] = "✅ Salvare / Suprascrie efectuată cu succes!"
+                trigger_rerun()
+
             st.markdown("---")
-            st.button("💾 Salvează / Suprascrie (Jos)", type="primary", use_container_width=True, on_click=handle_save_action, key="bottom_save_btn")
+            st.button("💾 Salvează / Suprascrie Înregistrarea", type="primary", use_container_width=True, on_click=handle_save_action, key="bottom_save_btn")
 
 # ----------------- TAB: TRATAMENT -----------------
 with tab_dict["💊 Tratament"]:

@@ -108,6 +108,22 @@ def clean_obs(val):
         return ""
     return str(val).strip()
 
+def parse_flexible_date(series_or_str):
+    if isinstance(series_or_str, pd.Series):
+        s = series_or_str.astype(str).str.strip()
+        dt1 = pd.to_datetime(s, format="%d.%m.%Y", errors="coerce")
+        dt2 = pd.to_datetime(s, format="%Y-%m-%d", errors="coerce")
+        dt3 = pd.to_datetime(s, errors="coerce")
+        return dt1.fillna(dt2).fillna(dt3)
+    else:
+        s = str(series_or_str).strip()
+        for fmt in ("%d.%m.%Y", "%Y-%m-%d", "%d/%m/%Y"):
+            try:
+                return datetime.strptime(s, fmt)
+            except:
+                pass
+        return pd.to_datetime(s, errors="coerce")
+
 def trigger_rerun():
     if hasattr(st, "rerun"):
         st.rerun()
@@ -252,7 +268,7 @@ def get_chronological_backup_df():
         df_b = pd.read_csv(DATA_FILE)
         date_col_name = 'Data' if 'Data' in df_b.columns else 'Dată'
         if date_col_name in df_b.columns:
-            df_b["Dată_dt"] = pd.to_datetime(df_b[date_col_name].astype(str).str.strip(), format="%d.%m.%Y", errors="coerce")
+            df_b["Dată_dt"] = parse_flexible_date(df_b[date_col_name])
             df_b["Moment_Cat"] = pd.Categorical(df_b["Moment Zi"], categories=moment_order, ordered=True)
             df_b = df_b.dropna(subset=["Dată_dt"]).sort_values(by=["Dată_dt", "Moment_Cat"]).drop(columns=["Dată_dt", "Moment_Cat"])
         for col in df_b.columns:
@@ -328,7 +344,6 @@ def verifica_si_fa_backup_automat():
             except:
                 pass
 
-        # Trimite automat în fiecare zi nouă (la prima accesare)
         if ultima_data is None or ultima_data < azi:
             df_cron = get_chronological_backup_df()
             if not df_cron.empty:
@@ -440,7 +455,7 @@ def get_initial_data():
                 "Observații": ""
             })
     df_template = pd.DataFrame(full_template)
-    df_template["Dată_dt"] = pd.to_datetime(df_template["Dată"], format="%d.%m.%Y")
+    df_template["Dată_dt"] = parse_flexible_date(df_template["Dată"])
 
     initial_defaults = [
         {"Dată": "12.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 137, "Sistolică": 108, "Diastolică": 61, "Puls": 0, "Observații": "Prima zi cu tratament"},
@@ -466,7 +481,7 @@ def get_initial_data():
     ]
 
     for r_def in initial_defaults:
-        d_dt = pd.to_datetime(r_def["Dată"], format="%d.%m.%Y")
+        d_dt = parse_flexible_date(r_def["Dată"])
         m_val = r_def["Moment Zi"]
         mask = (df_template["Dată_dt"] == d_dt) & (df_template["Moment Zi"] == m_val)
         if mask.any():
@@ -484,7 +499,7 @@ def get_initial_data():
                 if "Sistolica" in df_saved.columns:
                     df_saved = df_saved.rename(columns={"Sistolica": "Sistolică", "Diastolica": "Diastolică", "Observatii": "Observații"})
                 
-                df_saved["Dată_dt"] = pd.to_datetime(df_saved[date_col_name].astype(str).str.strip(), format="%d.%m.%Y", errors="coerce")
+                df_saved["Dată_dt"] = parse_flexible_date(df_saved[date_col_name])
                 df_saved = df_saved.dropna(subset=["Dată_dt"])
                 
                 for _, row in df_saved.iterrows():
@@ -525,10 +540,7 @@ col_puls = "Puls"
 col_obs = "Observații"
 
 if date_col in df.columns and not df.empty:
-    if pd.api.types.is_datetime64_any_dtype(df[date_col]):
-        df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
-    else:
-        df[date_col] = pd.to_datetime(df[date_col].astype(str).str.strip(), format="%d.%m.%Y", errors="coerce")
+    df[date_col] = parse_flexible_date(df[date_col])
     df["Moment_Cat"] = pd.Categorical(df[moment_col], categories=moment_order, ordered=True)
     df = df.dropna(subset=[date_col]).sort_values(by=[date_col, "Moment_Cat"]).drop(columns=["Moment_Cat"]).reset_index(drop=True)
 
@@ -541,7 +553,7 @@ def save_local_record(date_str, moment_str, glic_v, sis_v, dia_v, puls_v, obs_v)
         current_df[col_obs] = ""
 
     if not current_df.empty and date_col in current_df.columns:
-        current_df["Dată_str"] = pd.to_datetime(current_df[date_col], errors="coerce").dt.strftime("%d.%m.%Y")
+        current_df["Dată_str"] = parse_flexible_date(current_df[date_col]).dt.strftime("%d.%m.%Y")
         mask = (current_df["Dată_str"] == date_str) & (current_df[moment_col].astype(str) == moment_str)
         current_df = current_df.drop(columns=["Dată_str"])
     else:
@@ -562,13 +574,13 @@ def save_local_record(date_str, moment_str, glic_v, sis_v, dia_v, puls_v, obs_v)
         current_df.loc[mask, col_obs] = obs_clean_val
     else:
         new_record = {
-            date_col: pd.to_datetime(date_str, format="%d.%m.%Y"),
+            date_col: parse_flexible_date(date_str),
             moment_col: moment_str, col_glic: glic_v, col_sis: sis_v, col_dia: dia_v, col_puls: puls_v,
             col_obs: obs_clean_val,
         }
         current_df = pd.concat([current_df, pd.DataFrame([new_record])], ignore_index=True)
 
-    current_df[date_col] = pd.to_datetime(current_df[date_col], errors="coerce")
+    current_df[date_col] = parse_flexible_date(current_df[date_col])
     dates_unique = sorted(current_df[date_col].dropna().unique())
     full_rows = []
     for d in dates_unique:
@@ -578,11 +590,11 @@ def save_local_record(date_str, moment_str, glic_v, sis_v, dia_v, puls_v, obs_v)
             row_m = df_d[df_d[moment_col] == m]
             if not row_m.empty:
                 r = row_m.iloc[0].to_dict()
-                r[date_col] = pd.to_datetime(d_str, format="%d.%m.%Y")
+                r[date_col] = parse_flexible_date(d_str)
                 full_rows.append(r)
             else:
                 full_rows.append({
-                    date_col: pd.to_datetime(d_str, format="%d.%m.%Y"),
+                    date_col: parse_flexible_date(d_str),
                     moment_col: m,
                     col_glic: 0,
                     col_sis: 0,
@@ -597,7 +609,7 @@ def save_local_record(date_str, moment_str, glic_v, sis_v, dia_v, puls_v, obs_v)
     st.session_state.local_df_v2 = current_df
     try:
         df_to_save = current_df.copy()
-        df_to_save[date_col] = pd.to_datetime(df_to_save[date_col]).dt.strftime("%d.%m.%Y")
+        df_to_save[date_col] = parse_flexible_date(df_to_save[date_col]).dt.strftime("%d.%m.%Y")
         df_to_save.to_csv(DATA_FILE, index=False)
     except Exception as e:
         print(f"Erore: {e}")
@@ -935,7 +947,7 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
             existing_row = pd.DataFrame()
             date_str = selected_date.strftime("%d.%m.%Y")
             if not df.empty and date_col in df.columns and moment_col in df.columns:
-                match = df[(df[date_col].dt.strftime("%d.%m.%Y") == date_str) & (df[moment_col] == selected_moment)]
+                match = df[(parse_flexible_date(df[date_col]).dt.strftime("%d.%m.%Y") == date_str) & (df[moment_col] == selected_moment)]
                 if not match.empty:
                     existing_row = match.iloc[0]
                     st.warning(f"⚠️ Există deja o înregistrare pentru {date_str} - {selected_moment}. Salvarea va SUPRASCRIE.")
@@ -959,6 +971,11 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
             session_form_key = f"form_state_{date_str}_{selected_moment}"
             if "last_form_key" not in st.session_state or st.session_state["last_form_key"] != session_form_key:
                 st.session_state["last_form_key"] = session_form_key
+                st.session_state["inp_glic"] = get_val(col_glic)
+                st.session_state["inp_sis"] = get_val(col_sis)
+                st.session_state["inp_dia"] = get_val(col_dia)
+                st.session_state["inp_puls"] = get_val(col_puls)
+                st.session_state["inp_obs"] = get_obs()
                 for k in list(st.session_state.keys()):
                     if k.startswith("quick_"):
                         del st.session_state[k]
@@ -994,11 +1011,11 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
 
             c1, c2 = st.columns(2)
             with c1: 
-                st.number_input("🩸 Glicemie (mg/dL) [0 = nemăsurat]", min_value=0, value=get_val(col_glic), key="inp_glic")
+                st.number_input("🩸 Glicemie (mg/dL) [0 = nemăsurat]", min_value=0, key="inp_glic")
             with c2:
-                st.number_input("🫀 Tensiune Sistolică [0 = nemăsurat]", min_value=0, value=get_val(col_sis), key="inp_sis")
-                st.number_input("🫀 Tensiune Diastolică [0 = nemăsurat]", min_value=0, value=get_val(col_dia), key="inp_dia")
-                st.number_input("💓 Puls [0 = nemăsurat]", min_value=0, value=get_val(col_puls), key="inp_puls")
+                st.number_input("🫀 Tensiune Sistolică [0 = nemăsurat]", min_value=0, key="inp_sis")
+                st.number_input("🫀 Tensiune Diastolică [0 = nemăsurat]", min_value=0, key="inp_dia")
+                st.number_input("💓 Puls [0 = nemăsurat]", min_value=0, key="inp_puls")
 
             st.markdown("---")
             st.markdown("##### ⚡ Asistent Inteligent Mese & Indice Glicemic (Sugestii instantanee)")
@@ -1019,11 +1036,6 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
                         item_clean = remove_diacritics(item).lower()
                         is_default_checked = (search_query_clean and item_clean.startswith(search_query_clean))
                         st.checkbox(item, value=is_default_checked, key=f"quick_{cat_name}_{item}_{session_form_key}")
-
-            base_obs_initial = get_obs()
-            if "inp_obs" not in st.session_state or st.session_state.get("last_form_key_obs") != session_form_key:
-                st.session_state["inp_obs"] = base_obs_initial
-                st.session_state["last_form_key_obs"] = session_form_key
 
             st.text_area("✍️ Notițe / Observații", key="inp_obs")
             

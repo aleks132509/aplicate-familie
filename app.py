@@ -1,5 +1,6 @@
 import io
 import os
+import json
 import re
 import smtplib
 import time
@@ -114,7 +115,7 @@ def trigger_rerun():
         st.experimental_rerun()
 
 # ==========================================
-# GESTIONARE FIȘIERE PERSISTENTE
+# GESTIONARE FIȘIERE PERSISTENTE & SETĂRI EMAIL
 # ==========================================
 DATA_FILE = "date_medicale_utilizator.csv"
 MEDS_FILE = "medicamente.csv"
@@ -122,6 +123,7 @@ MEDS_HIST_FILE = "istoric_medicamente.csv"
 PROG_FILE = "programari_medicale.csv"
 FOODS_FILE = "alimente_custom.csv"
 BACKUP_LOG_FILE = "ultimul_backup_auto.txt"
+SETTINGS_FILE = "setari_email.json"
 
 moment_order = [
     'Dimineața - Înainte de masă',
@@ -131,6 +133,31 @@ moment_order = [
     'Seara - Înainte de masă',
     'Seara - După masă'
 ]
+
+def load_persisted_settings():
+    default_settings = {
+        "notif_enabled": True, 
+        "email_sender": "",
+        "email_password": "",
+        "target_glic_min": 70, "target_glic_max": 120,
+        "target_glic_post_min": 70, "target_glic_post_max": 160,
+        "target_ta_sis": 120, "target_ta_dia": 80,
+    }
+    if os.path.exists(SETTINGS_FILE):
+        try:
+            with open(SETTINGS_FILE, "r") as f:
+                saved = json.load(f)
+                default_settings.update(saved)
+        except:
+            pass
+    return default_settings
+
+def save_persisted_settings(settings_dict):
+    try:
+        with open(SETTINGS_FILE, "w") as f:
+            json.dump(settings_dict, f)
+    except:
+        pass
 
 def get_initial_meds():
     if os.path.exists(MEDS_FILE):
@@ -301,7 +328,8 @@ def verifica_si_fa_backup_automat():
             except:
                 pass
 
-        if ultima_data is None or (azi - ultima_data).days >= 2:
+        # Trimite automat în fiecare zi nouă (la prima accesare)
+        if ultima_data is None or ultima_data < azi:
             df_cron = get_chronological_backup_df()
             if not df_cron.empty:
                 temp_backup_file = "temp_backup_cron.csv"
@@ -309,8 +337,8 @@ def verifica_si_fa_backup_automat():
                 
                 succes, _ = trimite_email_cu_atasament(
                     destinatar=email_dest,
-                    subiect="💾 [Backup Automat] HealthTrack Pro - Date Medicale",
-                    mesaj=f"Salut!\n\nAcesta este backup-ul tău automat cronologic generat la data de {azi.strftime('%d.%m.%Y')}.\nFișierul CSV cu toate datele medicale este atașat acestui mesaj.\n\nHealthTrack Pro System",
+                    subiect=f"💾 [Backup Zilnic Automat] HealthTrack Pro - {azi.strftime('%d.%m.%Y')}",
+                    mesaj=f"Salut!\n\nAcesta este backup-ul tău zilnic automat generat la data de {azi.strftime('%d.%m.%Y')}.\nFișierul CSV cu toate datele medicale este atașat acestui mesaj.\n\nHealthTrack Pro System",
                     file_path=temp_backup_file,
                     file_name="backup_date_medicale.csv"
                 )
@@ -339,14 +367,7 @@ if "user" not in st.session_state:
     st.session_state.user = None
 
 if "settings" not in st.session_state:
-    st.session_state.settings = {
-        "notif_enabled": True, 
-        "email_sender": "",
-        "email_password": "",
-        "target_glic_min": 70, "target_glic_max": 120,
-        "target_glic_post_min": 70, "target_glic_post_max": 160,
-        "target_ta_sis": 120, "target_ta_dia": 80,
-    }
+    st.session_state.settings = load_persisted_settings()
 
 if "meds_df" not in st.session_state:
     st.session_state.meds_df = get_initial_meds()
@@ -361,7 +382,7 @@ if "action_history_stack" not in st.session_state:
     st.session_state.action_history_stack = []
 
 # ==========================================
-# AUTENTIFICARE
+# AUTENTIFICARE CU OPȚIUNE "ȚINE-Mă MINTE"
 # ==========================================
 if not st.session_state.logged_in:
     st.markdown("<br><br><br>", unsafe_allow_html=True)
@@ -374,6 +395,7 @@ if not st.session_state.logged_in:
         with st.container(border=True):
             username = st.text_input("👤 Utilizator")
             password = st.text_input("🔑 Parolă", type="password")
+            remember_me = st.checkbox("🧠 Ține-mă minte (Rămâi autentificat)", value=True)
 
             if st.button("🔓 Autentificare", type="primary", use_container_width=True):
                 user_data = st.session_state.users.get(username)
@@ -546,7 +568,6 @@ def save_local_record(date_str, moment_str, glic_v, sis_v, dia_v, puls_v, obs_v)
         }
         current_df = pd.concat([current_df, pd.DataFrame([new_record])], ignore_index=True)
 
-    # Asigurăm sortarea uniformă a datelor
     current_df[date_col] = pd.to_datetime(current_df[date_col], errors="coerce")
     dates_unique = sorted(current_df[date_col].dropna().unique())
     full_rows = []
@@ -779,6 +800,7 @@ with tab_dict["📊 Jurnal & Grafice"]:
                     marker=dict(size=10, color=spike_colors),
                     text=spike_texts, textposition="top center",
                     textfont=dict(size=9.5, color="#ffffff"),
+                    texttemplate="%{text}",
                     connectgaps=True
                 ))
                 
@@ -911,17 +933,22 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
             selected_moment = st.selectbox("🍽️ Momentul Măsurătorii", moment_order, key="input_moment_select")
 
             existing_row = pd.DataFrame()
+            date_str = selected_date.strftime("%d.%m.%Y")
             if not df.empty and date_col in df.columns and moment_col in df.columns:
-                date_str = selected_date.strftime("%d.%m.%Y")
                 match = df[(df[date_col].dt.strftime("%d.%m.%Y") == date_str) & (df[moment_col] == selected_moment)]
                 if not match.empty:
                     existing_row = match.iloc[0]
                     st.warning(f"⚠️ Există deja o înregistrare pentru {date_str} - {selected_moment}. Salvarea va SUPRASCRIE.")
+                else:
+                    st.info(f"ℹ️ Nu există înregistrare anterioară pentru {date_str} - {selected_moment}. Câmpurile vor porni de la 0.")
 
             def get_val(col_name):
                 if not existing_row.empty and col_name in existing_row:
-                    try: return int(float(existing_row[col_name])) if not pd.isna(existing_row[col_name]) else 0
-                    except: return 0
+                    try:
+                        v = float(existing_row[col_name])
+                        return int(v) if not pd.isna(v) else 0
+                    except:
+                        return 0
                 return 0
 
             def get_obs():
@@ -929,7 +956,7 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
                     return clean_obs(existing_row[col_obs])
                 return ""
 
-            session_form_key = f"form_state_{selected_date}_{selected_moment}"
+            session_form_key = f"form_state_{date_str}_{selected_moment}"
             if "last_form_key" not in st.session_state or st.session_state["last_form_key"] != session_form_key:
                 st.session_state["last_form_key"] = session_form_key
                 for k in list(st.session_state.keys()):
@@ -942,8 +969,24 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
                 d_val = st.session_state.get("inp_dia", 0)
                 p_val = st.session_state.get("inp_puls", 0)
                 o_val = st.session_state.get("inp_obs", "")
-                save_local_record(selected_date.strftime("%d.%m.%Y"), selected_moment, g_val, s_val, d_val, p_val, o_val)
-                st.session_state["success_message"] = "✅ Salvare efectuată cu succes!"
+                
+                quick_selected_final = []
+                for cat_name, items in st.session_state.food_categories.items():
+                    for item in items:
+                        chk_key = f"quick_{cat_name}_{item}_{session_form_key}"
+                        if st.session_state.get(chk_key, False):
+                            quick_selected_final.append(item)
+                
+                if quick_selected_final:
+                    joined_quick = ", ".join(sorted(list(set(quick_selected_final))))
+                    if o_val:
+                        if joined_quick not in o_val:
+                            o_val = f"{o_val}, {joined_quick}"
+                    else:
+                        o_val = joined_quick
+
+                save_local_record(date_str, selected_moment, g_val, s_val, d_val, p_val, o_val)
+                st.session_state["success_message"] = "✅ Salvare / Suprascrie efectuată cu succes!"
                 trigger_rerun()
 
             st.button("💾 Salvează / Suprascrie (Sus)", type="primary", use_container_width=True, on_click=handle_save_action, key="top_save_btn")
@@ -966,31 +1009,18 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
                 key="search_food_dropdown_instant"
             )
             
-            selected_quick_items = []
             cat_cols = st.columns(len(st.session_state.food_categories))
-            
             search_query_clean = remove_diacritics(str(search_food_input).strip().lower())
 
             for idx, (cat_name, items) in enumerate(st.session_state.food_categories.items()):
                 with cat_cols[idx]:
                     st.caption(cat_name)
-                    
                     for item in sorted(items):
                         item_clean = remove_diacritics(item).lower()
                         is_default_checked = (search_query_clean and item_clean.startswith(search_query_clean))
-                        
-                        if st.checkbox(item, value=is_default_checked, key=f"quick_{cat_name}_{item}_{session_form_key}"):
-                            selected_quick_items.append(item)
+                        st.checkbox(item, value=is_default_checked, key=f"quick_{cat_name}_{item}_{session_form_key}")
 
             base_obs_initial = get_obs()
-            if selected_quick_items:
-                joined_quick = ", ".join(sorted(list(set(selected_quick_items))))
-                if base_obs_initial:
-                    if joined_quick not in base_obs_initial:
-                        base_obs_initial = f"{base_obs_initial}, {joined_quick}"
-                else:
-                    base_obs_initial = joined_quick
-
             if "inp_obs" not in st.session_state or st.session_state.get("last_form_key_obs") != session_form_key:
                 st.session_state["inp_obs"] = base_obs_initial
                 st.session_state["last_form_key_obs"] = session_form_key
@@ -1277,28 +1307,39 @@ with tab_dict["⚙️ Setări"]:
     st.markdown("---")
     col_set1, col_set2 = st.columns(2)
     with col_set1:
-        st.markdown("#### ✉️ Configurare Server iCloud Mail & Test")
-        st.session_state.settings["email_sender"] = st.text_input("Adresa ta de iCloud (expeditor)", value=st.session_state.settings.get("email_sender", ""))
-        st.session_state.settings["email_password"] = st.text_input("Parolă specifică de aplicație iCloud (App-Specific Password)", type="password", value=st.session_state.settings.get("email_password", ""))
-        st.markdown("<small>💡 *Notă: Nu folosi parola ta principală Apple ID. Generează o App-Specific Password din portalul tău Apple ID.*</small>", unsafe_allow_html=True)
+        st.markdown("#### ✉️ Configurare Server iCloud Mail & Test Zilnic (Salvare Permanentă)")
         
-        if st.button("🔌 Testează Conexiunea iCloud (Trimite Email Test)", type="primary"):
+        entered_sender = st.text_input("Adresa ta de iCloud (expeditor)", value=st.session_state.settings.get("email_sender", ""))
+        entered_password = st.text_input("Parolă specifică de aplicație iCloud (App-Specific Password)", type="password", value=st.session_state.settings.get("email_password", ""))
+        
+        if st.button("💾 Salvează Datele Email Permanent", type="primary"):
+            st.session_state.settings["email_sender"] = entered_sender
+            st.session_state.settings["email_password"] = entered_password
+            save_persisted_settings(st.session_state.settings)
+            st.success("✅ Datele de email au fost salvate permanent pe disc!")
+
+        st.markdown("<small>💡 *Notă: Nu folosi parola ta principală Apple ID. Generează o App-Specific Password din portalul tău Apple ID.*</small>", unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        if st.button("🔌 Forțează Trimite Backup Zilnic Acum", type="primary"):
             test_dest = st.session_state.settings.get("email_sender", "")
             if not test_dest:
-                st.error("Completează mai întâi adresa de email a expeditorului.")
+                st.error("Completează și salvează mai întâi adresa de email a expeditorului.")
             else:
                 df_test_cron = get_chronological_backup_df()
                 temp_test_file = "temp_test_backup.csv"
                 if not df_test_cron.empty:
                     df_test_cron.to_csv(temp_test_file, index=False)
                 
-                success_t, msg_t = trimite_email_cu_atasament(test_dest, "🧪 Test Conexiune HealthTrack Pro", "Salut! Conexiunea SMTP cu serverul iCloud funcționează perfect și fișierul cronologic este atașat.", temp_test_file, "backup_test.csv")
+                success_t, msg_t = trimite_email_cu_atasament(test_dest, "🧪 Test Forțat / Backup Zilnic HealthTrack Pro", "Salut! Acesta este un email de test forțat cu fișierul de date cronologic atașat.", temp_test_file, "backup_date_medicale.csv")
                 
                 if os.path.exists(temp_test_file):
                     os.remove(temp_test_file)
 
                 if success_t:
-                    st.success("✅ Conexiune reușită! Emailul de test cu fișierul de date cronologic a fost trimis prin iCloud.")
+                    with open(BACKUP_LOG_FILE, "w") as f:
+                        f.write(datetime.now().strftime("%Y-%m-%d"))
+                    st.success("✅ Emailul de backup zilnic a fost trimis cu succes prin iCloud!")
                 else:
                     st.error(f"❌ {msg_t}")
 

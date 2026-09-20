@@ -382,39 +382,99 @@ is_admin = current_role == "Administrator"
 verifica_si_fa_backup_automat()
 
 # ==========================================
-# DATE MEDICALE
+# DATE MEDICALE (CU RESTAURARE COMPLETĂ 12.09 - PREZENT)
 # ==========================================
+moment_order = [
+    'Dimineața - Înainte de masă',
+    'Dimineața - După masă',
+    'Prânz - Înainte de masă',
+    'Prânz - După masă',
+    'Seara - Înainte de masă',
+    'Seara - După masă'
+]
+
 def get_initial_data():
     if os.path.exists(DATA_FILE):
         try:
             df_saved = pd.read_csv(DATA_FILE)
             if not df_saved.empty:
-                if "Dată" in df_saved.columns:
-                    df_saved["Dată"] = pd.to_datetime(
-                        df_saved["Dată"].astype(str).str.strip(),
-                        format="%d.%m.%Y", errors="coerce",
-                    )
-                    df_saved = df_saved.dropna(subset=["Dată"])
-                if "Observații" not in df_saved.columns:
-                    df_saved["Observații"] = ""
-                else:
-                    df_saved["Observații"] = df_saved["Observații"].apply(clean_obs)
-                return df_saved
+                date_col_name = 'Data' if 'Data' in df_saved.columns else 'Dată'
+                if "Sistolica" in df_saved.columns:
+                    df_saved = df_saved.rename(columns={"Sistolica": "Sistolică", "Diastolica": "Diastolică", "Observatii": "Observații"})
+                
+                df_saved["Dată_dt"] = pd.to_datetime(df_saved[date_col_name].astype(str).str.strip(), format="%d.%m.%Y", errors="coerce")
+                df_saved = df_saved.dropna(subset=["Dată_dt"])
+                if not df_saved.empty:
+                    df_saved["Dată"] = df_saved["Dată_dt"].dt.strftime("%d.%m.%Y")
+                    df_saved = df_saved.drop(columns=["Dată_dt"])
+                    return df_saved
         except Exception:
             pass
 
+    # Istoric complet începând cu 12.09.2026 incluzând toate momentele și valoarea de 150 din 19.09.2026
     initial_data = [
-        {"Dată": "12.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 108, "Sistolică": 120, "Diastolică": 78, "Puls": 70, "Observații": "Pornire istoric"},
-        {"Dată": "12.09.2026", "Moment Zi": "Dimineața - După masă", "Glicemie": 142, "Sistolică": 128, "Diastolică": 82, "Puls": 74, "Observații": "Mic dejun"},
-        {"Dată": "13.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 105, "Sistolică": 118, "Diastolică": 76, "Puls": 68, "Observații": ""},
-        {"Dată": "13.09.2026", "Moment Zi": "Seara - După masă", "Glicemie": 135, "Sistolică": 125, "Diastolică": 80, "Puls": 72, "Observații": "Cina"},
-        {"Dată": "14.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 110, "Sistolică": 122, "Diastolică": 79, "Puls": 71, "Observații": ""},
-        {"Dată": "15.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 106, "Sistolică": 120, "Diastolică": 78, "Puls": 70, "Observații": ""},
-        {"Dată": "16.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 109, "Sistolică": 124, "Diastolică": 81, "Puls": 73, "Observații": ""},
-        {"Dată": "17.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 104, "Sistolică": 119, "Diastolică": 77, "Puls": 69, "Observații": ""},
-        {"Dată": "18.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 107, "Sistolică": 121, "Diastolică": 78, "Puls": 71, "Observații": ""},
-        {"Dată": "19.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 108, "Sistolică": 120, "Diastolică": 78, "Puls": 70, "Observații": ""},
-        {"Dată": "20.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 105, "Sistolică": 120, "Diastolică": 78, "Puls": 70, "Observații": "Azi"}
+        {"Dată": "12.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 137, "Sistolică": 108, "Diastolică": 61, "Puls": 0, "Observații": "Prima zi cu tratament"},
+        {"Dată": "12.09.2026", "Moment Zi": "Dimineața - După masă", "Glicemie": 0, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+        {"Dată": "12.09.2026", "Moment Zi": "Prânz - Înainte de masă", "Glicemie": 0, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+        {"Dată": "12.09.2026", "Moment Zi": "Prânz - După masă", "Glicemie": 0, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+        {"Dată": "12.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 134, "Sistolică": 132, "Diastolică": 61, "Puls": 0, "Observații": "Prima zi cu tratament"},
+        {"Dată": "12.09.2026", "Moment Zi": "Seara - După masă", "Glicemie": 0, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+        
+        {"Dată": "13.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 143, "Sistolică": 115, "Diastolică": 52, "Puls": 0, "Observații": "A doua zi cu tratament"},
+        {"Dată": "13.09.2026", "Moment Zi": "Dimineața - După masă", "Glicemie": 0, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+        {"Dată": "13.09.2026", "Moment Zi": "Prânz - Înainte de masă", "Glicemie": 0, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+        {"Dată": "13.09.2026", "Moment Zi": "Prânz - După masă", "Glicemie": 0, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+        {"Dată": "13.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 0, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+        {"Dată": "13.09.2026", "Moment Zi": "Seara - După masă", "Glicemie": 133, "Sistolică": 114, "Diastolică": 50, "Puls": 0, "Observații": ""},
+        
+        {"Dată": "14.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 114, "Sistolică": 133, "Diastolică": 62, "Puls": 0, "Observații": ""},
+        {"Dată": "14.09.2026", "Moment Zi": "Dimineața - După masă", "Glicemie": 0, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+        {"Dată": "14.09.2026", "Moment Zi": "Prânz - Înainte de masă", "Glicemie": 0, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+        {"Dată": "14.09.2026", "Moment Zi": "Prânz - După masă", "Glicemie": 0, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+        {"Dată": "14.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 114, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+        {"Dată": "14.09.2026", "Moment Zi": "Seara - După masă", "Glicemie": 0, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+        
+        {"Dată": "15.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 116, "Sistolică": 111, "Diastolică": 70, "Puls": 0, "Observații": ""},
+        {"Dată": "15.09.2026", "Moment Zi": "Dimineața - După masă", "Glicemie": 151, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+        {"Dată": "15.09.2026", "Moment Zi": "Prânz - Înainte de masă", "Glicemie": 0, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+        {"Dată": "15.09.2026", "Moment Zi": "Prânz - După masă", "Glicemie": 0, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+        {"Dată": "15.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 102, "Sistolică": 120, "Diastolică": 80, "Puls": 0, "Observații": ""},
+        {"Dată": "15.09.2026", "Moment Zi": "Seara - După masă", "Glicemie": 0, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+        
+        {"Dată": "16.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 108, "Sistolică": 105, "Diastolică": 64, "Puls": 0, "Observații": ""},
+        {"Dată": "16.09.2026", "Moment Zi": "Dimineața - După masă", "Glicemie": 0, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+        {"Dată": "16.09.2026", "Moment Zi": "Prânz - Înainte de masă", "Glicemie": 0, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+        {"Dată": "16.09.2026", "Moment Zi": "Prânz - După masă", "Glicemie": 0, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+        {"Dată": "16.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 111, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+        {"Dată": "16.09.2026", "Moment Zi": "Seara - După masă", "Glicemie": 0, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+        
+        {"Dată": "17.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 105, "Sistolică": 106, "Diastolică": 68, "Puls": 78, "Observații": ""},
+        {"Dată": "17.09.2026", "Moment Zi": "Dimineața - După masă", "Glicemie": 0, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+        {"Dată": "17.09.2026", "Moment Zi": "Prânz - Înainte de masă", "Glicemie": 0, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+        {"Dată": "17.09.2026", "Moment Zi": "Prânz - După masă", "Glicemie": 0, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+        {"Dată": "17.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 100, "Sistolică": 106, "Diastolică": 62, "Puls": 84, "Observații": ""},
+        {"Dată": "17.09.2026", "Moment Zi": "Seara - După masă", "Glicemie": 0, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+        
+        {"Dată": "18.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 127, "Sistolică": 114, "Diastolică": 72, "Puls": 78, "Observații": "mancat tarziu, baton orez expandat cu ciocolata 0 zahar, chipsuri proteice, inghetata fara zahar"},
+        {"Dată": "18.09.2026", "Moment Zi": "Dimineața - După masă", "Glicemie": 143, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+        {"Dată": "18.09.2026", "Moment Zi": "Prânz - Înainte de masă", "Glicemie": 112, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+        {"Dată": "18.09.2026", "Moment Zi": "Prânz - După masă", "Glicemie": 0, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+        {"Dată": "18.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 0, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+        {"Dată": "18.09.2026", "Moment Zi": "Seara - După masă", "Glicemie": 112, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+        
+        {"Dată": "19.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 95, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+        {"Dată": "19.09.2026", "Moment Zi": "Dimineața - După masă", "Glicemie": 0, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+        {"Dată": "19.09.2026", "Moment Zi": "Prânz - Înainte de masă", "Glicemie": 0, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+        {"Dată": "19.09.2026", "Moment Zi": "Prânz - După masă", "Glicemie": 0, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+        {"Dată": "19.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 0, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+        {"Dată": "19.09.2026", "Moment Zi": "Seara - După masă", "Glicemie": 150, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+        
+        {"Dată": "20.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 105, "Sistolică": 120, "Diastolică": 78, "Puls": 70, "Observații": "Azi"},
+        {"Dată": "20.09.2026", "Moment Zi": "Dimineața - După masă", "Glicemie": 0, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+        {"Dată": "20.09.2026", "Moment Zi": "Prânz - Înainte de masă", "Glicemie": 0, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+        {"Dată": "20.09.2026", "Moment Zi": "Prânz - După masă", "Glicemie": 0, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+        {"Dată": "20.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 0, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+        {"Dată": "20.09.2026", "Moment Zi": "Seara - După masă", "Glicemie": 0, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""}
     ]
     df_init = pd.DataFrame(initial_data)
     df_init["Dată"] = pd.to_datetime(df_init["Dată"], format="%d.%m.%Y")
@@ -478,13 +538,34 @@ def save_local_record(date_str, moment_str, glic_v, sis_v, dia_v, puls_v, obs_v)
         }
         current_df = pd.concat([current_df, pd.DataFrame([new_record])], ignore_index=True)
 
+    # Re-sort and ensure all 6 moments exist for all dates to prevent missing dates/gaps
+    dates_unique = sorted(current_df[date_col].dropna().unique())
+    full_rows = []
+    for d in dates_unique:
+        d_str = pd.to_datetime(d).strftime("%d.%m.%Y")
+        df_d = current_df[current_df[date_col] == d]
+        for m in moment_order:
+            row_m = df_d[df_d[moment_col] == m]
+            if not row_m.empty:
+                r = row_m.iloc[0].to_dict()
+                r[date_col] = pd.to_datetime(d_str, format="%d.%m.%Y")
+                full_rows.append(r)
+            else:
+                full_rows.append({
+                    date_col: pd.to_datetime(d_str, format="%d.%m.%Y"),
+                    moment_col: m,
+                    col_glic: 0,
+                    col_sis: 0,
+                    col_dia: 0,
+                    col_puls: 0,
+                    col_obs: ""
+                })
+    current_df = pd.DataFrame(full_rows).sort_values(by=date_col).reset_index(drop=True)
+
     st.session_state.local_df_v2 = current_df
     try:
         df_to_save = current_df.copy()
-        if pd.api.types.is_datetime64_any_dtype(df_to_save[date_col]):
-            df_to_save[date_col] = df_to_save[date_col].dt.strftime("%d.%m.%Y")
-        else:
-            df_to_save[date_col] = pd.to_datetime(df_to_save[date_col], errors="coerce").dt.strftime("%d.%m.%Y")
+        df_to_save[date_col] = pd.to_datetime(df_to_save[date_col]).dt.strftime("%d.%m.%Y")
         df_to_save.to_csv(DATA_FILE, index=False)
     except Exception as e:
         print(f"Erore: {e}")
@@ -593,7 +674,7 @@ def apply_color_styling(df_to_style, subset_cols):
         return df_to_style
 
 # ==========================================
-# SIDEBAR & FILTRARE (cu st.multiselect stilizat)
+# SIDEBAR & FILTRARE
 # ==========================================
 st.sidebar.markdown(f"### 👤 **{st.session_state.user}**")
 st.sidebar.markdown(f"Rol: <span class='role-badge'>{current_role}</span>", unsafe_allow_html=True)
@@ -838,15 +919,7 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
         with st.container(border=True):
             selected_date = st.date_input("📅 Selectează Data", value=date.today(), key="input_date_picker")
             
-            momente_opțiuni = [
-                "Dimineața - Înainte de masă", 
-                "Dimineața - După masă", 
-                "Prânz - Înainte de masă", 
-                "Prânz - După masă", 
-                "Seara - Înainte de masă", 
-                "Seara - După masă"
-            ]
-            selected_moment = st.selectbox("🍽️ Momentul Măsurătorii", momente_opțiuni, key="input_moment_select")
+            selected_moment = st.selectbox("🍽️ Momentul Măsurătorii", moment_order, key="input_moment_select")
 
             existing_row = pd.DataFrame()
             if not df.empty and date_col in df.columns and moment_col in df.columns:

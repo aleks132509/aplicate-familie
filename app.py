@@ -107,7 +107,6 @@ def clean_obs(val):
     if not val or pd.isna(val) or str(val).strip().lower() in ["nan", "none", ""]:
         return ""
     res = str(val).strip()
-    # Curățăm automat orice prefix rezidual "Azi," dacă există din date vechi
     res = re.sub(r'^(azi,\s*)+', '', res, flags=re.IGNORECASE).strip()
     return res
 
@@ -1018,6 +1017,9 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
                     if k.startswith("quick_"):
                         del st.session_state[k]
 
+            # Lista completă de alimente din baza de date
+            all_known_foods = sorted(list(set([remove_diacritics(item).lower() for items in st.session_state.food_categories.values() for item in items])))
+
             def handle_save_action():
                 g_val = st.session_state.get("inp_glic", 0)
                 s_val = st.session_state.get("inp_sis", 0)
@@ -1025,20 +1027,19 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
                 p_val = st.session_state.get("inp_puls", 0)
                 o_val = st.session_state.get("inp_obs", "")
                 
-                quick_selected_final = []
+                checked_foods = []
                 for cat_name, items in st.session_state.food_categories.items():
                     for item in items:
                         chk_key = f"quick_{cat_name}_{item}_{session_form_key}"
                         if st.session_state.get(chk_key, False):
-                            quick_selected_final.append(item)
+                            checked_foods.append(item.strip().lower())
                 
-                if quick_selected_final:
-                    joined_quick = ", ".join(sorted(list(set(quick_selected_final))))
-                    if o_val:
-                        if joined_quick not in o_val:
-                            o_val = f"{o_val}, {joined_quick}"
-                    else:
-                        o_val = joined_quick
+                # Curățăm și reconstruim textul observațiilor
+                existing_parts = [p.strip() for p in o_val.split(",") if p.strip()]
+                non_food_parts = [p for p in existing_parts if remove_diacritics(p).lower() not in all_known_foods]
+                
+                final_parts = non_food_parts + sorted(list(set(checked_foods)))
+                o_val = ", ".join(final_parts)
 
                 save_local_record(date_str, selected_moment, g_val, s_val, d_val, p_val, o_val)
                 st.session_state["success_message"] = "✅ Salvare / Suprascrie efectuată cu succes!"
@@ -1066,17 +1067,21 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
             
             cat_cols = st.columns(len(st.session_state.food_categories))
             search_query_clean = remove_diacritics(str(search_food_input).strip().lower())
-            existing_obs_text = clean_obs(get_obs()).lower()
+            existing_obs_text = clean_obs(st.session_state.get("inp_obs", get_obs())).lower()
 
             for idx, (cat_name, items) in enumerate(st.session_state.food_categories.items()):
                 with cat_cols[idx]:
                     st.caption(cat_name)
                     for item in sorted(items):
                         item_clean = remove_diacritics(item).lower()
-                        # Verificăm dacă e deja în observații sau căutat
-                        is_already_present = item_clean in existing_obs_text
-                        is_default_checked = is_already_present or (search_query_clean and item_clean.startswith(search_query_clean))
-                        st.checkbox(item, value=is_default_checked, key=f"quick_{cat_name}_{item}_{session_form_key}")
+                        
+                        chk_key = f"quick_{cat_name}_{item}_{session_form_key}"
+                        if chk_key not in st.session_state:
+                            is_already_present = item_clean in existing_obs_text
+                            is_default_checked = is_already_present or (search_query_clean and item_clean.startswith(search_query_clean))
+                            st.session_state[chk_key] = is_default_checked
+
+                        st.checkbox(item, key=chk_key)
 
             st.text_area("✍️ Notițe / Observații", key="inp_obs")
             

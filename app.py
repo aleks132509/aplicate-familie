@@ -19,7 +19,7 @@ from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Tabl
 import streamlit as st
 
 # ==========================================
-# CONFIGURARE PAGINĂ & THEME (DARK MODE)
+# CONFIGURARE PAGINĂ & THEME (DARK MODE + MULTISELECT LUX)
 # ==========================================
 st.set_page_config(
     page_title="HealthTrack Pro - Monitorizare Sănătate",
@@ -67,6 +67,27 @@ st.markdown(
         border-radius: 6px;
         font-size: 12px;
         font-weight: bold;
+    }
+    /* ========================================== */
+    /* STIL DE LUX PENTRU st.multiselect (TAGS)    */
+    /* ========================================== */
+    .stMultiSelect [data-baseweb="tag"] {
+        background: linear-gradient(135deg, #fef08a 0%, #fde047 30%, #eab308 100%) !important;
+        color: #111827 !important;
+        border: 1px solid #ca8a04 !important;
+        border-radius: 6px !important;
+        font-weight: 600 !important;
+    }
+    .stMultiSelect [data-baseweb="tag"] span,
+    .stMultiSelect [data-baseweb="tag"] div {
+        color: #111827 !important;
+    }
+    .stMultiSelect [data-baseweb="tag"] svg {
+        fill: #111827 !important;
+    }
+    .stMultiSelect div[data-baseweb="select"] > div {
+        background-color: #1e222d !important;
+        border-color: #2e3545 !important;
     }
     </style>
 """,
@@ -361,7 +382,7 @@ is_admin = current_role == "Administrator"
 verifica_si_fa_backup_automat()
 
 # ==========================================
-# DATE MEDICALE (CU RESTAURARE DE LA 12.09)
+# DATE MEDICALE
 # ==========================================
 def get_initial_data():
     if os.path.exists(DATA_FILE):
@@ -382,7 +403,6 @@ def get_initial_data():
         except Exception:
             pass
 
-    # Valori implicite / istoric de la început începând cu 12.09.2026
     initial_data = [
         {"Dată": "12.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 108, "Sistolică": 120, "Diastolică": 78, "Puls": 70, "Observații": "Pornire istoric"},
         {"Dată": "12.09.2026", "Moment Zi": "Dimineața - După masă", "Glicemie": 142, "Sistolică": 128, "Diastolică": 82, "Puls": 74, "Observații": "Mic dejun"},
@@ -573,7 +593,7 @@ def apply_color_styling(df_to_style, subset_cols):
         return df_to_style
 
 # ==========================================
-# SIDEBAR & FILTRARE
+# SIDEBAR & FILTRARE (cu st.multiselect stilizat)
 # ==========================================
 st.sidebar.markdown(f"### 👤 **{st.session_state.user}**")
 st.sidebar.markdown(f"Rol: <span class='role-badge'>{current_role}</span>", unsafe_allow_html=True)
@@ -879,7 +899,7 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
             st.markdown("##### ⚡ Asistent Inteligent Mese & Indice Glicemic (Sugestii instantanee)")
             
             search_food_input = st.selectbox(
-                "🔍 Caută / Selectează rapid ingredient (afiseaza sugestii instant după primele litere)",
+                "🔍 Caută / Selectează rapid ingredient",
                 options=[""] + sorted(list(set([item for items in st.session_state.food_categories.values() for item in items]))),
                 key="search_food_dropdown_instant"
             )
@@ -1163,13 +1183,13 @@ with tab_dict["⚙️ Setări"]:
         st.markdown("<br>", unsafe_allow_html=True)
 
         with st.container(border=True):
-            st.markdown("#### 🍎 Gestiune Elemente Mese & Indice Glicemic (Fără duplicate / Fără diacritice)")
+            st.markdown("#### 🍎 Gestiune Elemente Mese & Indice Glicemic")
             fc_cat = st.selectbox("Selectează Categoria", list(st.session_state.food_categories.keys()))
             
             c_f1, c_f2 = st.columns(2)
             with c_f1:
-                new_food_item = st.text_input("Adaugă ingredient nou (ex: paine integrala etc.)")
-                if st.button("➕ Adaugă în Categorie (Fără Duplicate)"):
+                new_food_item = st.text_input("Adaugă ingredient nou")
+                if st.button("➕ Adaugă în Categorie"):
                     if new_food_item and new_food_item.strip():
                         item_clean = remove_diacritics(new_food_item).strip().lower()
                         existing_all = [remove_diacritics(x).lower() for x in st.session_state.food_categories[fc_cat]]
@@ -1196,7 +1216,7 @@ with tab_dict["⚙️ Setări"]:
     col_set1, col_set2 = st.columns(2)
     with col_set1:
         st.markdown("#### ✉️ Configurare Server iCloud Mail & Test")
-        st.session_state.settings["email_sender"] = st.text_input("Adresa ta de iCloud (expeditor, ex: nume@icloud.com)", value=st.session_state.settings.get("email_sender", ""))
+        st.session_state.settings["email_sender"] = st.text_input("Adresa ta de iCloud (expeditor)", value=st.session_state.settings.get("email_sender", ""))
         st.session_state.settings["email_password"] = st.text_input("Parolă specifică de aplicație iCloud (App-Specific Password)", type="password", value=st.session_state.settings.get("email_password", ""))
         st.markdown("<small>💡 *Notă: Nu folosi parola ta principală Apple ID. Generează o App-Specific Password din portalul tău Apple ID.*</small>", unsafe_allow_html=True)
         

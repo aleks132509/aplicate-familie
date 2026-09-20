@@ -123,6 +123,15 @@ PROG_FILE = "programari_medicale.csv"
 FOODS_FILE = "alimente_custom.csv"
 BACKUP_LOG_FILE = "ultimul_backup_auto.txt"
 
+moment_order = [
+    'Dimineața - Înainte de masă',
+    'Dimineața - După masă',
+    'Prânz - Înainte de masă',
+    'Prânz - După masă',
+    'Seara - Înainte de masă',
+    'Seara - După masă'
+]
+
 def get_initial_meds():
     if os.path.exists(MEDS_FILE):
         return pd.read_csv(MEDS_FILE)
@@ -217,7 +226,8 @@ def get_chronological_backup_df():
         date_col_name = 'Data' if 'Data' in df_b.columns else 'Dată'
         if date_col_name in df_b.columns:
             df_b["Dată_dt"] = pd.to_datetime(df_b[date_col_name].astype(str).str.strip(), format="%d.%m.%Y", errors="coerce")
-            df_b = df_b.dropna(subset=["Dată_dt"]).sort_values(by="Dată_dt", ascending=True).drop(columns=["Dată_dt"])
+            df_b["Moment_Cat"] = pd.Categorical(df_b["Moment Zi"], categories=moment_order, ordered=True)
+            df_b = df_b.dropna(subset=["Dată_dt"]).sort_values(by=["Dată_dt", "Moment_Cat"]).drop(columns=["Dată_dt", "Moment_Cat"])
         for col in df_b.columns:
             if df_b[col].dtype == object:
                 df_b[col] = df_b[col].apply(lambda x: remove_diacritics(str(x)) if pd.notna(x) else x)
@@ -383,17 +393,8 @@ is_admin = current_role == "Administrator"
 verifica_si_fa_backup_automat()
 
 # ==========================================
-# DATE MEDICALE (CU RESTAURARE ROBUSTĂ ȘI GARANTAREA ISTORICULUI 12.09 - PREZENT)
+# DATE MEDICALE (ORDINE CRONOLOGICĂ STRICTĂ)
 # ==========================================
-moment_order = [
-    'Dimineața - Înainte de masă',
-    'Dimineața - După masă',
-    'Prânz - Înainte de masă',
-    'Prânz - După masă',
-    'Seara - Înainte de masă',
-    'Seara - După masă'
-]
-
 def get_initial_data():
     start_date = datetime.strptime("12.09.2026", "%d.%m.%Y").date()
     end_date = max(datetime.now().date(), start_date)
@@ -419,7 +420,6 @@ def get_initial_data():
     df_template = pd.DataFrame(full_template)
     df_template["Dată_dt"] = pd.to_datetime(df_template["Dată"], format="%d.%m.%Y")
 
-    # Date inițiale implicite (12.09 - 20.09) în cazul în care fișierul nu există
     initial_defaults = [
         {"Dată": "12.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 137, "Sistolică": 108, "Diastolică": 61, "Puls": 0, "Observații": "Prima zi cu tratament"},
         {"Dată": "12.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 134, "Sistolică": 132, "Diastolică": 61, "Puls": 0, "Observații": "Prima zi cu tratament"},
@@ -443,7 +443,6 @@ def get_initial_data():
         {"Dată": "20.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 105, "Sistolică": 120, "Diastolică": 78, "Puls": 70, "Observații": "Azi"}
     ]
 
-    # Aplicăm valorile implicite în template
     for r_def in initial_defaults:
         d_dt = pd.to_datetime(r_def["Dată"], format="%d.%m.%Y")
         m_val = r_def["Moment Zi"]
@@ -455,7 +454,6 @@ def get_initial_data():
             if r_def.get("Observații"):
                 df_template.loc[mask, "Observații"] = r_def["Observații"]
 
-    # Citim din fișierul persistent de pe disc dacă există și fuzionăm pentru a nu pierde nimic
     if os.path.exists(DATA_FILE):
         try:
             df_saved = pd.read_csv(DATA_FILE)
@@ -486,7 +484,8 @@ def get_initial_data():
         except Exception as e:
             print(f"Erore citire CSV: {e}")
 
-    df_template = df_template.sort_values(by="Dată_dt").drop(columns=["Dată_dt"]).reset_index(drop=True)
+    df_template["Moment_Cat"] = pd.Categorical(df_template["Moment Zi"], categories=moment_order, ordered=True)
+    df_template = df_template.sort_values(by=["Dată_dt", "Moment_Cat"]).drop(columns=["Dată_dt", "Moment_Cat"]).reset_index(drop=True)
     df_template.to_csv(DATA_FILE, index=False)
     return df_template
 
@@ -508,8 +507,8 @@ if date_col in df.columns and not df.empty:
         df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
     else:
         df[date_col] = pd.to_datetime(df[date_col].astype(str).str.strip(), format="%d.%m.%Y", errors="coerce")
-    df = df.dropna(subset=[date_col])
-    df = df.sort_values(by=date_col, ascending=True).reset_index(drop=True)
+    df["Moment_Cat"] = pd.Categorical(df[moment_col], categories=moment_order, ordered=True)
+    df = df.dropna(subset=[date_col]).sort_values(by=[date_col, "Moment_Cat"]).drop(columns=["Moment_Cat"]).reset_index(drop=True)
 
 def save_local_record(date_str, moment_str, glic_v, sis_v, dia_v, puls_v, obs_v):
     global df
@@ -547,7 +546,6 @@ def save_local_record(date_str, moment_str, glic_v, sis_v, dia_v, puls_v, obs_v)
         }
         current_df = pd.concat([current_df, pd.DataFrame([new_record])], ignore_index=True)
 
-    # Re-sort and ensure all 6 moments exist for all dates
     dates_unique = sorted(current_df[date_col].dropna().unique())
     full_rows = []
     for d in dates_unique:
@@ -569,7 +567,9 @@ def save_local_record(date_str, moment_str, glic_v, sis_v, dia_v, puls_v, obs_v)
                     col_puls: 0,
                     col_obs: ""
                 })
-    current_df = pd.DataFrame(full_rows).sort_values(by=date_col).reset_index(drop=True)
+    current_df = pd.DataFrame(full_rows)
+    current_df["Moment_Cat"] = pd.Categorical(current_df[moment_col], categories=moment_order, ordered=True)
+    current_df = current_df.sort_values(by=[date_col, "Moment_Cat"]).drop(columns=["Moment_Cat"]).reset_index(drop=True)
 
     st.session_state.local_df_v2 = current_df
     try:
@@ -581,58 +581,6 @@ def save_local_record(date_str, moment_str, glic_v, sis_v, dia_v, puls_v, obs_v)
 
 def format_table_column(series):
     return series.astype(str).str.strip().replace(["0", "0.0", "nan", "None", "", "<NA>"], "")
-
-# ==========================================
-# EVALUARE SPIKE & CAUZĂ ALIMENTARĂ
-# ==========================================
-def check_food_cause(obs_text):
-    obs_clean_text = clean_obs(obs_text)
-    if not obs_clean_text:
-        return ""
-    obs_clean = remove_diacritics(obs_clean_text.lower())
-    found_foods = set()
-    
-    for cat, items in st.session_state.food_categories.items():
-        for item in items:
-            kw_clean = remove_diacritics(item.lower())
-            if re.search(r'\b' + re.escape(kw_clean) + r'\b', obs_clean):
-                found_foods.add(item)
-    
-    if found_foods:
-        return f" (Cauză: {', '.join(sorted(found_foods))})"
-    elif len(obs_clean_text) > 0:
-        return f" ({obs_clean_text[:20]})"
-    return ""
-
-def is_glic_spike(val, moment_zi=""):
-    try:
-        v = float(val)
-        if v == 0 or pd.isna(v): return False
-        if "După masă" in str(moment_zi):
-            t_max = st.session_state.settings.get("target_glic_post_max", 160)
-        else:
-            t_max = st.session_state.settings.get("target_glic_max", 120)
-        return v > t_max
-    except:
-        return False
-
-def is_ta_spike(sis_val, dia_val):
-    try:
-        s, d = float(sis_val), float(dia_val)
-        if s == 0 or d == 0 or pd.isna(s) or pd.isna(d): return False
-        max_s = st.session_state.settings.get("target_ta_sis", 120)
-        max_d = st.session_state.settings.get("target_ta_dia", 80)
-        return s > max_s or d > max_d
-    except:
-        return False
-
-def is_puls_spike(val):
-    try:
-        v = float(val)
-        if v == 0 or pd.isna(v): return False
-        return v < 60 or v > 100
-    except:
-        return False
 
 def evaluate_glic(val, moment_zi=""):
     try:
@@ -668,6 +616,36 @@ def evaluate_puls(val):
         else: return "🔴 Ridicat"
     except:
         return "Nemăsurat"
+
+def is_glic_spike(val, moment_zi=""):
+    try:
+        v = float(val)
+        if v == 0 or pd.isna(v): return False
+        if "După masă" in str(moment_zi):
+            t_max = st.session_state.settings.get("target_glic_post_max", 160)
+        else:
+            t_max = st.session_state.settings.get("target_glic_max", 120)
+        return v > t_max
+    except:
+        return False
+
+def is_ta_spike(sis_val, dia_val):
+    try:
+        s, d = float(sis_val), float(dia_val)
+        if s == 0 or d == 0 or pd.isna(s) or pd.isna(d): return False
+        max_s = st.session_state.settings.get("target_ta_sis", 120)
+        max_d = st.session_state.settings.get("target_ta_dia", 80)
+        return s > max_s or d > max_d
+    except:
+        return False
+
+def is_puls_spike(val):
+    try:
+        v = float(val)
+        if v == 0 or pd.isna(v): return False
+        return v < 60 or v > 100
+    except:
+        return False
 
 def color_status(val):
     if not isinstance(val, str): return ""
@@ -820,7 +798,7 @@ with tab_dict["📊 Jurnal & Grafice"]:
                 df_g_tab[col_glic] = format_table_column(df_g_tab[col_glic])
                 df_g_tab[col_obs] = df_g_tab[col_obs].apply(clean_obs)
                 df_g_tab = df_g_tab[df_g_tab[col_glic] != ""]
-                st.dataframe(apply_color_styling(df_g_tab, ["Status Glicemie"]), use_container_width=True)
+                st.dataframe(apply_color_styling(df_g_tab, ["Status Glicemie"]), use_container_width=True, hide_index=True)
 
         with sub_tab_ta:
             st.markdown("ℹ️ **Legendă Tensiune:** 🔵 Albastru/Indigo = Tensiune Sistolică normală | 🟠 Portocaliu = Diastolică | 🔴 Roșu = Valori de Tensiune Crescută.")
@@ -859,7 +837,7 @@ with tab_dict["📊 Jurnal & Grafice"]:
                 df_t_tab[col_dia] = format_table_column(df_t_tab[col_dia])
                 df_t_tab[col_obs] = df_t_tab[col_obs].apply(clean_obs)
                 df_t_tab = df_t_tab[(df_t_tab[col_sis] != "") | (df_t_tab[col_dia] != "")]
-                st.dataframe(apply_color_styling(df_t_tab, ["Status Tensiune"]), use_container_width=True)
+                st.dataframe(apply_color_styling(df_t_tab, ["Status Tensiune"]), use_container_width=True, hide_index=True)
 
         with sub_tab_puls:
             st.markdown("ℹ️ **Legendă Puls:** 🟢 Verde = Interval normal (60-100 bpm) | 🔴 Roșu = Puls în afara limitelor.")
@@ -887,7 +865,7 @@ with tab_dict["📊 Jurnal & Grafice"]:
                 df_p_tab[col_puls] = format_table_column(df_p_tab[col_puls])
                 df_p_tab[col_obs] = df_p_tab[col_obs].apply(clean_obs)
                 df_p_tab = df_p_tab[df_p_tab[col_puls] != ""]
-                st.dataframe(apply_color_styling(df_p_tab, ["Status Puls"]), use_container_width=True)
+                st.dataframe(apply_color_styling(df_p_tab, ["Status Puls"]), use_container_width=True, hide_index=True)
 
         with sub_tab_all:
             df_all = view_df.copy()
@@ -904,7 +882,7 @@ with tab_dict["📊 Jurnal & Grafice"]:
                 df_all[col_puls] = format_table_column(df_all[col_puls])
             df_all[col_obs] = df_all[col_obs].apply(clean_obs)
             if 'Luna_An' in df_all.columns: df_all = df_all.drop(columns=['Luna_An'])
-            st.dataframe(df_all, use_container_width=True, height=800)
+            st.dataframe(df_all, use_container_width=True, height=800, hide_index=True)
 
 # ----------------- TAB: ADAUGĂ / SUPRASCRIE (ADMIN) -----------------
 if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
@@ -1023,7 +1001,7 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
 # ----------------- TAB: TRATAMENT -----------------
 with tab_dict["💊 Tratament"]:
     st.markdown("### 💊 Schemă Tratament Medical")
-    st.dataframe(st.session_state.meds_df, use_container_width=True)
+    st.dataframe(st.session_state.meds_df, use_container_width=True, hide_index=True)
 
     if is_admin:
         st.markdown("---")
@@ -1085,7 +1063,7 @@ with tab_dict["💊 Tratament"]:
 if is_admin and "📅 Programări" in tab_dict:
     with tab_dict["📅 Programări"]:
         st.markdown("### 📅 Programări Medicale, Editare, Ștergere & Alerte")
-        st.dataframe(st.session_state.prog_df, use_container_width=True)
+        st.dataframe(st.session_state.prog_df, use_container_width=True, hide_index=True)
 
         st.markdown("---")
         col_p1, col_p2, col_p3 = st.columns(3)

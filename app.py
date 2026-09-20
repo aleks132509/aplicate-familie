@@ -1656,7 +1656,7 @@ with tab_dict["📄 Raport PDF"]:
                     if "🟢" in ev_p: t_style.append(('TEXTCOLOR', (4, r_idx), (4, r_idx), colors.HexColor("#16a34a")))
                     elif "🔴" in ev_p: t_style.append(('TEXTCOLOR', (4, r_idx), (4, r_idx), colors.HexColor("#dc2626")))
                     
-                    r_idx += `1`
+                    r_idx += 1
                 
                 t = Table(table_data, colWidths=[60, 115, 35, 55, 35, 200])
                 t.setStyle(TableStyle(t_style))

@@ -249,10 +249,10 @@ def get_initial_foods():
             df_f = pd.read_csv(FOODS_FILE)
             categories = {}
             for _, row in df_f.iterrows():
-                cat = row["Categorie"]
+                cat = str(row["Categorie"])
                 item = remove_diacritics(str(row["Element"])).strip().lower()
                 if cat not in categories: categories[cat] = []
-                if item not in categories[cat]: categories[cat].append(item)
+                if item and item != "nan" and item not in categories[cat]: categories[cat].append(item)
             return categories
         except:
             pass
@@ -267,7 +267,8 @@ def save_custom_foods():
     rows = []
     for cat, items in st.session_state.food_categories.items():
         for item in items:
-            rows.append({"Categorie": cat, "Element": remove_diacritics(item).strip().lower()})
+            if item and str(item).strip().lower() != "nan":
+                rows.append({"Categorie": cat, "Element": remove_diacritics(str(item)).strip().lower()})
     pd.DataFrame(rows).to_csv(FOODS_FILE, index=False)
 
 def add_history_entry(actiune, medicament, detalii):
@@ -1016,7 +1017,7 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
                     if k.startswith("quick_"):
                         del st.session_state[k]
 
-            all_known_foods = sorted(list(set([remove_diacritics(item).lower() for items in st.session_state.food_categories.values() for item in items])))
+            all_known_foods = sorted(list(set([remove_diacritics(str(item)).lower() for items in st.session_state.food_categories.values() for item in items if pd.notna(item)])))
 
             def handle_save_action():
                 g_val = st.session_state.get("inp_glic", 0)
@@ -1028,9 +1029,10 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
                 checked_foods = []
                 for cat_name, items in st.session_state.food_categories.items():
                     for item in items:
-                        chk_key = f"quick_{cat_name}_{item}_{session_form_key}"
-                        if st.session_state.get(chk_key, False):
-                            checked_foods.append(item.strip().lower())
+                        if pd.notna(item):
+                            chk_key = f"quick_{cat_name}_{str(item)}_{session_form_key}"
+                            if st.session_state.get(chk_key, False):
+                                checked_foods.append(str(item).strip().lower())
                 
                 existing_parts = [p.strip() for p in o_val.split(",") if p.strip()]
                 non_food_parts = [p for p in existing_parts if remove_diacritics(p).lower() not in all_known_foods]
@@ -1056,9 +1058,10 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
             st.markdown("---")
             st.markdown("##### ⚡ Asistent Inteligent Mese & Indice Glicemic (Sugestii instantanee)")
             
+            valid_food_options = sorted(list(set([str(item) for items in st.session_state.food_categories.values() for item in items if pd.notna(item)])))
             search_food_input = st.selectbox(
                 "🔍 Caută / Selectează rapid ingredient",
-                options=[""] + sorted(list(set([item for items in st.session_state.food_categories.values() for item in items]))),
+                options=[""] + valid_food_options,
                 key="search_food_dropdown_instant"
             )
             
@@ -1070,15 +1073,17 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
                 with cat_cols[idx]:
                     st.caption(cat_name)
                     for item in sorted(items):
-                        item_clean = remove_diacritics(item).lower()
-                        chk_key = f"quick_{cat_name}_{item}_{session_form_key}"
-                        
-                        if chk_key not in st.session_state:
-                            is_already_present = item_clean in existing_obs_text
-                            is_default_checked = is_already_present or (search_query_clean and item_clean.startswith(search_query_clean))
-                            st.session_state[chk_key] = is_default_checked
+                        if pd.notna(item):
+                            item_str = str(item)
+                            item_clean = remove_diacritics(item_str).lower()
+                            chk_key = f"quick_{cat_name}_{item_str}_{session_form_key}"
+                            
+                            if chk_key not in st.session_state:
+                                is_already_present = item_clean in existing_obs_text
+                                is_default_checked = is_already_present or (search_query_clean and item_clean.startswith(search_query_clean))
+                                st.session_state[chk_key] = bool(is_default_checked)
 
-                        st.checkbox(item, key=chk_key)
+                            st.checkbox(item_str, key=chk_key)
 
             st.text_area("✍️ Notițe / Observații", key="inp_obs")
             
@@ -1343,7 +1348,7 @@ with tab_dict["⚙️ Setări"]:
                 if st.button("➕ Adaugă în Categorie"):
                     if new_food_item and new_food_item.strip():
                         item_clean = remove_diacritics(new_food_item).strip().lower()
-                        existing_all = [remove_diacritics(x).lower() for x in st.session_state.food_categories[fc_cat]]
+                        existing_all = [remove_diacritics(str(x)).lower() for x in st.session_state.food_categories[fc_cat] if pd.notna(x)]
                         if item_clean in existing_all:
                             st.warning(f"⚠️ Ingredientul '{item_clean}' există deja în această categorie!")
                         else:
@@ -1352,7 +1357,7 @@ with tab_dict["⚙️ Setări"]:
                             st.success(f"Ingredientul '{item_clean}' a fost adăugat cu succes!")
                             trigger_rerun()
             with c_f2:
-                all_items_flat = sorted(list(set(st.session_state.food_categories[fc_cat])))
+                all_items_flat = sorted(list(set([str(x) for x in st.session_state.food_categories[fc_cat] if pd.notna(x)])))
                 if all_items_flat:
                     del_food_item = st.selectbox("Selectează ingredient existent de șters", all_items_flat, key="del_food_select")
                     if st.button("🗑️ Șterge Ingredientul Selectat"):

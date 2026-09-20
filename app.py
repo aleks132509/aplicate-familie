@@ -106,7 +106,10 @@ def remove_diacritics(text):
 def clean_obs(val):
     if not val or pd.isna(val) or str(val).strip().lower() in ["nan", "none", ""]:
         return ""
-    return str(val).strip()
+    res = str(val).strip()
+    # Curățăm automat orice prefix rezidual "Azi," dacă există din date vechi
+    res = re.sub(r'^(azi,\s*)+', '', res, flags=re.IGNORECASE).strip()
+    return res
 
 def parse_flexible_date(series_or_str):
     if isinstance(series_or_str, pd.Series):
@@ -296,7 +299,7 @@ def get_chronological_backup_df():
 
         for col in df_b.columns:
             if df_b[col].dtype == object:
-                df_b[col] = df_b[col].apply(lambda x: remove_diacritics(str(x)) if pd.notna(x) else x)
+                df_b[col] = df_b[col].apply(lambda x: remove_diacritics(clean_obs(str(x))) if pd.notna(x) else x)
         df_b.columns = [remove_diacritics(c) for c in df_b.columns]
         if 'Luna_An' in df_b.columns: 
             df_b = df_b.drop(columns=['Luna_An'])
@@ -508,7 +511,7 @@ def get_initial_data():
         {"Dată": "18.09.2026", "Moment Zi": "Seara - După masă", "Glicemie": 112, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
         {"Dată": "19.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 95, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
         {"Dată": "19.09.2026", "Moment Zi": "Seara - După masă", "Glicemie": 150, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
-        {"Dată": "20.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 105, "Sistolică": 120, "Diastolică": 78, "Puls": 70, "Observații": "Azi"}
+        {"Dată": "20.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 122, "Sistolică": 120, "Diastolică": 78, "Puls": 70, "Observații": "cartofi prajiti"}
     ]
 
     for r_def in initial_defaults:
@@ -520,7 +523,7 @@ def get_initial_data():
                 if col in r_def:
                     df_template.loc[mask, col] = r_def[col]
             if r_def.get("Observații"):
-                df_template.loc[mask, "Observații"] = r_def["Observații"]
+                df_template.loc[mask, "Observații"] = clean_obs(r_def["Observații"])
 
     if os.path.exists(DATA_FILE):
         try:
@@ -543,7 +546,7 @@ def get_initial_data():
                                 df_template.loc[mask, col] = row[col]
                         obs_val = clean_obs(row.get("Observații", ""))
                         if obs_val:
-                            existing_obs = str(df_template.loc[mask, "Observații"].values[0])
+                            existing_obs = clean_obs(str(df_template.loc[mask, "Observații"].values[0]))
                             if existing_obs:
                                 if obs_val not in existing_obs:
                                     df_template.loc[mask, "Observații"] = f"{existing_obs}, {obs_val}"
@@ -818,7 +821,6 @@ with tab_dict["📊 Jurnal & Grafice"]:
         st.markdown("<br>", unsafe_allow_html=True)
         sub_tab_glic, sub_tab_ta, sub_tab_puls, sub_tab_all = st.tabs(["🩸 Glicemie & Analiză Spike", "🫀 Tensiune Arterială", "💓 Puls", "📋 Toate Datele (Doar Măsurate)"])
         
-        # Filtrare exclusivă pentru tabelele vizuale (doar unde glicemia > 0)
         view_df_measured = view_df.copy()
         if col_glic in view_df_measured.columns:
             view_df_measured["Glic_num"] = pd.to_numeric(view_df_measured[col_glic], errors="coerce").fillna(0)
@@ -1064,13 +1066,16 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
             
             cat_cols = st.columns(len(st.session_state.food_categories))
             search_query_clean = remove_diacritics(str(search_food_input).strip().lower())
+            existing_obs_text = clean_obs(get_obs()).lower()
 
             for idx, (cat_name, items) in enumerate(st.session_state.food_categories.items()):
                 with cat_cols[idx]:
                     st.caption(cat_name)
                     for item in sorted(items):
                         item_clean = remove_diacritics(item).lower()
-                        is_default_checked = (search_query_clean and item_clean.startswith(search_query_clean))
+                        # Verificăm dacă e deja în observații sau căutat
+                        is_already_present = item_clean in existing_obs_text
+                        is_default_checked = is_already_present or (search_query_clean and item_clean.startswith(search_query_clean))
                         st.checkbox(item, value=is_default_checked, key=f"quick_{cat_name}_{item}_{session_form_key}")
 
             st.text_area("✍️ Notițe / Observații", key="inp_obs")

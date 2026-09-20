@@ -361,26 +361,45 @@ is_admin = current_role == "Administrator"
 verifica_si_fa_backup_automat()
 
 # ==========================================
-# DATE MEDICALE
+# DATE MEDICALE (CU RESTAURARE DE LA 12.09)
 # ==========================================
 def get_initial_data():
     if os.path.exists(DATA_FILE):
         try:
             df_saved = pd.read_csv(DATA_FILE)
-            if "Dată" in df_saved.columns:
-                df_saved["Dată"] = pd.to_datetime(
-                    df_saved["Dată"].astype(str).str.strip(),
-                    format="%d.%m.%Y", errors="coerce",
-                )
-                df_saved = df_saved.dropna(subset=["Dată"])
-            if "Observații" not in df_saved.columns:
-                df_saved["Observații"] = ""
-            else:
-                df_saved["Observații"] = df_saved["Observații"].apply(clean_obs)
-            return df_saved
+            if not df_saved.empty:
+                if "Dată" in df_saved.columns:
+                    df_saved["Dată"] = pd.to_datetime(
+                        df_saved["Dată"].astype(str).str.strip(),
+                        format="%d.%m.%Y", errors="coerce",
+                    )
+                    df_saved = df_saved.dropna(subset=["Dată"])
+                if "Observații" not in df_saved.columns:
+                    df_saved["Observații"] = ""
+                else:
+                    df_saved["Observații"] = df_saved["Observații"].apply(clean_obs)
+                return df_saved
         except Exception:
             pass
-    return pd.DataFrame(columns=["Dată", "Moment Zi", "Glicemie", "Sistolică", "Diastolică", "Puls", "Observații"])
+
+    # Valori implicite / istoric de la început începând cu 12.09.2026
+    initial_data = [
+        {"Dată": "12.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 108, "Sistolică": 120, "Diastolică": 78, "Puls": 70, "Observații": "Pornire istoric"},
+        {"Dată": "12.09.2026", "Moment Zi": "Dimineața - După masă", "Glicemie": 142, "Sistolică": 128, "Diastolică": 82, "Puls": 74, "Observații": "Mic dejun"},
+        {"Dată": "13.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 105, "Sistolică": 118, "Diastolică": 76, "Puls": 68, "Observații": ""},
+        {"Dată": "13.09.2026", "Moment Zi": "Seara - După masă", "Glicemie": 135, "Sistolică": 125, "Diastolică": 80, "Puls": 72, "Observații": "Cina"},
+        {"Dată": "14.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 110, "Sistolică": 122, "Diastolică": 79, "Puls": 71, "Observații": ""},
+        {"Dată": "15.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 106, "Sistolică": 120, "Diastolică": 78, "Puls": 70, "Observații": ""},
+        {"Dată": "16.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 109, "Sistolică": 124, "Diastolică": 81, "Puls": 73, "Observații": ""},
+        {"Dată": "17.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 104, "Sistolică": 119, "Diastolică": 77, "Puls": 69, "Observații": ""},
+        {"Dată": "18.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 107, "Sistolică": 121, "Diastolică": 78, "Puls": 71, "Observații": ""},
+        {"Dată": "19.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 108, "Sistolică": 120, "Diastolică": 78, "Puls": 70, "Observații": ""},
+        {"Dată": "20.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 105, "Sistolică": 120, "Diastolică": 78, "Puls": 70, "Observații": "Azi"}
+    ]
+    df_init = pd.DataFrame(initial_data)
+    df_init["Dată"] = pd.to_datetime(df_init["Dată"], format="%d.%m.%Y")
+    df_init.to_csv(DATA_FILE, index=False)
+    return df_init
 
 if "local_df_v2" not in st.session_state:
     st.session_state.local_df_v2 = get_initial_data()
@@ -845,7 +864,6 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
                 st.session_state["success_message"] = "✅ Salvare efectuată cu succes!"
                 trigger_rerun()
 
-            # 💾 BUTON SALVARE SUS
             st.button("💾 Salvează / Suprascrie (Sus)", type="primary", use_container_width=True, on_click=handle_save_action, key="top_save_btn")
             st.markdown("---")
 
@@ -898,7 +916,6 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
             st.text_area("✍️ Notițe / Observații", key="inp_obs")
             
             st.markdown("---")
-            # 💾 BUTON SALVARE JOS
             st.button("💾 Salvează / Suprascrie (Jos)", type="primary", use_container_width=True, on_click=handle_save_action, key="bottom_save_btn")
 
 # ----------------- TAB: TRATAMENT -----------------
@@ -1249,7 +1266,6 @@ with tab_dict["📄 Raport PDF"]:
                 plt.plot(xi, yi, marker="o", markersize=6.5, color=dot_color)
                 plt.annotate(str(int(yi)), (xi, yi), textcoords="offset points", xytext=(0, 7), ha="center", fontsize=7.5, fontweight="bold", bbox=dict(boxstyle="round,pad=0.15", fc="white", ec=dot_color, alpha=0.95))
         
-        # Limită axa Y dinamică cu headroom pentru a preveni depășirea graficului
         max_y = max(y_vals) if y_vals and max(y_vals) > 0 else 200
         plt.ylim(0, max(max_y * 1.25, 220))
 
@@ -1295,7 +1311,6 @@ with tab_dict["📄 Raport PDF"]:
                 plt.plot(xi, d, marker="o", markersize=6.5, color=d_color)
                 plt.annotate(f"D:{int(d)}", (xi, d), textcoords="offset points", xytext=(0, -12), ha="center", fontsize=7, fontweight="bold", bbox=dict(boxstyle="round,pad=0.15", fc="white", ec=d_color, alpha=0.95))
                 
-        # Limită axa Y dinamică cu headroom pentru tensiune
         all_ta = [s for s in sis_vals if s > 0] + [d for d in dia_vals if d > 0]
         max_t = max(all_ta) if all_ta else 180
         plt.ylim(0, max(max_t * 1.25, 200))
@@ -1331,7 +1346,6 @@ with tab_dict["📄 Raport PDF"]:
                 plt.plot(xi, p, marker="o", markersize=6.5, color=p_color)
                 plt.annotate(str(int(p)), (xi, p), textcoords="offset points", xytext=(0, 7), ha="center", fontsize=7.5, fontweight="bold", bbox=dict(boxstyle="round,pad=0.15", fc="white", ec=p_color, alpha=0.95))
                 
-        # Limită axa Y dinamică cu headroom pentru puls
         max_p = max(puls_vals) if puls_vals and max(puls_vals) > 0 else 100
         plt.ylim(30, max(max_p * 1.25, 140))
 

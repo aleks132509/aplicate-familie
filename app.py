@@ -288,22 +288,54 @@ def get_chronological_backup_df():
     try:
         df_b = pd.read_csv(DATA_FILE)
         date_col_name = 'Data' if 'Data' in df_b.columns else 'Dată'
+        moment_col_name = 'Moment Zi' if 'Moment Zi' in df_b.columns else 'Moment Zi'
+        glic_col_name = 'Glicemie'
+        sis_col_name = 'Sistolică' if 'Sistolică' in df_b.columns else 'Sistolica'
+        dia_col_name = 'Diastolică' if 'Diastolică' in df_b.columns else 'Diastolica'
+        puls_col_name = 'Puls'
+        obs_col_name = 'Observații' if 'Observații' in df_b.columns else 'Observatii'
+
         if date_col_name in df_b.columns:
             df_b["Dată_dt"] = parse_flexible_date(df_b[date_col_name])
-            df_b["Moment_Cat"] = pd.Categorical(df_b["Moment Zi"], categories=moment_order, ordered=True)
+            df_b["Moment_Cat"] = pd.Categorical(df_b[moment_col_name], categories=moment_order, ordered=True)
             df_b = df_b.dropna(subset=["Dată_dt"]).sort_values(by=["Dată_dt", "Moment_Cat"]).drop(columns=["Dată_dt", "Moment_Cat"])
         
-        if "Glicemie" in df_b.columns:
-            df_b["Glicemie_num"] = pd.to_numeric(df_b["Glicemie"], errors="coerce").fillna(0)
-            df_b = df_b[df_b["Glicemie_num"] > 0].drop(columns=["Glicemie_num"])
+        if glic_col_name in df_b.columns:
+            df_b["Glic_num"] = pd.to_numeric(df_b[glic_col_name], errors="coerce").fillna(0)
+            df_b = df_b[df_b["Glic_num"] > 0].drop(columns=["Glic_num"])
 
-        for col in df_b.columns:
-            if df_b[col].dtype == object:
-                df_b[col] = df_b[col].apply(lambda x: remove_diacritics(clean_obs(str(x))) if pd.notna(x) else x)
-        df_b.columns = [remove_diacritics(c) for c in df_b.columns]
-        if 'Luna_An' in df_b.columns: 
-            df_b = df_b.drop(columns=['Luna_An'])
-        return df_b
+        df_all = df_b.copy()
+        if date_col_name in df_all.columns:
+            df_all[date_col_name] = parse_flexible_date(df_all[date_col_name]).dt.strftime("%d.%m.%Y")
+        
+        if glic_col_name in df_all.columns:
+            df_all["St. Glicemie"] = df_all.apply(lambda r: evaluate_glic(r[glic_col_name], r[moment_col_name]), axis=1)
+            df_all[glic_col_name] = format_table_column(df_all[glic_col_name])
+        
+        if sis_col_name in df_all.columns and dia_col_name in df_all.columns:
+            df_all["St. Tensiune"] = df_all.apply(lambda r: evaluate_ta(r[sis_col_name], r[dia_col_name]), axis=1)
+            df_all[sis_col_name] = format_table_column(df_all[sis_col_name])
+            df_all[dia_col_name] = format_table_column(df_all[dia_col_name])
+        
+        if puls_col_name in df_all.columns:
+            df_all["St. Puls"] = df_all[puls_col_name].apply(evaluate_puls)
+            df_all[puls_col_name] = format_table_column(df_all[puls_col_name])
+        
+        if obs_col_name in df_all.columns:
+            df_all[obs_col_name] = df_all[obs_col_name].apply(clean_obs)
+        
+        if 'Luna_An' in df_all.columns:
+            df_all = df_all.drop(columns=['Luna_An'])
+
+        cols_order_all = [date_col_name, moment_col_name, glic_col_name, "St. Glicemie", sis_col_name, dia_col_name, "St. Tensiune", puls_col_name, "St. Puls", obs_col_name]
+        existing_cols_all = [c for c in cols_order_all if c in df_all.columns]
+        df_all = df_all[existing_cols_all]
+
+        for col in df_all.columns:
+            df_all[col] = df_all[col].apply(lambda x: remove_diacritics(str(x)) if pd.notna(x) and str(x).strip() not in ["nan", "None", ""] else "")
+        
+        df_all.columns = [remove_diacritics(c) for c in df_all.columns]
+        return df_all
     except:
         return pd.DataFrame()
 
@@ -654,7 +686,7 @@ def format_table_column(series):
 def evaluate_glic(val, moment_zi=""):
     try:
         v = float(val)
-        if v == 0 or pd.isna(v): return "Nemăsurat"
+        if v == 0 or pd.isna(v): return ""
         m_clean = remove_diacritics(str(moment_zi)).lower()
         if "dupa masa" in m_clean:
             t_min, t_max = st.session_state.settings.get("target_glic_post_min", 70), st.session_state.settings.get("target_glic_post_max", 160)
@@ -665,27 +697,27 @@ def evaluate_glic(val, moment_zi=""):
         elif v < t_min: return "🔴 Mică"
         else: return "🔴 Mare"
     except:
-        return "Nemăsurat"
+        return ""
 
 def evaluate_ta(sis_val, dia_val):
     try:
         s, d = float(sis_val), float(dia_val)
-        if s == 0 or d == 0 or pd.isna(s) or pd.isna(d): return "Nemăsurat"
+        if s == 0 or d == 0 or pd.isna(s) or pd.isna(d): return ""
         max_s, max_d = st.session_state.settings["target_ta_sis"], st.session_state.settings["target_ta_dia"]
         if s <= max_s and d <= max_d: return "🟢 Normală"
         else: return "🔴 Crescută"
     except:
-        return "Nemăsurat"
+        return ""
 
 def evaluate_puls(val):
     try:
         v = float(val)
-        if v == 0 or pd.isna(v): return "Nemăsurat"
+        if v == 0 or pd.isna(v): return ""
         if 60 <= v <= 100: return "🟢 Normal"
         elif v < 60: return "🔴 Scăzut"
         else: return "🔴 Ridicat"
     except:
-        return "Nemăsurat"
+        return ""
 
 def is_glic_spike(val, moment_zi=""):
     try:
@@ -719,7 +751,7 @@ def is_puls_spike(val):
         return False
 
 def color_status(val):
-    if not isinstance(val, str): return ""
+    if not isinstance(val, str) or not val.strip(): return ""
     if "🟢" in val: return "background-color: #047857; color: #ffffff; font-weight: bold; text-align: center;"
     elif "🔴" in val: return "background-color: #b91c1c; color: #ffffff; font-weight: bold; text-align: center;"
     return ""
@@ -787,14 +819,14 @@ with tab_dict["📊 Jurnal & Grafice"]:
     if view_df.empty:
         st.info("📭 Nu există nicio înregistrare pentru selecția curentă.")
     else:
-        avg_glic_str = "Nemăsurat"
+        avg_glic_str = ""
         if col_glic in view_df.columns:
             s_glic_all = pd.to_numeric(view_df[col_glic], errors="coerce").fillna(0).replace(0, None).dropna()
             if not s_glic_all.empty: avg_glic_str = f"{int(s_glic_all.mean())} mg/dL"
 
         kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
         with kpi1:
-            val_glic = "Nemăsurat"
+            val_glic = ""
             if col_glic in view_df.columns:
                 s_glic = pd.to_numeric(view_df[col_glic], errors="coerce").fillna(0).replace(0, None).dropna()
                 if not s_glic.empty: val_glic = f"{int(s_glic.iloc[-1])} mg/dL"
@@ -802,17 +834,17 @@ with tab_dict["📊 Jurnal & Grafice"]:
         with kpi2:
             st.markdown(f'<div class="metric-card"><div class="metric-label">📊 MEDIE GLICEMIE</div><div class="metric-value">{avg_glic_str}</div></div>', unsafe_allow_html=True)
         with kpi3:
-            val_sis, val_dia = "-", "-"
+            val_sis, val_dia = "", ""
             if col_sis in view_df.columns:
                 s_sis = pd.to_numeric(view_df[col_sis], errors="coerce").fillna(0).replace(0, None).dropna()
                 if not s_sis.empty: val_sis = int(s_sis.iloc[-1])
             if col_dia in view_df.columns:
                 s_dia = pd.to_numeric(view_df[col_dia], errors="coerce").fillna(0).replace(0, None).dropna()
                 if not s_dia.empty: val_dia = int(s_dia.iloc[-1])
-            val_ta_str = f"{val_sis}/{val_dia}" if val_sis != "-" or val_dia != "-" else "Nemăsurat"
+            val_ta_str = f"{val_sis}/{val_dia}" if val_sis != "" or val_dia != "" else ""
             st.markdown(f'<div class="metric-card"><div class="metric-label">🫀 ULTIMA TENSIUNE</div><div class="metric-value">{val_ta_str}</div></div>', unsafe_allow_html=True)
         with kpi4:
-            val_puls = "Nemăsurat"
+            val_puls = ""
             if col_puls in view_df.columns:
                 s_puls = pd.to_numeric(view_df[col_puls], errors="coerce").fillna(0).replace(0, None).dropna()
                 if not s_puls.empty: val_puls = f"{int(s_puls.iloc[-1])} bpm"
@@ -875,7 +907,6 @@ with tab_dict["📊 Jurnal & Grafice"]:
                 df_g_tab[col_glic] = format_table_column(df_g_tab[col_glic])
                 df_g_tab[col_obs] = df_g_tab[col_obs].apply(clean_obs)
                 df_g_tab = df_g_tab[df_g_tab[col_glic] != ""]
-                # Setăm coloana Observații ultima
                 df_g_tab = df_g_tab[[date_col, moment_col, col_glic, "Status Glicemie", col_obs]]
                 st.dataframe(apply_color_styling(df_g_tab, ["Status Glicemie"]), use_container_width=True, hide_index=True)
 
@@ -916,7 +947,6 @@ with tab_dict["📊 Jurnal & Grafice"]:
                 df_t_tab[col_dia] = format_table_column(df_t_tab[col_dia])
                 df_t_tab[col_obs] = df_t_tab[col_obs].apply(clean_obs)
                 df_t_tab = df_t_tab[(df_t_tab[col_sis] != "") | (df_t_tab[col_dia] != "")]
-                # Setăm coloana Observații ultima
                 df_t_tab = df_t_tab[[date_col, moment_col, col_sis, col_dia, "Status Tensiune", col_obs]]
                 st.dataframe(apply_color_styling(df_t_tab, ["Status Tensiune"]), use_container_width=True, hide_index=True)
 
@@ -946,7 +976,6 @@ with tab_dict["📊 Jurnal & Grafice"]:
                 df_p_tab[col_puls] = format_table_column(df_p_tab[col_puls])
                 df_p_tab[col_obs] = df_p_tab[col_obs].apply(clean_obs)
                 df_p_tab = df_p_tab[df_p_tab[col_puls] != ""]
-                # Setăm coloana Observații ultima
                 df_p_tab = df_p_tab[[date_col, moment_col, col_puls, "Status Puls", col_obs]]
                 st.dataframe(apply_color_styling(df_p_tab, ["Status Puls"]), use_container_width=True, hide_index=True)
 
@@ -966,7 +995,6 @@ with tab_dict["📊 Jurnal & Grafice"]:
             df_all[col_obs] = df_all[col_obs].apply(clean_obs)
             if 'Luna_An' in df_all.columns: df_all = df_all.drop(columns=['Luna_An'])
             
-            # Ne asigurăm că Observații este ultima coloană
             cols_order_all = [date_col, moment_col, col_glic, "St. Glicemie", col_sis, col_dia, "St. Tensiune", col_puls, "St. Puls", col_obs]
             existing_cols_all = [c for c in cols_order_all if c in df_all.columns]
             df_all = df_all[existing_cols_all]
@@ -1630,12 +1658,11 @@ with tab_dict["📄 Raport PDF"]:
                 story.append(Paragraph("Date Tabelare si Observatii (Doar Inregistrari cu Valori)", styles["Heading2"]))
                 table_data = [["Data", "Moment", "Glic", "TA", "Puls", "Observatii"]]
                 
-                # Stil modern îmbunătățit pentru un tabel mai frumos, aerisit și ușor de citit
                 t_style = [
                     ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#0284c7")),
                     ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
                     ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-                    ('ALIGN', (5,1), (5,-1), 'LEFT'),  # Observațiile aliniate la stânga pentru lizibilitate optimă
+                    ('ALIGN', (5,1), (5,-1), 'LEFT'),
                     ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
                     ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
                     ('FONTSIZE', (0,0), (-1,0), 9),
@@ -1678,7 +1705,6 @@ with tab_dict["📄 Raport PDF"]:
                     
                     table_data.append([dt_str, mm, g_str, ta_str, p_str, obs_paragraph])
                     
-                    # Efect de rânduri alternative (zebra striping) pentru claritate sporită
                     if r_idx % 2 == 0:
                         t_style.append(('BACKGROUND', (0, r_idx), (-1, r_idx), colors.HexColor("#f8fafc")))
                     else:
@@ -1698,7 +1724,8 @@ with tab_dict["📄 Raport PDF"]:
                     
                     r_idx += 1
                 
-                t = Table(table_data, colWidths=[65, 115, 40, 55, 40, 200])
+                # repeatRows=1 asigură repetarea capului de tabel pe paginile următoare
+                t = Table(table_data, colWidths=[65, 115, 40, 55, 40, 200], repeatRows=1)
                 t.setStyle(TableStyle(t_style))
                 story.append(t)
         else:
@@ -1721,4 +1748,4 @@ with tab_dict["📄 Raport PDF"]:
         </div>
         '''
         st.markdown(href, unsafe_allow_html=True)
-        st.success("✅ Raportul PDF a fost generat! Apasă pe butonul de mai sus pentru al descărca sau vizualiza în siguranță, fără ca aplicația să se închidă.")
+        st.success("✅ Raportul PDF a fost generat cu succes!")

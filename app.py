@@ -241,7 +241,6 @@ def get_initial_apple_watch():
         except:
             pass
             
-    # Fără valori generate algorithmic (valori reale), returnăm DataFrame gol cu coloanele standard
     return pd.DataFrame(columns=["Dată", "Pași", "Calorii Active", "Somn (ore)", "HRV (ms)", "SpO2 (%)", "Puls Mediu"])
 
 def get_initial_history():
@@ -842,7 +841,6 @@ with tab_dict["📊 Jurnal & Grafice"]:
                 fig_g.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=40, r=40, t=50, b=120), xaxis=dict(tickangle=-45, dtick=1), yaxis=dict(range=[0, max(250, int(max_glic_data) + 50)]))
                 st.plotly_chart(fig_g, use_container_width=True)
 
-                # Observații pe ultima coloană
                 cols_g = [date_col, moment_col, col_glic, "Status Glicemie", col_obs]
                 df_g_tab = view_df_measured[cols_g].copy()
                 df_g_tab[date_col] = df_g_tab[date_col].dt.strftime("%d.%m.%Y")
@@ -912,7 +910,6 @@ with tab_dict["📊 Jurnal & Grafice"]:
             if col_puls in df_all.columns:
                 df_all[col_puls] = format_table_column(df_all[col_puls])
             
-            # Asigurăm Observații pe ultima coloană
             cols_all_order = [date_col, moment_col, col_glic, col_sis, col_dia, col_puls, col_obs]
             cols_all_existing = [c for c in cols_all_order if c in df_all.columns]
             df_all = df_all[cols_all_existing]
@@ -1140,12 +1137,10 @@ with tab_dict["📄 Raport PDF"]:
         cell_style = ParagraphStyle('ReportCell', parent=styles['Normal'], fontSize=8, leading=10, textColor=colors.HexColor('#1e293b'))
         cell_header_style = ParagraphStyle('ReportHeaderCell', parent=styles['Normal'], fontSize=8.5, leading=11, textColor=colors.HexColor('#ffffff'), fontName='Helvetica-Bold')
 
-        # Titlu
         story.append(Paragraph(remove_diacritics("HealthTrack Pro - Raport Medical și Jurnal Sănătate"), title_style))
         story.append(Paragraph(remove_diacritics(f"Generat la data: {datetime.now().strftime('%d.%m.%Y %H:%M')} | Perioada: {filtru_luni_str}"), subtitle_style))
         story.append(Spacer(1, 10))
 
-        # 1. Jurnal Medical (Observații pe ultima coloană, diacritice curățate)
         story.append(Paragraph(remove_diacritics("1. Jurnal Măsurători Medicale (Glicemie, Tensiune, Puls, Observații)"), heading_style))
         
         pdf_df = view_df.copy()
@@ -1192,7 +1187,6 @@ with tab_dict["📄 Raport PDF"]:
         story.append(t_med)
         story.append(Spacer(1, 10))
 
-        # 2. Secțiunea Apple Watch în PDF (dacă e bifată)
         if opt_aw_pdf and not st.session_state.apple_watch_df.empty:
             story.append(Paragraph(remove_diacritics("2. Secțiunea Apple Watch & Biometrie Zilnică"), heading_style))
             aw_pdf_df = st.session_state.apple_watch_df.copy()
@@ -1210,7 +1204,9 @@ with tab_dict["📄 Raport PDF"]:
             aw_header_row = [remove_diacritics(str(c)) for c in aw_pdf_df.columns]
             aw_table_data.append([Paragraph(h, cell_header_style) for h in aw_header_row])
 
-            for _, row in aw_pdf_df.tail(25.iterrows() if len(aw_pdf_df) > 25 else aw_pdf_df.iterrows()):
+            # COD CORECTAT AICI:
+            df_aw_to_iter = aw_pdf_df.tail(25) if len(aw_pdf_df) > 25 else aw_pdf_df
+            for _, row in df_aw_to_iter.iterrows():
                 row_cells = []
                 for col in aw_pdf_df.columns:
                     row_cells.append(Paragraph(remove_diacritics(str(row[col])), cell_style))
@@ -1229,7 +1225,6 @@ with tab_dict["📄 Raport PDF"]:
             story.append(t_aw)
             story.append(Spacer(1, 10))
 
-        # 3. Schema de Tratament
         story.append(Paragraph(remove_diacritics("3. Schema de Tratament Curentă"), heading_style))
         meds_pdf_df = st.session_state.meds_df.copy()
         meds_pdf_cols = ["Medicament", "Doză", "Orar / Frecvență", "Observații"]

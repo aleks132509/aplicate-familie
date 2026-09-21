@@ -203,16 +203,47 @@ def get_initial_meds():
     df_init_m.to_csv(MEDS_FILE, index=False)
     return df_init_m
 
+def normalize_apple_watch_df(df_aw):
+    if df_aw.empty:
+        return df_aw
+    col_map = {}
+    for c in df_aw.columns:
+        c_clean = remove_diacritics(c).lower().strip()
+        if c_clean in ["pasi", "steps"]:
+            col_map[c] = "Pași"
+        elif c_clean in ["calorii active", "active calories", "calorii"]:
+            col_map[c] = "Calorii Active"
+        elif c_clean in ["somn (ore)", "somn", "sleep"]:
+            col_map[c] = "Somn (ore)"
+        elif c_clean in ["hrv (ms)", "hrv"]:
+            col_map[c] = "HRV (ms)"
+        elif c_clean in ["spo2 (%)", "spo2"]:
+            col_map[c] = "SpO2 (%)"
+        elif c_clean in ["puls mediu", "puls"]:
+            col_map[c] = "Puls Mediu"
+        elif c_clean in ["data", "date"]:
+            col_map[c] = "Dată"
+    if col_map:
+        df_aw = df_aw.rename(columns=col_map)
+        
+    expected_aw_cols = {
+        "Pași": 0, "Calorii Active": 0, "Somn (ore)": 0.0, 
+        "HRV (ms)": 0, "SpO2 (%)": 0, "Puls Mediu": 0, "Dată": ""
+    }
+    for col, default_val in expected_aw_cols.items():
+        if col not in df_aw.columns:
+            df_aw[col] = default_val
+    return df_aw
+
 def get_initial_apple_watch():
     if os.path.exists(APPLE_WATCH_FILE):
         try:
             df_aw = pd.read_csv(APPLE_WATCH_FILE)
             if not df_aw.empty:
-                return df_aw
+                return normalize_apple_watch_df(df_aw)
         except:
             pass
             
-    # Date inițiale template pentru Apple Watch
     start_date = datetime.strptime("12.09.2026", "%d.%m.%Y").date()
     end_date = max(datetime.now().date(), start_date)
     
@@ -459,6 +490,9 @@ if "meds_df" not in st.session_state:
     st.session_state.meds_df = get_initial_meds()
 if "apple_watch_df" not in st.session_state:
     st.session_state.apple_watch_df = get_initial_apple_watch()
+else:
+    st.session_state.apple_watch_df = normalize_apple_watch_df(st.session_state.apple_watch_df)
+
 if "meds_hist_df" not in st.session_state:
     st.session_state.meds_hist_df = get_initial_history()
 if "prog_df" not in st.session_state:
@@ -1005,12 +1039,13 @@ with tab_dict["⌚ Apple Watch"]:
     st.markdown("### ⌚ Monitorizare Activitate & Biometrie Apple Watch")
     st.caption("Date preluate și sincronizate din Apple Health / Apple Watch.")
 
+    st.session_state.apple_watch_df = normalize_apple_watch_df(st.session_state.apple_watch_df)
     aw_df = st.session_state.apple_watch_df.copy()
+
     if not aw_df.empty:
         aw_df["Dată_dt"] = parse_flexible_date(aw_df["Dată"])
         aw_df = aw_df.sort_values(by="Dată_dt").drop(columns=["Dată_dt"])
 
-        # KPI Cards Apple Watch
         last_aw = aw_df.iloc[-1]
         
         aw_kpi1, aw_kpi2, aw_kpi3, aw_kpi4, aw_kpi5 = st.columns(5)
@@ -1098,7 +1133,6 @@ with tab_dict["⌚ Apple Watch"]:
 
                 if st.form_submit_button("💾 Salvează Datele Apple Watch", type="primary"):
                     d_str_aw = aw_date_inp.strftime("%d.%m.%Y")
-                    # Actualizează sau adaugă
                     existing_idx = st.session_state.apple_watch_df.index[st.session_state.apple_watch_df["Dată"] == d_str_aw]
                     new_row_data = {
                         "Dată": d_str_aw,
@@ -1736,185 +1770,118 @@ with tab_dict["📄 Raport PDF"]:
         img_buffer.seek(0)
         return img_buffer
 
-    def generate_pdf_chart_aw_steps(x_vals, steps_vals, title):
-        plt.figure(figsize=(9.5, 3.2))
-        plt.bar(x_vals, steps_vals, color="#38bdf8", alpha=0.85)
-        plt.title(title, fontsize=9.5, fontweight="bold", color="#1e3a8a", pad=15)
-        plt.ylabel("Pasi", fontsize=9, fontweight="bold")
-        plt.xticks(rotation=35, fontsize=7.5, ha="right")
-        plt.yticks(fontsize=8)
-        plt.grid(True, linestyle=":", alpha=0.7)
-        plt.tight_layout()
-
-        img_buffer = io.BytesIO()
-        plt.savefig(img_buffer, format="png", dpi=250)
-        plt.close()
-        img_buffer.seek(0)
-        return img_buffer
-
     def make_pdf_report(data_frame, include_glic, include_ta, include_puls, include_tables, include_aw_ch, include_aw_tb):
         buffer = io.BytesIO()
-        doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=20, leftMargin=20, topMargin=20, bottomMargin=20)
-        story = []
+        doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
         styles = getSampleStyleSheet()
+        
+        title_style = ParagraphStyle(
+            'ReportTitle',
+            parent=styles['Heading1'],
+            fontName='Helvetica-Bold',
+            fontSize=18,
+            textColor=colors.HexColor('#1e3a8a'),
+            spaceAfter=6,
+            alignment=1
+        )
+        subtitle_style = ParagraphStyle(
+            'ReportSubtitle',
+            parent=styles['Normal'],
+            fontName='Helvetica',
+            fontSize=10,
+            textColor=colors.HexColor('#64748b'),
+            spaceAfter=15,
+            alignment=1
+        )
+        h2_style = ParagraphStyle(
+            'ReportH2',
+            parent=styles['Heading2'],
+            fontName='Helvetica-Bold',
+            fontSize=12,
+            textColor=colors.HexColor('#1e3a8a'),
+            spaceBefore=10,
+            spaceAfter=6
+        )
 
-        title_text = remove_diacritics("RAPORT MEDICAL DE MONITORIZARE - HEALTHTRACK PRO")
-        date_text = remove_diacritics(f"Generat la: {datetime.now().strftime('%d.%m.%Y %H:%M')} | Perioada: {filtru_luni_str}")
-
-        story.append(Paragraph(f"<b>{title_text}</b>", ParagraphStyle("TitleStyle", parent=styles["Heading1"], fontSize=13, textColor=colors.HexColor("#1e3a8a"), alignment=1, spaceAfter=12)))
-        story.append(Paragraph(date_text, ParagraphStyle("DateStyle", parent=styles["Normal"], alignment=1, spaceAfter=15)))
+        elements = []
+        elements.append(Paragraph("HealthTrack Pro - Raport Medical", title_style))
+        elements.append(Paragraph(f"Generat la data: {datetime.now().strftime('%d.%m.%Y %H:%M')} | Filtru: {filtru_luni_str}", subtitle_style))
+        elements.append(Spacer(1, 10))
 
         if not data_frame.empty:
-            df_pdf_measured = data_frame.copy()
-            if col_glic in df_pdf_measured.columns:
-                df_pdf_measured["G_num"] = pd.to_numeric(df_pdf_measured[col_glic], errors="coerce").fillna(0)
-                df_pdf_measured = df_pdf_measured[df_pdf_measured["G_num"] > 0].drop(columns=["G_num"])
+            df_pdf = data_frame.copy()
+            if 'Glicemie' in df_pdf.columns:
+                df_pdf["Glic_num"] = pd.to_numeric(df_pdf["Glicemie"], errors="coerce").fillna(0)
+                df_pdf_meas = df_pdf[df_pdf["Glic_num"] > 0].copy()
+            else:
+                df_pdf_meas = df_pdf.copy()
 
-            x_data = [f"{d.strftime('%d.%m')} ({m[:3]})" for d, m in zip(df_pdf_measured[date_col], df_pdf_measured[moment_col])]
-            moments_arr = df_pdf_measured[moment_col].tolist() if moment_col in df_pdf_measured.columns else [""] * len(df_pdf_measured)
-            
-            if include_glic and col_glic in df_pdf_measured.columns:
-                g_vals = pd.to_numeric(df_pdf_measured[col_glic], errors='coerce').fillna(0).tolist()
-                story.append(Paragraph("Evolutie Glicemie", styles["Heading2"]))
-                img_buf = generate_pdf_chart_glic(x_data, g_vals, moments_arr, "Glicemie (mg/dL)", "mg/dL", "#38bdf8")
-                story.append(Image(img_buf, width=480, height=170))
-                story.append(Spacer(1, 10))
-                
-            if include_ta and col_sis in df_pdf_measured.columns and col_dia in df_pdf_measured.columns:
-                s_vals = pd.to_numeric(df_pdf_measured[col_sis], errors='coerce').fillna(0).tolist()
-                d_vals = pd.to_numeric(df_pdf_measured[col_dia], errors='coerce').fillna(0).tolist()
-                story.append(Paragraph("Evolutie Tensiune Arteriala", styles["Heading2"]))
-                img_buf = generate_pdf_chart_ta(x_data, s_vals, d_vals, "Tensiune Arteriala (mmHg)")
-                story.append(Image(img_buf, width=480, height=170))
-                story.append(Spacer(1, 10))
-                
-            if include_puls and col_puls in df_pdf_measured.columns:
-                p_vals = pd.to_numeric(df_pdf_measured[col_puls], errors='coerce').fillna(0).tolist()
-                story.append(Paragraph("Evolutie Puls", styles["Heading2"]))
-                img_buf = generate_pdf_chart_puls(x_data, p_vals, "Puls (bpm)")
-                story.append(Image(img_buf, width=480, height=170))
-                story.append(Spacer(1, 10))
+            x_lbls = [f"{d.strftime('%d.%m')} ({m[:3] if isinstance(m, str) else ''})" for d, m in zip(df_pdf_meas[date_col], df_pdf_meas[moment_col])]
 
-            # Secțiune Apple Watch în PDF
-            aw_report_df = st.session_state.apple_watch_df.copy()
-            if not aw_report_df.empty:
-                aw_report_df["Dată_dt"] = parse_flexible_date(aw_report_df["Dată"])
-                aw_report_df = aw_report_df.sort_values(by="Dată_dt").drop(columns=["Dată_dt"])
-                
-                if include_aw_ch:
-                    story.append(Paragraph("Evolutie Apple Watch - Pasi Zilnici", styles["Heading2"]))
-                    x_aw_pdf = aw_report_df["Dată"].tolist()
-                    steps_pdf = pd.to_numeric(aw_report_df["Pași"], errors="coerce").tolist()
-                    img_buf_aw = generate_pdf_chart_aw_steps(x_aw_pdf, steps_pdf, "Pasi Zilnici (Apple Watch)")
-                    story.append(Image(img_buf_aw, width=480, height=160))
-                    story.append(Spacer(1, 10))
+            if include_glic and 'Glicemie' in df_pdf_meas.columns:
+                glic_v = pd.to_numeric(df_pdf_meas["Glicemie"], errors="coerce").fillna(0).tolist()
+                mom_v = df_pdf_meas[moment_col].tolist() if moment_col in df_pdf_meas.columns else [""] * len(df_pdf_meas)
+                if any(v > 0 for v in glic_v):
+                    img_g = generate_pdf_chart_glic(x_lbls, glic_v, mom_v, "Evolutie Glicemie", "mg/dL", "#38bdf8")
+                    elements.append(Paragraph("Grafic Glicemie", h2_style))
+                    elements.append(Image(img_g, width=450, height=160))
+                    elements.append(Spacer(1, 10))
 
-                if include_aw_tb:
-                    story.append(Paragraph("Tabel Centralizator Apple Watch", styles["Heading2"]))
-                    aw_table_data = [["Data", "Pasi", "Calorii", "Somn (h)", "HRV", "SpO2", "Puls"]]
-                    aw_t_style = [
-                        ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#0284c7")),
-                        ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
-                        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-                        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-                        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-                        ('FONTSIZE', (0,0), (-1,-1), 8),
-                        ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
-                    ]
-                    for _, row in aw_report_df.iterrows():
-                        aw_table_data.append([
-                            str(row.get("Dată", "")),
-                            f"{int(row.get('Pași', 0)):,}",
-                            f"{int(row.get('Calorii Active', 0))}",
-                            f"{float(row.get('Somn (ore)', 0))}",
-                            f"{int(row.get('HRV (ms)', 0))}",
-                            f"{int(row.get('SpO2 (%)', 0))}%",
-                            f"{int(row.get('Puls Mediu', 0))}"
-                        ])
-                    t_aw = Table(aw_table_data, colWidths=[65, 70, 60, 60, 55, 55, 65])
-                    t_aw.setStyle(TableStyle(aw_t_style))
-                    story.append(t_aw)
-                    story.append(Spacer(1, 10))
+            if include_ta and 'Sistolică' in df_pdf_meas.columns and 'Diastolică' in df_pdf_meas.columns:
+                sis_v = pd.to_numeric(df_pdf_meas["Sistolică"], errors="coerce").fillna(0).tolist()
+                dia_v = pd.to_numeric(df_pdf_meas["Diastolică"], errors="coerce").fillna(0).tolist()
+                if any(s > 0 for s in sis_v):
+                    img_t = generate_pdf_chart_ta(x_lbls, sis_v, dia_v, "Evolutie Tensiune Arteriala")
+                    elements.append(Paragraph("Grafic Tensiune Arteriala", h2_style))
+                    elements.append(Image(img_t, width=450, height=160))
+                    elements.append(Spacer(1, 10))
+
+            if include_puls and 'Puls' in df_pdf_meas.columns:
+                puls_v = pd.to_numeric(df_pdf_meas["Puls"], errors="coerce").fillna(0).tolist()
+                if any(p > 0 for p in puls_v):
+                    img_p = generate_pdf_chart_puls(x_lbls, puls_v, "Evolutie Puls")
+                    elements.append(Paragraph("Grafic Puls", h2_style))
+                    elements.append(Image(img_p, width=450, height=160))
+                    elements.append(Spacer(1, 10))
 
             if include_tables:
-                story.append(Paragraph("Date Tabelare si Observatii Medicale (Doar Inregistrari cu Valori)", styles["Heading2"]))
-                table_data = [["Data", "Moment", "Glic", "TA", "Puls", "Observatii"]]
+                elements.append(Paragraph("Tabel Centralizator Măsurători", h2_style))
+                table_data = [["Data", "Moment", "Glicemie", "Sistol.", "Diastol.", "Puls"]]
+                for _, r in df_pdf_meas.iterrows():
+                    d_str = r[date_col].strftime("%d.%m.%Y") if pd.notna(r[date_col]) else ""
+                    m_str = str(r.get(moment_col, ""))
+                    g_str = str(int(r['Glicemie'])) if pd.notna(r.get('Glicemie')) and float(r.get('Glicemie', 0)) > 0 else "-"
+                    s_str = str(int(r['Sistolică'])) if pd.notna(r.get('Sistolică')) and float(r.get('Sistolică', 0)) > 0 else "-"
+                    di_str = str(int(r['Diastolică'])) if pd.notna(r.get('Diastolică')) and float(r.get('Diastolică', 0)) > 0 else "-"
+                    p_str = str(int(r['Puls'])) if pd.notna(r.get('Puls')) and float(r.get('Puls', 0)) > 0 else "-"
+                    table_data.append([d_str, m_str, g_str, s_str, di_str, p_str])
                 
-                t_style = [
-                    ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#1e3a8a")),
-                    ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
-                    ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-                    ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-                    ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-                    ('FONTSIZE', (0,0), (-1,-1), 8),
-                    ('BOTTOMPADDING', (0,0), (-1,0), 8),
-                    ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
-                ]
-                
-                obs_style_pdf = ParagraphStyle(
-                    'ObsStylePDF',
-                    parent=styles['Normal'],
-                    fontName='Helvetica',
-                    fontSize=7.5,
-                    leading=9,
-                    textColor=colors.HexColor("#111827")
-                )
+                t = Table(table_data, colWidths=[65, 140, 55, 50, 50, 50])
+                t.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1e3a8a')),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, 0), (-1, 0), 8),
+                    ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
+                    ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#f8fafc')),
+                    ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#cbd5e1')),
+                    ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                    ('FONTSIZE', (0, 1), (-1, -1), 7.5),
+                ]))
+                elements.append(t)
+                elements.append(Spacer(1, 10))
 
-                r_idx = 1
-                for _, row in df_pdf_measured.iterrows():
-                    dt_str = row[date_col].strftime("%d.%m.%Y")
-                    mm = remove_diacritics(str(row.get(moment_col, "")))
-                    obs_val = clean_obs(row.get(col_obs, ""))
-                    obs_str = remove_diacritics(obs_val)
-                    
-                    obs_paragraph = Paragraph(obs_str, obs_style_pdf)
-                    
-                    glic_v = row.get(col_glic, 0)
-                    sis_v = row.get(col_sis, 0)
-                    dia_v = row.get(col_dia, 0)
-                    puls_v = row.get(col_puls, 0)
-                    
-                    g_str = str(int(glic_v)) if pd.notna(glic_v) and float(glic_v)>0 else ""
-                    ta_str = f"{int(sis_v)}/{int(dia_v)}" if pd.notna(sis_v) and float(sis_v)>0 else ""
-                    p_str = str(int(puls_v)) if pd.notna(puls_v) and float(puls_v)>0 else ""
-                    
-                    table_data.append([dt_str, mm, g_str, ta_str, p_str, obs_paragraph])
-                    
-                    ev_g = evaluate_glic(glic_v, mm)
-                    if "🟢" in ev_g: t_style.append(('TEXTCOLOR', (2, r_idx), (2, r_idx), colors.HexColor("#16a34a")))
-                    elif "🔴" in ev_g: t_style.append(('TEXTCOLOR', (2, r_idx), (2, r_idx), colors.HexColor("#dc2626")))
-                    
-                    ev_ta = evaluate_ta(sis_val=sis_v, dia_val=dia_v)
-                    if "🟢" in ev_ta: t_style.append(('TEXTCOLOR', (3, r_idx), (3, r_idx), colors.HexColor("#16a34a")))
-                    elif "🔴" in ev_ta: t_style.append(('TEXTCOLOR', (3, r_idx), (3, r_idx), colors.HexColor("#dc2626")))
-                    
-                    ev_p = evaluate_puls(puls_v)
-                    if "🟢" in ev_p: t_style.append(('TEXTCOLOR', (4, r_idx), (4, r_idx), colors.HexColor("#16a34a")))
-                    elif "🔴" in ev_p: t_style.append(('TEXTCOLOR', (4, r_idx), (4, r_idx), colors.HexColor("#dc2626")))
-                    
-                    r_idx += 1
-                
-                t = Table(table_data, colWidths=[60, 115, 35, 55, 35, 200])
-                t.setStyle(TableStyle(t_style))
-                story.append(t)
-        else:
-            story.append(Paragraph("Nu exista date pentru perioada selectata.", styles["Normal"]))
-
-        doc.build(story)
+        doc.build(elements)
         buffer.seek(0)
         return buffer
 
-    if st.button("Crează Raport PDF", type="primary"):
-        pdf_buffer = make_pdf_report(view_df, opt_glic, opt_ta, opt_puls, opt_tabele, opt_aw_chart, opt_aw_table)
-        file_name = f"Raport_Medical_{filtru_luni_str.replace(', ', '_')}.pdf"
-        
-        b64_pdf = base64.b64encode(pdf_buffer.getvalue()).decode('utf-8')
-        href = f'''
-        <div style="text-align: center; margin-top: 15px;">
-            <a href="data:application/pdf;base64,{b64_pdf}" download="{file_name}" target="_blank" style="display:inline-block; padding: 14px 24px; background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); color: white; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
-                📥 Descarcă / Deschide Raport PDF (Fereastră Nouă)
-            </a>
-        </div>
-        '''
-        st.markdown(href, unsafe_allow_html=True)
-        st.success("✅ Raportul PDF a fost generat! Apasă pe butonul de mai sus pentru al descărca sau vizualiza în siguranță, fără ca aplicația să se închidă.")
+    if st.button("📥 Generează și Descarcă Raportul PDF", type="primary"):
+        pdf_file_obj = make_pdf_report(view_df, opt_glic, opt_ta, opt_puls, opt_tabele, opt_aw_chart, opt_aw_table)
+        st.download_button(
+            label="📄 Descarcă PDF Generat",
+            data=pdf_file_obj,
+            file_name=f"Raport_Medical_{datetime.now().strftime('%d_%m_%Y')}.pdf",
+            mime="application/pdf",
+            use_container_width=True
+        )

@@ -655,7 +655,8 @@ def evaluate_glic(val, moment_zi=""):
     try:
         v = float(val)
         if v == 0 or pd.isna(v): return "Nemăsurat"
-        if "După masă" in str(moment_zi):
+        m_clean = remove_diacritics(str(moment_zi)).lower()
+        if "dupa masa" in m_clean:
             t_min, t_max = st.session_state.settings.get("target_glic_post_min", 70), st.session_state.settings.get("target_glic_post_max", 160)
         else:
             t_min, t_max = st.session_state.settings.get("target_glic_min", 70), st.session_state.settings.get("target_glic_max", 120)
@@ -690,7 +691,8 @@ def is_glic_spike(val, moment_zi=""):
     try:
         v = float(val)
         if v == 0 or pd.isna(v): return False
-        if "După masă" in str(moment_zi):
+        m_clean = remove_diacritics(str(moment_zi)).lower()
+        if "dupa masa" in m_clean:
             t_max = st.session_state.settings.get("target_glic_post_max", 160)
         else:
             t_max = st.session_state.settings.get("target_glic_max", 120)
@@ -1072,7 +1074,6 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
                             if st.checkbox(item_str, key=chk_key):
                                 checked_foods_live.append(item_str.strip().lower())
 
-            # Sincronizare instantanee a observațiilor în funcție de bife
             current_obs_val = st.session_state.get("inp_obs", "")
             existing_parts = [p.strip() for p in current_obs_val.split(",") if p.strip()]
             non_food_parts = [p for p in existing_parts if remove_diacritics(p).lower() not in all_known_foods]
@@ -1080,7 +1081,6 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
             combined_parts = non_food_parts + sorted(list(set(checked_foods_live)))
             new_computed_obs = ", ".join([p for p in combined_parts if p])
             
-            # Actualizăm direct starea în session_state înainte de afișare
             st.session_state["inp_obs"] = new_computed_obs
 
             st.text_area("✍️ Notițe / Observații (Se actualizează instant la bifare/debifare)", key="inp_obs")

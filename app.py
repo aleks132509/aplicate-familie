@@ -875,7 +875,6 @@ with tab_dict["📊 Jurnal & Grafice"]:
                 df_g_tab[col_glic] = format_table_column(df_g_tab[col_glic])
                 df_g_tab[col_obs] = df_g_tab[col_obs].apply(clean_obs)
                 df_g_tab = df_g_tab[df_g_tab[col_glic] != ""]
-                # Setăm coloana Observații ultima
                 df_g_tab = df_g_tab[[date_col, moment_col, col_glic, "Status Glicemie", col_obs]]
                 st.dataframe(apply_color_styling(df_g_tab, ["Status Glicemie"]), use_container_width=True, hide_index=True)
 
@@ -916,7 +915,6 @@ with tab_dict["📊 Jurnal & Grafice"]:
                 df_t_tab[col_dia] = format_table_column(df_t_tab[col_dia])
                 df_t_tab[col_obs] = df_t_tab[col_obs].apply(clean_obs)
                 df_t_tab = df_t_tab[(df_t_tab[col_sis] != "") | (df_t_tab[col_dia] != "")]
-                # Setăm coloana Observații ultima
                 df_t_tab = df_t_tab[[date_col, moment_col, col_sis, col_dia, "Status Tensiune", col_obs]]
                 st.dataframe(apply_color_styling(df_t_tab, ["Status Tensiune"]), use_container_width=True, hide_index=True)
 
@@ -946,7 +944,6 @@ with tab_dict["📊 Jurnal & Grafice"]:
                 df_p_tab[col_puls] = format_table_column(df_p_tab[col_puls])
                 df_p_tab[col_obs] = df_p_tab[col_obs].apply(clean_obs)
                 df_p_tab = df_p_tab[df_p_tab[col_puls] != ""]
-                # Setăm coloana Observații ultima
                 df_p_tab = df_p_tab[[date_col, moment_col, col_puls, "Status Puls", col_obs]]
                 st.dataframe(apply_color_styling(df_p_tab, ["Status Puls"]), use_container_width=True, hide_index=True)
 
@@ -966,7 +963,6 @@ with tab_dict["📊 Jurnal & Grafice"]:
             df_all[col_obs] = df_all[col_obs].apply(clean_obs)
             if 'Luna_An' in df_all.columns: df_all = df_all.drop(columns=['Luna_An'])
             
-            # Ne asigurăm că Observații este ultima coloană
             cols_order_all = [date_col, moment_col, col_glic, "St. Glicemie", col_sis, col_dia, "St. Tensiune", col_puls, "St. Puls", col_obs]
             existing_cols_all = [c for c in cols_order_all if c in df_all.columns]
             df_all = df_all[existing_cols_all]
@@ -1606,46 +1602,45 @@ with tab_dict["📄 Raport PDF"]:
             
             if include_glic and col_glic in df_pdf_measured.columns:
                 g_vals = pd.to_numeric(df_pdf_measured[col_glic], errors='coerce').fillna(0).tolist()
-                story.append(Paragraph("Evolutie Glicemie", styles["Heading2"]))
-                img_buf = generate_pdf_chart_glic(x_data, g_vals, moments_arr, "Glicemie (mg/dL)", "mg/dL", "#38bdf8")
+                story.append(Paragraph(remove_diacritics("Evolutie Glicemie"), styles["Heading2"]))
+                img_buf = generate_pdf_chart_glic(x_data, g_vals, moments_arr, remove_diacritics("Glicemie (mg/dL)"), "mg/dL", "#38bdf8")
                 story.append(Image(img_buf, width=480, height=170))
                 story.append(Spacer(1, 10))
                 
             if include_ta and col_sis in df_pdf_measured.columns and col_dia in df_pdf_measured.columns:
                 s_vals = pd.to_numeric(df_pdf_measured[col_sis], errors='coerce').fillna(0).tolist()
                 d_vals = pd.to_numeric(df_pdf_measured[col_dia], errors='coerce').fillna(0).tolist()
-                story.append(Paragraph("Evolutie Tensiune Arteriala", styles["Heading2"]))
-                img_buf = generate_pdf_chart_ta(x_data, s_vals, d_vals, "Tensiune Arteriala (mmHg)")
+                story.append(Paragraph(remove_diacritics("Evolutie Tensiune Arteriala"), styles["Heading2"]))
+                img_buf = generate_pdf_chart_ta(x_data, s_vals, d_vals, remove_diacritics("Tensiune Arteriala (mmHg)"))
                 story.append(Image(img_buf, width=480, height=170))
                 story.append(Spacer(1, 10))
                 
             if include_puls and col_puls in df_pdf_measured.columns:
                 p_vals = pd.to_numeric(df_pdf_measured[col_puls], errors='coerce').fillna(0).tolist()
-                story.append(Paragraph("Evolutie Puls", styles["Heading2"]))
-                img_buf = generate_pdf_chart_puls(x_data, p_vals, "Puls (bpm)")
+                story.append(Paragraph(remove_diacritics("Evolutie Puls"), styles["Heading2"]))
+                img_buf = generate_pdf_chart_puls(x_data, p_vals, remove_diacritics("Puls (bpm)"))
                 story.append(Image(img_buf, width=480, height=170))
                 story.append(Spacer(1, 10))
 
             if include_tables:
-                story.append(Paragraph("Date Tabelare si Observatii (Doar Inregistrari cu Valori)", styles["Heading2"]))
-                table_data = [["Data", "Moment", "Glic", "TA", "Puls", "Observatii"]]
+                story.append(Paragraph(remove_diacritics("Toate Datele (Doar Masurate) si Observatii"), styles["Heading2"]))
+                table_data = [[remove_diacritics("Data"), remove_diacritics("Moment"), remove_diacritics("Glic"), remove_diacritics("St Glic"), remove_diacritics("Sis"), remove_diacritics("Dia"), remove_diacritics("St TA"), remove_diacritics("Puls"), remove_diacritics("St Puls"), remove_diacritics("Observatii")]]
                 
-                # Stil modern îmbunătățit pentru un tabel mai frumos, aerisit și ușor de citit
                 t_style = [
                     ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#0284c7")),
                     ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
                     ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-                    ('ALIGN', (5,1), (5,-1), 'LEFT'),  # Observațiile aliniate la stânga pentru lizibilitate optimă
+                    ('ALIGN', (9,1), (9,-1), 'LEFT'),
                     ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
                     ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-                    ('FONTSIZE', (0,0), (-1,0), 9),
-                    ('FONTSIZE', (0,1), (-1,-1), 8),
-                    ('TOPPADDING', (0,0), (-1,0), 7),
-                    ('BOTTOMPADDING', (0,0), (-1,0), 7),
-                    ('TOPPADDING', (0,1), (-1,-1), 6),
-                    ('BOTTOMPADDING', (0,1), (-1,-1), 6),
-                    ('LEFTPADDING', (0,0), (-1,-1), 6),
-                    ('RIGHTPADDING', (0,0), (-1,-1), 6),
+                    ('FONTSIZE', (0,0), (-1,0), 8),
+                    ('FONTSIZE', (0,1), (-1,-1), 7.5),
+                    ('TOPPADDING', (0,0), (-1,0), 6),
+                    ('BOTTOMPADDING', (0,0), (-1,0), 6),
+                    ('TOPPADDING', (0,1), (-1,-1), 5),
+                    ('BOTTOMPADDING', (0,1), (-1,-1), 5),
+                    ('LEFTPADDING', (0,0), (-1,-1), 4),
+                    ('RIGHTPADDING', (0,0), (-1,-1), 4),
                     ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#cbd5e1")),
                 ]
                 
@@ -1653,8 +1648,8 @@ with tab_dict["📄 Raport PDF"]:
                     'ObsStylePDF',
                     parent=styles['Normal'],
                     fontName='Helvetica',
-                    fontSize=8,
-                    leading=11,
+                    fontSize=7.5,
+                    leading=10,
                     textColor=colors.HexColor("#1e293b")
                 )
 
@@ -1673,36 +1668,43 @@ with tab_dict["📄 Raport PDF"]:
                     puls_v = row.get(col_puls, 0)
                     
                     g_str = str(int(glic_v)) if pd.notna(glic_v) and float(glic_v)>0 else ""
-                    ta_str = f"{int(sis_v)}/{int(dia_v)}" if pd.notna(sis_v) and float(sis_v)>0 else ""
+                    sis_str = str(int(sis_v)) if pd.notna(sis_v) and float(sis_v)>0 else ""
+                    dia_str = str(int(dia_v)) if pd.notna(dia_v) and float(dia_v)>0 else ""
                     p_str = str(int(puls_v)) if pd.notna(puls_v) and float(puls_v)>0 else ""
                     
-                    table_data.append([dt_str, mm, g_str, ta_str, p_str, obs_paragraph])
+                    ev_g = remove_diacritics(evaluate_glic(glic_v, mm).replace("🟢", "").replace("🔴", "").strip())
+                    ev_ta = remove_diacritics(evaluate_ta(sis_val=sis_v, dia_val=dia_v).replace("🟢", "").replace("🔴", "").strip())
+                    ev_p = remove_diacritics(evaluate_puls(puls_v).replace("🟢", "").replace("🔴", "").strip())
                     
-                    # Efect de rânduri alternative (zebra striping) pentru claritate sporită
+                    table_data.append([dt_str, mm, g_str, ev_g, sis_str, dia_str, ev_ta, p_str, ev_p, obs_paragraph])
+                    
                     if r_idx % 2 == 0:
                         t_style.append(('BACKGROUND', (0, r_idx), (-1, r_idx), colors.HexColor("#f8fafc")))
                     else:
                         t_style.append(('BACKGROUND', (0, r_idx), (-1, r_idx), colors.HexColor("#ffffff")))
                     
-                    ev_g = evaluate_glic(glic_v, mm)
-                    if "🟢" in ev_g: t_style.append(('TEXTCOLOR', (2, r_idx), (2, r_idx), colors.HexColor("#16a34a")))
-                    elif "🔴" in ev_g: t_style.append(('TEXTCOLOR', (2, r_idx), (2, r_idx), colors.HexColor("#dc2626")))
-                    
-                    ev_ta = evaluate_ta(sis_val=sis_v, dia_val=dia_v)
-                    if "🟢" in ev_ta: t_style.append(('TEXTCOLOR', (3, r_idx), (3, r_idx), colors.HexColor("#16a34a")))
-                    elif "🔴" in ev_ta: t_style.append(('TEXTCOLOR', (3, r_idx), (3, r_idx), colors.HexColor("#dc2626")))
-                    
-                    ev_p = evaluate_puls(puls_v)
-                    if "🟢" in ev_p: t_style.append(('TEXTCOLOR', (4, r_idx), (4, r_idx), colors.HexColor("#16a34a")))
-                    elif "🔴" in ev_p: t_style.append(('TEXTCOLOR', (4, r_idx), (4, r_idx), colors.HexColor("#dc2626")))
-                    
+                    if "Normala" in ev_g:
+                        t_style.append(('TEXTCOLOR', (3, r_idx), (3, r_idx), colors.HexColor("#16a34a")))
+                    elif "Mica" in ev_g or "Mare" in ev_g:
+                        t_style.append(('TEXTCOLOR', (3, r_idx), (3, r_idx), colors.HexColor("#dc2626")))
+                        
+                    if "Normala" in ev_ta:
+                        t_style.append(('TEXTCOLOR', (6, r_idx), (6, r_idx), colors.HexColor("#16a34a")))
+                    elif "Crescuta" in ev_ta:
+                        t_style.append(('TEXTCOLOR', (6, r_idx), (6, r_idx), colors.HexColor("#dc2626")))
+                        
+                    if "Normal" in ev_p:
+                        t_style.append(('TEXTCOLOR', (8, r_idx), (8, r_idx), colors.HexColor("#16a34a")))
+                    elif "Scazut" in ev_p or "Ridicat" in ev_p:
+                        t_style.append(('TEXTCOLOR', (8, r_idx), (8, r_idx), colors.HexColor("#dc2626")))
+                        
                     r_idx += 1
                 
-                t = Table(table_data, colWidths=[65, 115, 40, 55, 40, 200])
+                t = Table(table_data, colWidths=[55, 95, 30, 45, 25, 25, 45, 25, 40, 150])
                 t.setStyle(TableStyle(t_style))
                 story.append(t)
         else:
-            story.append(Paragraph("Nu exista date pentru perioada selectata.", styles["Normal"]))
+            story.append(Paragraph(remove_diacritics("Nu exista date pentru perioada selectata."), styles["Normal"]))
 
         doc.build(story)
         buffer.seek(0)

@@ -841,13 +841,15 @@ with tab_dict["📊 Jurnal & Grafice"]:
                 fig_g.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=40, r=40, t=50, b=120), xaxis=dict(tickangle=-45, dtick=1), yaxis=dict(range=[0, max(250, int(max_glic_data) + 50)]))
                 st.plotly_chart(fig_g, use_container_width=True)
 
-                cols_g = [date_col, moment_col, col_glic, "Status Glicemie", col_obs]
-                df_g_tab = view_df_measured[cols_g].copy()
-                df_g_tab[date_col] = df_g_tab[date_col].dt.strftime("%d.%m.%Y")
+                # CORRECȚIE KEYERROR: Creare corectă a tabelei Glicemie
+                df_g_tab = view_df_measured.copy()
                 df_g_tab["Status Glicemie"] = df_g_tab.apply(lambda r: evaluate_glic(r[col_glic], r[moment_col]), axis=1)
+                df_g_tab[date_col] = df_g_tab[date_col].dt.strftime("%d.%m.%Y")
                 df_g_tab[col_glic] = format_table_column(df_g_tab[col_glic])
                 df_g_tab[col_obs] = df_g_tab[col_obs].apply(clean_obs)
                 df_g_tab = df_g_tab[df_g_tab[col_glic] != ""]
+                cols_g = [date_col, moment_col, col_glic, "Status Glicemie", col_obs]
+                df_g_tab = df_g_tab[cols_g]
                 st.dataframe(apply_color_styling(df_g_tab, ["Status Glicemie"]), use_container_width=True, hide_index=True)
 
         with sub_tab_ta:
@@ -866,14 +868,16 @@ with tab_dict["📊 Jurnal & Grafice"]:
                 fig_ta.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=40, r=40, t=50, b=120), xaxis=dict(tickangle=-45, dtick=1))
                 st.plotly_chart(fig_ta, use_container_width=True)
                 
-                cols_t = [date_col, moment_col, col_sis, col_dia, "Status Tensiune", col_obs]
-                df_t_tab = view_df_measured[cols_t].copy()
-                df_t_tab[date_col] = df_t_tab[date_col].dt.strftime("%d.%m.%Y")
+                # CORRECȚIE KEYERROR: Creare corectă a tabelei Tensiune
+                df_t_tab = view_df_measured.copy()
                 df_t_tab["Status Tensiune"] = df_t_tab.apply(lambda r: evaluate_ta(r[col_sis], r[col_dia]), axis=1)
+                df_t_tab[date_col] = df_t_tab[date_col].dt.strftime("%d.%m.%Y")
                 df_t_tab[col_sis] = format_table_column(df_t_tab[col_sis])
                 df_t_tab[col_dia] = format_table_column(df_t_tab[col_dia])
                 df_t_tab[col_obs] = df_t_tab[col_obs].apply(clean_obs)
                 df_t_tab = df_t_tab[(df_t_tab[col_sis] != "") | (df_t_tab[col_dia] != "")]
+                cols_t = [date_col, moment_col, col_sis, col_dia, "Status Tensiune", col_obs]
+                df_t_tab = df_t_tab[cols_t]
                 st.dataframe(apply_color_styling(df_t_tab, ["Status Tensiune"]), use_container_width=True, hide_index=True)
 
         with sub_tab_puls:
@@ -889,13 +893,15 @@ with tab_dict["📊 Jurnal & Grafice"]:
                 fig_p.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=40, r=40, t=50, b=120), xaxis=dict(tickangle=-45, dtick=1))
                 st.plotly_chart(fig_p, use_container_width=True)
                 
-                cols_p = [date_col, moment_col, col_puls, "Status Puls", col_obs]
-                df_p_tab = view_df_measured[cols_p].copy()
-                df_p_tab[date_col] = df_p_tab[date_col].dt.strftime("%d.%m.%Y")
+                # CORRECȚIE KEYERROR: Creare corectă a tabelei Puls
+                df_p_tab = view_df_measured.copy()
                 df_p_tab["Status Puls"] = df_p_tab[col_puls].apply(evaluate_puls)
+                df_p_tab[date_col] = df_p_tab[date_col].dt.strftime("%d.%m.%Y")
                 df_p_tab[col_puls] = format_table_column(df_p_tab[col_puls])
                 df_p_tab[col_obs] = df_p_tab[col_obs].apply(clean_obs)
                 df_p_tab = df_p_tab[df_p_tab[col_puls] != ""]
+                cols_p = [date_col, moment_col, col_puls, "Status Puls", col_obs]
+                df_p_tab = df_p_tab[cols_p]
                 st.dataframe(apply_color_styling(df_p_tab, ["Status Puls"]), use_container_width=True, hide_index=True)
 
         with sub_tab_all:
@@ -1204,7 +1210,6 @@ with tab_dict["📄 Raport PDF"]:
             aw_header_row = [remove_diacritics(str(c)) for c in aw_pdf_df.columns]
             aw_table_data.append([Paragraph(h, cell_header_style) for h in aw_header_row])
 
-            # COD CORECTAT AICI:
             df_aw_to_iter = aw_pdf_df.tail(25) if len(aw_pdf_df) > 25 else aw_pdf_df
             for _, row in df_aw_to_iter.iterrows():
                 row_cells = []

@@ -868,13 +868,13 @@ with tab_dict["📊 Jurnal & Grafice"]:
                 fig_g.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=40, r=40, t=50, b=120), xaxis=dict(tickangle=-45, dtick=1), yaxis=dict(range=[0, upper_limit_g]))
                 st.plotly_chart(fig_g, use_container_width=True)
 
-                cols_g = [date_col, moment_col, col_glic, col_obs]
-                df_g_tab = view_df_measured[cols_g].copy()
+                df_g_tab = view_df_measured[[date_col, moment_col, col_glic, col_obs]].copy()
                 df_g_tab[date_col] = df_g_tab[date_col].dt.strftime("%d.%m.%Y")
                 df_g_tab["Status Glicemie"] = df_g_tab.apply(lambda r: evaluate_glic(r[col_glic], r[moment_col]), axis=1)
                 df_g_tab[col_glic] = format_table_column(df_g_tab[col_glic])
                 df_g_tab[col_obs] = df_g_tab[col_obs].apply(clean_obs)
                 df_g_tab = df_g_tab[df_g_tab[col_glic] != ""]
+                df_g_tab = df_g_tab[[date_col, moment_col, col_glic, "Status Glicemie", col_obs]]
                 st.dataframe(apply_color_styling(df_g_tab, ["Status Glicemie"]), use_container_width=True, hide_index=True)
 
         with sub_tab_ta:
@@ -906,14 +906,14 @@ with tab_dict["📊 Jurnal & Grafice"]:
                 fig_ta.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=40, r=40, t=50, b=120), xaxis=dict(tickangle=-45, dtick=1))
                 st.plotly_chart(fig_ta, use_container_width=True)
                 
-                cols_t = [date_col, moment_col, col_sis, col_dia, col_obs]
-                df_t_tab = view_df_measured[cols_t].copy()
+                df_t_tab = view_df_measured[[date_col, moment_col, col_sis, col_dia, col_obs]].copy()
                 df_t_tab[date_col] = df_t_tab[date_col].dt.strftime("%d.%m.%Y")
                 df_t_tab["Status Tensiune"] = df_t_tab.apply(lambda r: evaluate_ta(r[col_sis], r[col_dia]), axis=1)
                 df_t_tab[col_sis] = format_table_column(df_t_tab[col_sis])
                 df_t_tab[col_dia] = format_table_column(df_t_tab[col_dia])
                 df_t_tab[col_obs] = df_t_tab[col_obs].apply(clean_obs)
                 df_t_tab = df_t_tab[(df_t_tab[col_sis] != "") | (df_t_tab[col_dia] != "")]
+                df_t_tab = df_t_tab[[date_col, moment_col, col_sis, col_dia, "Status Tensiune", col_obs]]
                 st.dataframe(apply_color_styling(df_t_tab, ["Status Tensiune"]), use_container_width=True, hide_index=True)
 
         with sub_tab_puls:
@@ -935,13 +935,13 @@ with tab_dict["📊 Jurnal & Grafice"]:
                 fig_p.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=40, r=40, t=50, b=120), xaxis=dict(tickangle=-45, dtick=1))
                 st.plotly_chart(fig_p, use_container_width=True)
                 
-                cols_p = [date_col, moment_col, col_puls, col_obs]
-                df_p_tab = view_df_measured[cols_p].copy()
+                df_p_tab = view_df_measured[[date_col, moment_col, col_puls, col_obs]].copy()
                 df_p_tab[date_col] = df_p_tab[date_col].dt.strftime("%d.%m.%Y")
                 df_p_tab["Status Puls"] = df_p_tab[col_puls].apply(evaluate_puls)
                 df_p_tab[col_puls] = format_table_column(df_p_tab[col_puls])
                 df_p_tab[col_obs] = df_p_tab[col_obs].apply(clean_obs)
                 df_p_tab = df_p_tab[df_p_tab[col_puls] != ""]
+                df_p_tab = df_p_tab[[date_col, moment_col, col_puls, "Status Puls", col_obs]]
                 st.dataframe(apply_color_styling(df_p_tab, ["Status Puls"]), use_container_width=True, hide_index=True)
 
         with sub_tab_all:
@@ -959,7 +959,11 @@ with tab_dict["📊 Jurnal & Grafice"]:
                 df_all[col_puls] = format_table_column(df_all[col_puls])
             df_all[col_obs] = df_all[col_obs].apply(clean_obs)
             if 'Luna_An' in df_all.columns: df_all = df_all.drop(columns=['Luna_An'])
-            st.dataframe(df_all, use_container_width=True, height=800, hide_index=True)
+            
+            cols_order_all = [date_col, moment_col, col_glic, "St. Glicemie", col_sis, col_dia, "St. Tensiune", col_puls, "St. Puls", col_obs]
+            existing_cols_all = [c for c in cols_order_all if c in df_all.columns]
+            df_all = df_all[existing_cols_all]
+            st.dataframe(apply_color_styling(df_all, ["St. Glicemie", "St. Tensiune", "St. Puls"]), use_container_width=True, height=800, hide_index=True)
 
 # ----------------- TAB: ADAUGĂ / SUPRASCRIE (ADMIN) -----------------
 if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:

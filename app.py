@@ -412,10 +412,30 @@ def verifica_si_fa_backup_automat():
                 attachments = {
                     "backup_date_medicale.csv": temp_backup_file,
                 }
+                
+                temp_meds_backup = "temp_meds_backup.csv"
                 if os.path.exists(MEDS_FILE):
-                    attachments["medicamente.csv"] = MEDS_FILE
+                    try:
+                        df_m_temp = pd.read_csv(MEDS_FILE)
+                        for col in df_m_temp.columns:
+                            df_m_temp[col] = df_m_temp[col].apply(lambda x: remove_diacritics(str(x)) if pd.notna(x) and str(x).strip() not in ["nan", "None", ""] else "")
+                        df_m_temp.columns = [remove_diacritics(c) for c in df_m_temp.columns]
+                        df_m_temp.to_csv(temp_meds_backup, index=False)
+                        attachments["medicamente.csv"] = temp_meds_backup
+                    except:
+                        attachments["medicamente.csv"] = MEDS_FILE
+
+                temp_prog_backup = "temp_prog_backup.csv"
                 if os.path.exists(PROG_FILE):
-                    attachments["programari_medicale.csv"] = PROG_FILE
+                    try:
+                        df_p_temp = pd.read_csv(PROG_FILE)
+                        for col in df_p_temp.columns:
+                            df_p_temp[col] = df_p_temp[col].apply(lambda x: remove_diacritics(str(x)) if pd.notna(x) and str(x).strip() not in ["nan", "None", ""] else "")
+                        df_p_temp.columns = [remove_diacritics(c) for c in df_p_temp.columns]
+                        df_p_temp.to_csv(temp_prog_backup, index=False)
+                        attachments["programari_medicale.csv"] = temp_prog_backup
+                    except:
+                        attachments["programari_medicale.csv"] = PROG_FILE
 
                 succes, _ = trimite_email_cu_multiple_atasamente(
                     destinatar=email_dest,
@@ -425,6 +445,10 @@ def verifica_si_fa_backup_automat():
                 )
                 if os.path.exists(temp_backup_file):
                     os.remove(temp_backup_file)
+                if os.path.exists(temp_meds_backup):
+                    os.remove(temp_meds_backup)
+                if os.path.exists(temp_prog_backup):
+                    os.remove(temp_prog_backup)
 
                 if succes:
                     with open(BACKUP_LOG_FILE, "w") as f:
@@ -1447,10 +1471,30 @@ with tab_dict["⚙️ Setări"]:
                 attachments = {
                     "backup_date_medicale.csv": temp_test_file,
                 }
+                
+                temp_meds_backup = "temp_meds_backup.csv"
                 if os.path.exists(MEDS_FILE):
-                    attachments["medicamente.csv"] = MEDS_FILE
+                    try:
+                        df_m_temp = pd.read_csv(MEDS_FILE)
+                        for col in df_m_temp.columns:
+                            df_m_temp[col] = df_m_temp[col].apply(lambda x: remove_diacritics(str(x)) if pd.notna(x) and str(x).strip() not in ["nan", "None", ""] else "")
+                        df_m_temp.columns = [remove_diacritics(c) for c in df_m_temp.columns]
+                        df_m_temp.to_csv(temp_meds_backup, index=False)
+                        attachments["medicamente.csv"] = temp_meds_backup
+                    except:
+                        attachments["medicamente.csv"] = MEDS_FILE
+
+                temp_prog_backup = "temp_prog_backup.csv"
                 if os.path.exists(PROG_FILE):
-                    attachments["programari_medicale.csv"] = PROG_FILE
+                    try:
+                        df_p_temp = pd.read_csv(PROG_FILE)
+                        for col in df_p_temp.columns:
+                            df_p_temp[col] = df_p_temp[col].apply(lambda x: remove_diacritics(str(x)) if pd.notna(x) and str(x).strip() not in ["nan", "None", ""] else "")
+                        df_p_temp.columns = [remove_diacritics(c) for c in df_p_temp.columns]
+                        df_p_temp.to_csv(temp_prog_backup, index=False)
+                        attachments["programari_medicale.csv"] = temp_prog_backup
+                    except:
+                        attachments["programari_medicale.csv"] = PROG_FILE
 
                 success_t, msg_t = trimite_email_cu_multiple_atasamente(
                     test_dest, 
@@ -1461,6 +1505,10 @@ with tab_dict["⚙️ Setări"]:
                 
                 if os.path.exists(temp_test_file):
                     os.remove(temp_test_file)
+                if os.path.exists(temp_meds_backup):
+                    os.remove(temp_meds_backup)
+                if os.path.exists(temp_prog_backup):
+                    os.remove(temp_prog_backup)
 
                 if success_t:
                     with open(BACKUP_LOG_FILE, "w") as f:

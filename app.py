@@ -1724,7 +1724,6 @@ with tab_dict["📄 Raport PDF"]:
                     
                     r_idx += 1
                 
-                # repeatRows=1 asigură repetarea capului de tabel pe paginile următoare
                 t = Table(table_data, colWidths=[65, 115, 40, 55, 40, 200], repeatRows=1)
                 t.setStyle(TableStyle(t_style))
                 story.append(t)

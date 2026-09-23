@@ -142,6 +142,7 @@ MEDS_HIST_FILE = "istoric_medicamente.csv"
 PROG_FILE = "programari_medicale.csv"
 FOODS_FILE = "alimente_custom.csv"
 BACKUP_LOG_FILE = "ultimul_backup_auto.txt"
+BACKUP_ERROR_LOG_FILE = "ultima_eroare_backup_auto.txt"
 SETTINGS_FILE = "setari_email.json"
 
 moment_order = [
@@ -453,8 +454,20 @@ def verifica_si_fa_backup_automat():
                 if succes:
                     with open(BACKUP_LOG_FILE, "w") as f:
                         f.write(azi.strftime("%Y-%m-%d"))
-    except:
-        pass
+                    if os.path.exists(BACKUP_ERROR_LOG_FILE):
+                        os.remove(BACKUP_ERROR_LOG_FILE)
+                else:
+                    with open(BACKUP_ERROR_LOG_FILE, "w") as f:
+                        f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} | {_}")
+            else:
+                with open(BACKUP_ERROR_LOG_FILE, "w") as f:
+                    f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} | Nu există date de backup (df_cron gol).")
+    except Exception as e:
+        try:
+            with open(BACKUP_ERROR_LOG_FILE, "w") as f:
+                f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} | Eroare neașteptată: {e}")
+        except:
+            pass
 
 # ==========================================
 # SESSION STATE INITIALIZATION & PERSISTENȚĂ LOGARE
@@ -473,6 +486,31 @@ if "user" not in st.session_state:
 
 if "settings" not in st.session_state:
     st.session_state.settings = load_persisted_settings()
+
+# ==========================================
+# DECLANȘATOR EXTERN PENTRU BACKUP AUTOMAT ZILNIC (fără autentificare)
+# ==========================================
+# PROBLEMĂ REZOLVATĂ: backup-ul automat rula DOAR când cineva deschidea
+# manual aplicația și se autentifica — dacă nu intra nimeni într-o zi,
+# nu se trimitea niciun email, pentru că acest cod Streamlit nu rulează
+# de la sine la o oră fixă (nu există un "ceas" intern).
+#
+# Acest bloc permite unui serviciu extern GRATUIT de tip cron (ex:
+# cron-job.org, EasyCron, sau un GitHub Actions programat) să "trezească"
+# aplicația o dată pe zi și să declanșeze backup-ul, FĂRĂ să fie nevoie de
+# login manual. Configurează serviciul extern să acceseze (GET), o dată pe
+# zi, adresa:
+#
+#   https://<adresa-ta-streamlit>/?backup_trigger=SCHIMBA-ACEST-COD-SECRET
+#
+# ⚠️ Schimbă valoarea de mai jos cu un cod secret al tău (orice text greu
+# de ghicit), altfel oricine ar putea declanșa manual backup-ul.
+BACKUP_TRIGGER_SECRET = "schimba-acest-cod-secret-1234"
+
+if st.query_params.get("backup_trigger") == BACKUP_TRIGGER_SECRET:
+    verifica_si_fa_backup_automat()
+    st.write("Backup check executat.")
+    st.stop()
 
 if "meds_df" not in st.session_state:
     st.session_state.meds_df = get_initial_meds()
@@ -1456,6 +1494,27 @@ with tab_dict["⚙️ Setări"]:
             st.success("✅ Datele de email au fost salvate permanent pe disc!")
 
         st.markdown("<small>💡 *Notă: Nu folosi parola ta principală Apple ID. Generează o App-Specific Password din portalul tău Apple ID.*</small>", unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # Stare backup automat: ultima reușită / ultima eroare
+        if os.path.exists(BACKUP_LOG_FILE):
+            try:
+                with open(BACKUP_LOG_FILE, "r") as f:
+                    last_ok = f.read().strip()
+                st.success(f"✅ Ultimul backup automat reușit: {last_ok}")
+            except:
+                pass
+        else:
+            st.info("ℹ️ Nu a fost trimis încă niciun backup automat.")
+
+        if os.path.exists(BACKUP_ERROR_LOG_FILE):
+            try:
+                with open(BACKUP_ERROR_LOG_FILE, "r") as f:
+                    last_err = f.read().strip()
+                st.error(f"❌ Ultima eroare la backup automat: {last_err}")
+            except:
+                pass
+
         st.markdown("<br>", unsafe_allow_html=True)
 
         if st.button("🔌 Forțează Trimite Backup Complet Acum (Toate Fișierele)", type="primary"):

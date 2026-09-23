@@ -1,4 +1,3 @@
-
 import io
 import os
 import json
@@ -506,7 +505,7 @@ if "settings" not in st.session_state:
 #
 # ⚠️ Schimbă valoarea de mai jos cu un cod secret al tău (orice text greu
 # de ghicit), altfel oricine ar putea declanșa manual backup-ul.
-BACKUP_TRIGGER_SECRET = "Aleks132509"
+BACKUP_TRIGGER_SECRET = "hb2026-backup-x7k9q"
 
 if st.query_params.get("backup_trigger") == BACKUP_TRIGGER_SECRET:
     verifica_si_fa_backup_automat()

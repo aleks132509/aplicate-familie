@@ -70,6 +70,9 @@ st.markdown(
         font-size: 12px;
         font-weight: bold;
     }
+    /* ========================================== */
+    /* STIL DE LUX PENTRU st.multiselect (TAGS)    */
+    /* ========================================== */
     .stMultiSelect [data-baseweb="tag"] {
         background: linear-gradient(135deg, #fef08a 0%, #fde047 30%, #eab308 100%) !important;
         color: #111827 !important;
@@ -1755,53 +1758,41 @@ with tab_dict["📄 Raport PDF"]:
                     else:
                         t_style.append(('BACKGROUND', (0, r_idx), (-1, r_idx), colors.HexColor("#ffffff")))
                     
+                    ev_g = evaluate_glic(glic_v, mm)
+                    if "🟢" in ev_g: t_style.append(('TEXTCOLOR', (2, r_idx), (2, r_idx), colors.HexColor("#16a34a")))
+                    elif "🔴" in ev_g: t_style.append(('TEXTCOLOR', (2, r_idx), (2, r_idx), colors.HexColor("#dc2626")))
+                    
+                    ev_ta = evaluate_ta(sis_val=sis_v, dia_val=dia_v)
+                    if "🟢" in ev_ta: t_style.append(('TEXTCOLOR', (3, r_idx), (3, r_idx), colors.HexColor("#16a34a")))
+                    elif "🔴" in ev_ta: t_style.append(('TEXTCOLOR', (3, r_idx), (3, r_idx), colors.HexColor("#dc2626")))
+                    
+                    ev_p = evaluate_puls(puls_v)
+                    if "🟢" in ev_p: t_style.append(('TEXTCOLOR', (4, r_idx), (4, r_idx), colors.HexColor("#16a34a")))
+                    elif "🔴" in ev_p: t_style.append(('TEXTCOLOR', (4, r_idx), (4, r_idx), colors.HexColor("#dc2626")))
+                    
                     r_idx += 1
-
-                col_widths = [65, 85, 45, 60, 45, 180]
-                t = Table(table_data, colWidths=col_widths)
+                
+                t = Table(table_data, colWidths=[65, 115, 40, 55, 40, 200], repeatRows=1)
                 t.setStyle(TableStyle(t_style))
                 story.append(t)
+        else:
+            story.append(Paragraph("Nu exista date pentru perioada selectata.", styles["Normal"]))
 
         doc.build(story)
         buffer.seek(0)
-        return buffer.getvalue()
+        return buffer
 
-    if st.button("📄 Generează Raportul PDF", type="primary", use_container_width=True):
-        pdf_bytes = make_pdf_report(view_df, opt_glic, opt_ta, opt_puls, opt_tabele)
-        st.session_state["pdf_bytes"] = pdf_bytes
-
-    if "pdf_bytes" in st.session_state:
-        pdf_bytes = st.session_state["pdf_bytes"]
-        b64_pdf = base64.b64encode(pdf_bytes).decode("utf-8")
-        pdf_filename = f"Raport_Medical_{datetime.now().strftime('%d_%m_%Y')}.pdf"
+    if st.button("Crează Raport PDF", type="primary"):
+        pdf_buffer = make_pdf_report(view_df, opt_glic, opt_ta, opt_puls, opt_tabele)
+        file_name = f"Raport_Medical_{filtru_luni_str.replace(', ', '_')}.pdf"
         
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.success("✅ Raportul PDF a fost generat cu succes!")
-        
-        # 1. Buton de descărcare directă în folderul Downloads
-        st.download_button(
-            label="📥 Descarcă PDF în Downloads (Direct)",
-            data=pdf_bytes,
-            file_name=pdf_filename,
-            mime="application/pdf",
-            use_container_width=True
-        )
-        
-        # 2. Link HTML pentru deschidere sau vizualizare curată în tab nou (fără a rupe starea aplicației)
-        href_tab = f'''
-        <div style="text-align: center; margin-top: 10px;">
-            <a href="data:application/pdf;base64,{b64_pdf}" target="_blank" style="
-                background-color: #0284c7; 
-                color: white; 
-                padding: 10px 20px; 
-                border-radius: 8px; 
-                text-decoration: none; 
-                font-weight: bold; 
-                display: block; 
-                text-align: center;
-            ">
-                🌐 Deschide / Vizualizează PDF în Tab Nou
+        b64_pdf = base64.b64encode(pdf_buffer.getvalue()).decode('utf-8')
+        href = f'''
+        <div style="text-align: center; margin-top: 15px;">
+            <a href="data:application/pdf;base64,{b64_pdf}" download="{file_name}" target="_blank" style="display:inline-block; padding: 14px 24px; background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); color: white; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
+                📥 Descarcă / Deschide Raport PDF (Fereastră Nouă)
             </a>
         </div>
         '''
-        st.markdown(href_tab, unsafe_allow_html=True)
+        st.markdown(href, unsafe_allow_html=True)
+        st.success("✅ Raportul PDF a fost generat cu succes!")

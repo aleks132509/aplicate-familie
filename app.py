@@ -70,9 +70,6 @@ st.markdown(
         font-size: 12px;
         font-weight: bold;
     }
-    /* ========================================== */
-    /* STIL DE LUX PENTRU st.multiselect (TAGS)    */
-    /* ========================================== */
     .stMultiSelect [data-baseweb="tag"] {
         background: linear-gradient(135deg, #fef08a 0%, #fde047 30%, #eab308 100%) !important;
         color: #111827 !important;
@@ -387,15 +384,20 @@ def trimite_email_cu_multiple_atasamente(destinatar, subiect, mesaj, file_paths_
                 
     return False, f"Erore trimitere iCloud (toate porturile au eșuat): {last_error}"
 
-def verifica_si_fa_backup_automat():
+def verifica_si_fa_backup_automat(forțează=False):
     try:
         email_dest = st.session_state.settings.get("email_sender", "").strip()
         if not email_dest:
             return 
 
         azi = datetime.now().date()
+        
+        # Verificare sesiune curentă
+        if not forțează and st.session_state.get("backup_trimis_sesiune", False):
+            return
+
         ultima_data = None
-        if os.path.exists(BACKUP_LOG_FILE):
+        if not forțează and os.path.exists(BACKUP_LOG_FILE):
             try:
                 with open(BACKUP_LOG_FILE, "r") as f:
                     ultima_data_str = f.read().strip()
@@ -403,7 +405,7 @@ def verifica_si_fa_backup_automat():
             except:
                 pass
 
-        if ultima_data is None or ultima_data < azi:
+        if forțează or ultima_data is None or ultima_data < azi:
             df_cron = get_chronological_backup_df()
             if not df_cron.empty:
                 temp_backup_file = "temp_backup_cron.csv"
@@ -451,6 +453,7 @@ def verifica_si_fa_backup_automat():
                     os.remove(temp_prog_backup)
 
                 if succes:
+                    st.session_state.backup_trimis_sesiune = True
                     with open(BACKUP_LOG_FILE, "w") as f:
                         f.write(azi.strftime("%Y-%m-%d"))
     except:
@@ -470,6 +473,8 @@ if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 if "user" not in st.session_state:
     st.session_state.user = None
+if "backup_trimis_sesiune" not in st.session_state:
+    st.session_state.backup_trimis_sesiune = False
 
 if "settings" not in st.session_state:
     st.session_state.settings = load_persisted_settings()
@@ -507,7 +512,8 @@ if not st.session_state.logged_in:
                 if user_data and user_data["pass"] == password:
                     st.session_state.logged_in = True
                     st.session_state.user = username
-                    verifica_si_fa_backup_automat()
+                    # Forțăm trimiterea backup-ului la logare (considerând că e prima oară azi)
+                    verifica_si_fa_backup_automat(forțează=True)
                     trigger_rerun()
                 else:
                     st.error("Utilizator sau parolă incorectă!")
@@ -517,7 +523,7 @@ current_user_info = st.session_state.users.get(st.session_state.user, {"role": "
 current_role = current_user_info.get("role", "Membru")
 is_admin = current_role == "Administrator"
 
-verifica_si_fa_backup_automat()
+verifica_si_fa_backup_automat(forțează=False)
 
 # ==========================================
 # DATE MEDICALE (ORDINE CRONOLOGICĂ STRICTĂ)
@@ -820,6 +826,7 @@ st.sidebar.markdown("<br>", unsafe_allow_html=True)
 if st.sidebar.button("🚪 Deconectare", use_container_width=True):
     st.session_state.logged_in = False
     st.session_state.user = None
+    st.session_state.backup_trimis_sesiune = False
     trigger_rerun()
 st.sidebar.markdown("---")
 
@@ -1733,66 +1740,36 @@ with tab_dict["📄 Raport PDF"]:
                     textColor=colors.HexColor("#1e293b")
                 )
 
-                r_idx = 1
                 for _, row in df_pdf_measured.iterrows():
-                    dt_str = row[date_col].strftime("%d.%m.%Y")
-                    mm = remove_diacritics(str(row.get(moment_col, "")))
-                    obs_val = clean_obs(row.get(col_obs, ""))
-                    obs_str = remove_diacritics(obs_val)
+                    d_s = row[date_col].strftime("%d.%m.%Y") if pd.notna(row[date_col]) else ""
+                    m_s = str(row.get(moment_col, ""))
+                    g_s = str(int(row[col_glic])) if pd.notna(row.get(col_glic)) and float(row.get(col_glic, 0)) > 0 else ""
                     
-                    obs_paragraph = Paragraph(obs_str, obs_style_pdf)
+                    s_v = float(row.get(col_sis, 0) or 0)
+                    d_v = float(row.get(col_dia, 0) or 0)
+                    ta_s = f"{int(s_v)}/{int(d_v)}" if s_v > 0 and d_v > 0 else ""
                     
-                    glic_v = row.get(col_glic, 0)
-                    sis_v = row.get(col_sis, 0)
-                    dia_v = row.get(col_dia, 0)
-                    puls_v = row.get(col_puls, 0)
+                    p_s = str(int(row[col_puls])) if pd.notna(row.get(col_puls)) and float(row.get(col_puls, 0)) > 0 else ""
+                    o_s = remove_diacritics(clean_obs(row.get(col_obs, "")))
                     
-                    g_str = str(int(glic_v)) if pd.notna(glic_v) and float(glic_v)>0 else ""
-                    ta_str = f"{int(sis_v)}/{int(dia_v)}" if pd.notna(sis_v) and float(sis_v)>0 else ""
-                    p_str = str(int(puls_v)) if pd.notna(puls_v) and float(puls_v)>0 else ""
-                    
-                    table_data.append([dt_str, mm, g_str, ta_str, p_str, obs_paragraph])
-                    
-                    if r_idx % 2 == 0:
-                        t_style.append(('BACKGROUND', (0, r_idx), (-1, r_idx), colors.HexColor("#f8fafc")))
-                    else:
-                        t_style.append(('BACKGROUND', (0, r_idx), (-1, r_idx), colors.HexColor("#ffffff")))
-                    
-                    ev_g = evaluate_glic(glic_v, mm)
-                    if "🟢" in ev_g: t_style.append(('TEXTCOLOR', (2, r_idx), (2, r_idx), colors.HexColor("#16a34a")))
-                    elif "🔴" in ev_g: t_style.append(('TEXTCOLOR', (2, r_idx), (2, r_idx), colors.HexColor("#dc2626")))
-                    
-                    ev_ta = evaluate_ta(sis_val=sis_v, dia_val=dia_v)
-                    if "🟢" in ev_ta: t_style.append(('TEXTCOLOR', (3, r_idx), (3, r_idx), colors.HexColor("#16a34a")))
-                    elif "🔴" in ev_ta: t_style.append(('TEXTCOLOR', (3, r_idx), (3, r_idx), colors.HexColor("#dc2626")))
-                    
-                    ev_p = evaluate_puls(puls_v)
-                    if "🟢" in ev_p: t_style.append(('TEXTCOLOR', (4, r_idx), (4, r_idx), colors.HexColor("#16a34a")))
-                    elif "🔴" in ev_p: t_style.append(('TEXTCOLOR', (4, r_idx), (4, r_idx), colors.HexColor("#dc2626")))
-                    
-                    r_idx += 1
-                
-                t = Table(table_data, colWidths=[65, 115, 40, 55, 40, 200], repeatRows=1)
+                    table_data.append([d_s, m_s, g_s, ta_s, p_s, Paragraph(o_s, obs_style_pdf)])
+
+                t = Table(table_data, colWidths=[55, 105, 35, 55, 35, 195])
                 t.setStyle(TableStyle(t_style))
                 story.append(t)
-        else:
-            story.append(Paragraph("Nu exista date pentru perioada selectata.", styles["Normal"]))
 
         doc.build(story)
         buffer.seek(0)
         return buffer
 
-    if st.button("Crează Raport PDF", type="primary"):
-        pdf_buffer = make_pdf_report(view_df, opt_glic, opt_ta, opt_puls, opt_tabele)
-        file_name = f"Raport_Medical_{filtru_luni_str.replace(', ', '_')}.pdf"
-        
-        b64_pdf = base64.b64encode(pdf_buffer.getvalue()).decode('utf-8')
-        href = f'''
-        <div style="text-align: center; margin-top: 15px;">
-            <a href="data:application/pdf;base64,{b64_pdf}" download="{file_name}" target="_blank" style="display:inline-block; padding: 14px 24px; background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); color: white; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
-                📥 Descarcă / Deschide Raport PDF (Fereastră Nouă)
-            </a>
-        </div>
-        '''
-        st.markdown(href, unsafe_allow_html=True)
-        st.success("✅ Raportul PDF a fost generat cu succes!")
+    if not view_df.empty:
+        pdf_file = make_pdf_report(view_df, opt_glic, opt_ta, opt_puls, opt_tabele)
+        st.download_button(
+            label="📥 Descarcă Raportul Medical PDF",
+            data=pdf_file,
+            file_name=f"Raport_Medical_HealthTrack_{datetime.now().strftime('%d_%m_%Y')}.pdf",
+            mime="application/pdf",
+            use_container_width=True
+        )
+    else:
+        st.warning("Nu există date suficiente pentru generarea raportului PDF.")

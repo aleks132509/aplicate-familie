@@ -1526,7 +1526,7 @@ with tab_dict["⚙️ Setări"]:
 
     with col_set2:
         st.markdown("#### 🎯 Valori Țintă Medicale")
-        st.session_state.settings["target_glic_min"]->st.number_input("Glicemie Min Înainte Masă", value=st.session_state.settings["target_glic_min"], disabled=not is_admin)
+        st.session_state.settings["target_glic_min"] = st.number_input("Glicemie Min Înainte Masă", value=st.session_state.settings["target_glic_min"], disabled=not is_admin)
         st.session_state.settings["target_glic_max"] = st.number_input("Glicemie Max Înainte Masă", value=st.session_state.settings["target_glic_max"], disabled=not is_admin)
         st.session_state.settings["target_glic_post_max"] = st.number_input("Glicemie Max După Masă", value=st.session_state.settings["target_glic_post_max"], disabled=not is_admin)
         st.session_state.settings["target_ta_sis"] = st.number_input("TA Sistolică Max Țintă", value=st.session_state.settings["target_ta_sis"], disabled=not is_admin)
@@ -1766,29 +1766,21 @@ with tab_dict["📄 Raport PDF"]:
                     if "🟢" in ev_ta: t_style.append(('TEXTCOLOR', (3, r_idx), (3, r_idx), colors.HexColor("#16a34a")))
                     elif "🔴" in ev_ta: t_style.append(('TEXTCOLOR', (3, r_idx), (3, r_idx), colors.HexColor("#dc2626")))
                     
-                    ev_p = evaluate_puls(puls_v)
-                    if "🟢" in ev_p: t_style.append(('TEXTCOLOR', (4, r_idx), (4, r_idx), colors.HexColor("#16a34a")))
-                    elif "🔴" in ev_p: t_style.append(('TEXTCOLOR', (4, r_idx), (4, r_idx), colors.HexColor("#dc2626")))
-                    
                     r_idx += 1
-                
-                t = Table(table_data, colWidths=[65, 115, 40, 55, 40, 200], repeatRows=1)
+
+                t = Table(table_data, colWidths=[60, 110, 45, 60, 45, 160])
                 t.setStyle(TableStyle(t_style))
                 story.append(t)
-        else:
-            story.append(Paragraph("Nu exista date pentru perioada selectata.", styles["Normal"]))
 
         doc.build(story)
         buffer.seek(0)
         return buffer
 
-    if st.button("Crează Raport PDF", type="primary"):
-        pdf_buffer = make_pdf_report(view_df, opt_glic, opt_ta, opt_puls, opt_tabele)
-        file_name = f"Raport_Medical_{filtru_luni_str.replace(', ', '_')}.pdf"
-        st.download_button(
-            label="📥 Descarcă Raport PDF Generat",
-            data=pdf_buffer,
-            file_name=file_name,
-            mime="application/pdf",
-            use_container_width=True
-        )
+    pdf_buffer = make_pdf_report(view_df, opt_glic, opt_ta, opt_puls, opt_tabele)
+    st.download_button(
+        label="📥 Descarcă Raportul PDF Medical",
+        data=pdf_buffer,
+        file_name=f"Raport_Medical_{datetime.now().strftime('%d_%m_%Y')}.pdf",
+        mime="application/pdf",
+        use_container_width=True
+    )

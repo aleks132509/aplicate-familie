@@ -1,0 +1,29 @@
+name: Daily Backup Trigger
+
+on:
+  schedule:
+    # 06:00 UTC = 09:00 ora României (vara, UTC+3) / 08:00 iarna (UTC+2)
+    # Ajustează ora "06" dacă vrei alt moment al zilei.
+    - cron: "0 6 * * *"
+  workflow_dispatch: {}   # permite și rulare manuală din tab-ul Actions, pentru test
+
+jobs:
+  trigger-backup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalează Playwright
+        run: |
+          pip install playwright
+          playwright install --with-deps chromium
+
+      - name: Rulează trigger-ul de backup
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          BACKUP_TRIGGER_SECRET: ${{ secrets.BACKUP_TRIGGER_SECRET }}
+        run: python scripts/trigger_backup.py

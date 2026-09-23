@@ -384,80 +384,84 @@ def trimite_email_cu_multiple_atasamente(destinatar, subiect, mesaj, file_paths_
                 
     return False, f"Erore trimitere iCloud (toate porturile au eșuat): {last_error}"
 
-def verifica_si_fa_backup_automat(forțează=False):
+def verifica_si_fa_backup_automat():
     try:
-        email_dest = st.session_state.settings.get("email_sender", "").strip()
-        if not email_dest:
+        email_sender = st.session_state.settings.get("email_sender", "").strip()
+        email_password = st.session_state.settings.get("email_password", "").strip()
+        
+        if not email_sender or not email_password:
+            print("Backup auto: Datele de configurare email lipsesc.")
             return 
 
         azi = datetime.now().date()
-        
-        # Verificare sesiune curentă
-        if not forțează and st.session_state.get("backup_trimis_sesiune", False):
-            return
-
         ultima_data = None
-        if not forțează and os.path.exists(BACKUP_LOG_FILE):
+        
+        if os.path.exists(BACKUP_LOG_FILE):
             try:
                 with open(BACKUP_LOG_FILE, "r") as f:
                     ultima_data_str = f.read().strip()
                     ultima_data = datetime.strptime(ultima_data_str, "%Y-%m-%d").date()
-            except:
-                pass
+            except Exception as e:
+                print(f"Erore citire log backup: {e}")
 
-        if forțează or ultima_data is None or ultima_data < azi:
+        # Trimite doar dacă nu s-a trimis deja astăzi
+        if ultima_data is None or ultima_data < azi:
             df_cron = get_chronological_backup_df()
-            if not df_cron.empty:
-                temp_backup_file = "temp_backup_cron.csv"
-                df_cron.to_csv(temp_backup_file, index=False)
-                
-                attachments = {
-                    "backup_date_medicale.csv": temp_backup_file,
-                }
-                
-                temp_meds_backup = "temp_meds_backup.csv"
-                if os.path.exists(MEDS_FILE):
-                    try:
-                        df_m_temp = pd.read_csv(MEDS_FILE)
-                        for col in df_m_temp.columns:
-                            df_m_temp[col] = df_m_temp[col].apply(lambda x: remove_diacritics(str(x)) if pd.notna(x) and str(x).strip() not in ["nan", "None", ""] else "")
-                        df_m_temp.columns = [remove_diacritics(c) for c in df_m_temp.columns]
-                        df_m_temp.to_csv(temp_meds_backup, index=False)
-                        attachments["medicamente.csv"] = temp_meds_backup
-                    except:
-                        attachments["medicamente.csv"] = MEDS_FILE
+            if df_cron.empty:
+                print("Backup auto: Nu există date de cronometrat/salvat.")
+                return
 
-                temp_prog_backup = "temp_prog_backup.csv"
-                if os.path.exists(PROG_FILE):
-                    try:
-                        df_p_temp = pd.read_csv(PROG_FILE)
-                        for col in df_p_temp.columns:
-                            df_p_temp[col] = df_p_temp[col].apply(lambda x: remove_diacritics(str(x)) if pd.notna(x) and str(x).strip() not in ["nan", "None", ""] else "")
-                        df_p_temp.columns = [remove_diacritics(c) for c in df_p_temp.columns]
-                        df_p_temp.to_csv(temp_prog_backup, index=False)
-                        attachments["programari_medicale.csv"] = temp_prog_backup
-                    except:
-                        attachments["programari_medicale.csv"] = PROG_FILE
+            temp_backup_file = "temp_backup_cron.csv"
+            df_cron.to_csv(temp_backup_file, index=False)
+            
+            attachments = {
+                "backup_date_medicale.csv": temp_backup_file,
+            }
+            
+            temp_meds_backup = "temp_meds_backup.csv"
+            if os.path.exists(MEDS_FILE):
+                try:
+                    df_m_temp = pd.read_csv(MEDS_FILE)
+                    for col in df_m_temp.columns:
+                        df_m_temp[col] = df_m_temp[col].apply(lambda x: remove_diacritics(str(x)) if pd.notna(x) and str(x).strip() not in ["nan", "None", ""] else "")
+                    df_m_temp.columns = [remove_diacritics(c) for c in df_m_temp.columns]
+                    df_m_temp.to_csv(temp_meds_backup, index=False)
+                    attachments["medicamente.csv"] = temp_meds_backup
+                except:
+                    attachments["medicamente.csv"] = MEDS_FILE
 
-                succes, _ = trimite_email_cu_multiple_atasamente(
-                    destinatar=email_dest,
-                    subiect=f"💾 [Backup Zilnic Automat] HealthTrack Pro - {azi.strftime('%d.%m.%Y')}",
-                    mesaj=f"Salut!\n\nAcesta este backup-ul tău zilnic automat generat la data de {azi.strftime('%d.%m.%Y')}.\nSunt atașate fișierele CSV cu datele medicale (filtrate doar cu valori măsurate), schema de tratament și programările medicale.\n\nHealthTrack Pro System",
-                    file_paths_dict=attachments
-                )
-                if os.path.exists(temp_backup_file):
-                    os.remove(temp_backup_file)
-                if os.path.exists(temp_meds_backup):
-                    os.remove(temp_meds_backup)
-                if os.path.exists(temp_prog_backup):
-                    os.remove(temp_prog_backup)
+            temp_prog_backup = "temp_prog_backup.csv"
+            if os.path.exists(PROG_FILE):
+                try:
+                    df_p_temp = pd.read_csv(PROG_FILE)
+                    for col in df_p_temp.columns:
+                        df_p_temp[col] = df_p_temp[col].apply(lambda x: remove_diacritics(str(x)) if pd.notna(x) and str(x).strip() not in ["nan", "None", ""] else "")
+                    df_p_temp.columns = [remove_diacritics(c) for c in df_p_temp.columns]
+                    df_p_temp.to_csv(temp_prog_backup, index=False)
+                    attachments["programari_medicale.csv"] = temp_prog_backup
+                except:
+                    attachments["programari_medicale.csv"] = PROG_FILE
 
-                if succes:
-                    st.session_state.backup_trimis_sesiune = True
-                    with open(BACKUP_LOG_FILE, "w") as f:
-                        f.write(azi.strftime("%Y-%m-%d"))
-    except:
-        pass
+            succes, err_msg = trimite_email_cu_multiple_atasamente(
+                destinatar=email_sender,
+                subiect=f"💾 [Backup Zilnic Automat] HealthTrack Pro - {azi.strftime('%d.%m.%Y')}",
+                mesaj=f"Salut!\n\nAcesta este backup-ul tău zilnic automat generat la data de {azi.strftime('%d.%m.%Y')}.\nSunt atașate fișierele CSV.\n\nHealthTrack Pro System",
+                file_paths_dict=attachments
+            )
+            
+            # Curățare fișiere temporare
+            for f_tmp in [temp_backup_file, temp_meds_backup, temp_prog_backup]:
+                if os.path.exists(f_tmp):
+                    os.remove(f_tmp)
+
+            if succes:
+                with open(BACKUP_LOG_FILE, "w") as f:
+                    f.write(azi.strftime("%Y-%m-%d"))
+                print("Backup auto trimis cu succes!")
+            else:
+                print(f"Erore trimitere backup auto: {err_msg}")
+    except Exception as e:
+        print(f"Erore critică în verifica_si_fa_backup_automat: {e}")
 
 # ==========================================
 # SESSION STATE INITIALIZATION & PERSISTENȚĂ LOGARE
@@ -512,8 +516,7 @@ if not st.session_state.logged_in:
                 if user_data and user_data["pass"] == password:
                     st.session_state.logged_in = True
                     st.session_state.user = username
-                    # Forțăm trimiterea backup-ului la logare (considerând că e prima oară azi)
-                    verifica_si_fa_backup_automat(forțează=True)
+                    verifica_si_fa_backup_automat()
                     trigger_rerun()
                 else:
                     st.error("Utilizator sau parolă incorectă!")
@@ -523,7 +526,7 @@ current_user_info = st.session_state.users.get(st.session_state.user, {"role": "
 current_role = current_user_info.get("role", "Membru")
 is_admin = current_role == "Administrator"
 
-verifica_si_fa_backup_automat(forțează=False)
+verifica_si_fa_backup_automat()
 
 # ==========================================
 # DATE MEDICALE (ORDINE CRONOLOGICĂ STRICTĂ)
@@ -1681,95 +1684,73 @@ with tab_dict["📄 Raport PDF"]:
         if not data_frame.empty:
             df_pdf_measured = data_frame.copy()
             if col_glic in df_pdf_measured.columns:
-                df_pdf_measured["G_num"] = pd.to_numeric(df_pdf_measured[col_glic], errors="coerce").fillna(0)
-                df_pdf_measured = df_pdf_measured[df_pdf_measured["G_num"] > 0].drop(columns=["G_num"])
+                df_pdf_measured["Glic_num"] = pd.to_numeric(df_pdf_measured[col_glic], errors="coerce").fillna(0)
+                df_pdf_measured = df_pdf_measured[df_pdf_measured["Glic_num"] > 0].drop(columns=["Glic_num"])
 
-            x_data = [f"{d.strftime('%d.%m')} ({m[:3]})" for d, m in zip(df_pdf_measured[date_col], df_pdf_measured[moment_col])]
-            moments_arr = df_pdf_measured[moment_col].tolist() if moment_col in df_pdf_measured.columns else [""] * len(df_pdf_measured)
-            
-            if include_glic and col_glic in df_pdf_measured.columns:
-                g_vals = pd.to_numeric(df_pdf_measured[col_glic], errors='coerce').fillna(0).tolist()
-                story.append(Paragraph("Evolutie Glicemie", styles["Heading2"]))
-                img_buf = generate_pdf_chart_glic(x_data, g_vals, moments_arr, "Glicemie (mg/dL)", "mg/dL", "#38bdf8")
-                story.append(Image(img_buf, width=480, height=170))
-                story.append(Spacer(1, 10))
-                
-            if include_ta and col_sis in df_pdf_measured.columns and col_dia in df_pdf_measured.columns:
-                s_vals = pd.to_numeric(df_pdf_measured[col_sis], errors='coerce').fillna(0).tolist()
-                d_vals = pd.to_numeric(df_pdf_measured[col_dia], errors='coerce').fillna(0).tolist()
-                story.append(Paragraph("Evolutie Tensiune Arteriala", styles["Heading2"]))
-                img_buf = generate_pdf_chart_ta(x_data, s_vals, d_vals, "Tensiune Arteriala (mmHg)")
-                story.append(Image(img_buf, width=480, height=170))
-                story.append(Spacer(1, 10))
-                
-            if include_puls and col_puls in df_pdf_measured.columns:
-                p_vals = pd.to_numeric(df_pdf_measured[col_puls], errors='coerce').fillna(0).tolist()
-                story.append(Paragraph("Evolutie Puls", styles["Heading2"]))
-                img_buf = generate_pdf_chart_puls(x_data, p_vals, "Puls (bpm)")
-                story.append(Image(img_buf, width=480, height=170))
-                story.append(Spacer(1, 10))
+            if not df_pdf_measured.empty:
+                x_labels = [f"{d.strftime('%d.%m')} ({m[:3]})" for d, m in zip(df_pdf_measured[date_col], df_pdf_measured[moment_col])]
 
-            if include_tables:
-                story.append(Paragraph("Date Tabelare si Observatii (Doar Inregistrari cu Valori)", styles["Heading2"]))
-                table_data = [["Data", "Moment", "Glic", "TA", "Puls", "Observatii"]]
-                
-                t_style = [
-                    ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#0284c7")),
-                    ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
-                    ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-                    ('ALIGN', (5,1), (5,-1), 'LEFT'),
-                    ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-                    ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-                    ('FONTSIZE', (0,0), (-1,0), 9),
-                    ('FONTSIZE', (0,1), (-1,-1), 8),
-                    ('TOPPADDING', (0,0), (-1,0), 7),
-                    ('BOTTOMPADDING', (0,0), (-1,0), 7),
-                    ('TOPPADDING', (0,1), (-1,-1), 6),
-                    ('BOTTOMPADDING', (0,1), (-1,-1), 6),
-                    ('LEFTPADDING', (0,0), (-1,-1), 6),
-                    ('RIGHTPADDING', (0,0), (-1,-1), 6),
-                    ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#cbd5e1")),
-                ]
-                
-                obs_style_pdf = ParagraphStyle(
-                    'ObsStylePDF',
-                    parent=styles['Normal'],
-                    fontName='Helvetica',
-                    fontSize=8,
-                    leading=11,
-                    textColor=colors.HexColor("#1e293b")
-                )
+                if include_glic and col_glic in df_pdf_measured.columns:
+                    g_vals = pd.to_numeric(df_pdf_measured[col_glic], errors="coerce").fillna(0).tolist()
+                    m_vals = df_pdf_measured[moment_col].tolist()
+                    chart_buf = generate_pdf_chart_glic(x_labels, g_vals, m_vals, "Evolutie Glicemie (mg/dL)", "mg/dL", "#0284c7")
+                    story.append(Image(chart_buf, width=480, height=170))
+                    story.append(Spacer(1, 10))
 
-                for _, row in df_pdf_measured.iterrows():
-                    d_s = row[date_col].strftime("%d.%m.%Y") if pd.notna(row[date_col]) else ""
-                    m_s = str(row.get(moment_col, ""))
-                    g_s = str(int(row[col_glic])) if pd.notna(row.get(col_glic)) and float(row.get(col_glic, 0)) > 0 else ""
+                if include_ta and col_sis in df_pdf_measured.columns and col_dia in df_pdf_measured.columns:
+                    s_vals = pd.to_numeric(df_pdf_measured[col_sis], errors="coerce").fillna(0).tolist()
+                    d_vals = pd.to_numeric(df_pdf_measured[col_dia], errors="coerce").fillna(0).tolist()
+                    chart_buf_ta = generate_pdf_chart_ta(x_labels, s_vals, d_vals, "Evolutie Tensiune Arteriala (mmHg)")
+                    story.append(Image(chart_buf_ta, width=480, height=170))
+                    story.append(Spacer(1, 10))
+
+                if include_puls and col_puls in df_pdf_measured.columns:
+                    p_vals = pd.to_numeric(df_pdf_measured[col_puls], errors="coerce").fillna(0).tolist()
+                    chart_buf_p = generate_pdf_chart_puls(x_labels, p_vals, "Evolutie Puls (bpm)")
+                    story.append(Image(chart_buf_p, width=480, height=170))
+                    story.append(Spacer(1, 10))
+
+                if include_tables:
+                    story.append(Spacer(1, 10))
+                    story.append(Paragraph("<b>Tabel Centralizator Inregistrari Masurate</b>", styles["Heading3"]))
+                    story.append(Spacer(1, 5))
                     
-                    s_v = float(row.get(col_sis, 0) or 0)
-                    d_v = float(row.get(col_dia, 0) or 0)
-                    ta_s = f"{int(s_v)}/{int(d_v)}" if s_v > 0 and d_v > 0 else ""
+                    table_data = [["Data", "Moment", "Glic.", "Sist.", "Diast.", "Puls", "Observatii"]]
+                    for _, row in df_pdf_measured.iterrows():
+                        d_str = row[date_col].strftime("%d.%m.%Y") if pd.notna(row[date_col]) else ""
+                        m_str = remove_diacritics(str(row.get(moment_col, "")))
+                        g_str = str(int(row[col_glic])) if pd.notna(row.get(col_glic)) and float(row.get(col_glic, 0)) > 0 else ""
+                        s_str = str(int(row[col_sis])) if pd.notna(row.get(col_sis)) and float(row.get(col_sis, 0)) > 0 else ""
+                        di_str = str(int(row[col_dia])) if pd.notna(row.get(col_dia)) and float(row.get(col_dia, 0)) > 0 else ""
+                        p_str = str(int(row[col_puls])) if pd.notna(row.get(col_puls)) and float(row.get(col_puls, 0)) > 0 else ""
+                        o_str = remove_diacritics(clean_obs(row.get(col_obs, "")))
+                        table_data.append([d_str, m_str, g_str, s_str, di_str, p_str, o_str])
                     
-                    p_s = str(int(row[col_puls])) if pd.notna(row.get(col_puls)) and float(row.get(col_puls, 0)) > 0 else ""
-                    o_s = remove_diacritics(clean_obs(row.get(col_obs, "")))
-                    
-                    table_data.append([d_s, m_s, g_s, ta_s, p_s, Paragraph(o_s, obs_style_pdf)])
-
-                t = Table(table_data, colWidths=[55, 105, 35, 55, 35, 195])
-                t.setStyle(TableStyle(t_style))
-                story.append(t)
+                    t = Table(table_data, colWidths=[60, 110, 40, 40, 40, 40, 150])
+                    t.setStyle(TableStyle([
+                        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#1e3a8a")),
+                        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                        ('FONTSIZE', (0, 0), (-1, 0), 8),
+                        ('BOTTOMPADDING', (0, 0), (-1, 0), 5),
+                        ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor("#f8fafc")),
+                        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
+                        ('FONTSIZE', (0, 1), (-1, -1), 7),
+                        ('TEXTCOLOR', (0, 1), (-1, -1), colors.HexColor("#0f172a")),
+                    ]))
+                    story.append(t)
 
         doc.build(story)
         buffer.seek(0)
-        return buffer
+        return buffer.getvalue()
 
-    if not view_df.empty:
-        pdf_file = make_pdf_report(view_df, opt_glic, opt_ta, opt_puls, opt_tabele)
+    if st.button("📄 Generează și Descarcă Raportul PDF", type="primary"):
+        pdf_bytes = make_pdf_report(view_df, opt_glic, opt_ta, opt_puls, opt_tabele)
         st.download_button(
-            label="📥 Descarcă Raportul Medical PDF",
-            data=pdf_file,
-            file_name=f"Raport_Medical_HealthTrack_{datetime.now().strftime('%d_%m_%Y')}.pdf",
+            label="📥 Descarcă Fișierul PDF Generat",
+            data=pdf_bytes,
+            file_name=f"raport_medical_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
             mime="application/pdf",
             use_container_width=True
         )
-    else:
-        st.warning("Nu există date suficiente pentru generarea raportului PDF.")

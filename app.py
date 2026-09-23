@@ -1768,35 +1768,40 @@ with tab_dict["📄 Raport PDF"]:
 
     if st.button("📄 Generează Raportul PDF", type="primary", use_container_width=True):
         pdf_bytes = make_pdf_report(view_df, opt_glic, opt_ta, opt_puls, opt_tabele)
+        st.session_state["pdf_bytes"] = pdf_bytes
+
+    if "pdf_bytes" in st.session_state:
+        pdf_bytes = st.session_state["pdf_bytes"]
         b64_pdf = base64.b64encode(pdf_bytes).decode("utf-8")
+        pdf_filename = f"Raport_Medical_{datetime.now().strftime('%d_%m_%Y')}.pdf"
         
+        st.markdown("<br>", unsafe_allow_html=True)
         st.success("✅ Raportul PDF a fost generat cu succes!")
         
-        # Link HTML cu target="_blank" pentru a se deschide într-un tab nou fără să blocheze aplicația pe telefon
-        pdf_html = f'''
-            <a href="data:application/pdf;base64,{b64_pdf}" target="_blank" style="
-                display: block;
-                text-align: center;
-                background-color: #0284c7;
-                color: white;
-                padding: 14px 20px;
-                border-radius: 8px;
-                text-decoration: none;
-                font-weight: bold;
-                font-size: 16px;
-                margin-top: 10px;
-                margin-bottom: 12px;
-                box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-            ">
-                🔗 Deschide Raportul PDF în Tab Nou 📄
-            </a>
-        '''
-        st.markdown(pdf_html, unsafe_allow_html=True)
-        
+        # 1. Buton de descărcare directă în folderul Downloads
         st.download_button(
-            label="📥 Descarcă Fișierul PDF pe Dispozitiv",
+            label="📥 Descarcă PDF în Downloads (Direct)",
             data=pdf_bytes,
-            file_name=f"Raport_Medical_{datetime.now().strftime('%Y-%m-%d')}.pdf",
+            file_name=pdf_filename,
             mime="application/pdf",
             use_container_width=True
         )
+        
+        # 2. Link HTML pentru deschidere sau vizualizare curată în tab nou (fără a rupe starea aplicației)
+        href_tab = f'''
+        <div style="text-align: center; margin-top: 10px;">
+            <a href="data:application/pdf;base64,{b64_pdf}" target="_blank" style="
+                background-color: #0284c7; 
+                color: white; 
+                padding: 10px 20px; 
+                border-radius: 8px; 
+                text-decoration: none; 
+                font-weight: bold; 
+                display: block; 
+                text-align: center;
+            ">
+                🌐 Deschide / Vizualizează PDF în Tab Nou
+            </a>
+        </div>
+        '''
+        st.markdown(href_tab, unsafe_allow_html=True)

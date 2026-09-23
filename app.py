@@ -507,7 +507,6 @@ if not st.session_state.logged_in:
                 if user_data and user_data["pass"] == password:
                     st.session_state.logged_in = True
                     st.session_state.user = username
-                    # Apel garantat la prima logare pe o zi nouă
                     verifica_si_fa_backup_automat()
                     trigger_rerun()
                 else:
@@ -518,7 +517,6 @@ current_user_info = st.session_state.users.get(st.session_state.user, {"role": "
 current_role = current_user_info.get("role", "Membru")
 is_admin = current_role == "Administrator"
 
-# Verificare suplimentară la rulări ulterioare în aceeași sesiune
 verifica_si_fa_backup_automat()
 
 # ==========================================
@@ -1541,14 +1539,15 @@ with tab_dict["📄 Raport PDF"]:
 
     col_opt1, col_opt2 = st.columns(2)
     with col_opt1:
-        opt_glic = st.checkbox("Include Grafic Glicemie 🩸", value=True, key="opt_glic_pdf")
-        opt_ta = st.checkbox("Include Grafic Tensiune Arterială 🫀", value=True, key="opt_ta_pdf")
+        opt_glic = st.checkbox("Include Grafic Glicemie 🩸", value=True)
+        opt_ta = st.checkbox("Include Grafic Tensiune Arterială 🫀", value=True)
     with col_opt2:
-        opt_puls = st.checkbox("Include Grafic Puls 💓", value=True, key="opt_puls_pdf")
-        opt_tabele = st.checkbox("Include Tabelul Centralizator (Curat, Doar Valori Măsurate) 📋", value=True, key="opt_tab_pdf")
+        opt_puls = st.checkbox("Include Grafic Puls 💓", value=True)
+        opt_tabele = st.checkbox("Include Tabelul Centralizator (Curat, Doar Valori Măsurate) 📋", value=True)
 
     def generate_pdf_chart_glic(x_vals, y_vals, moments_list, title, ylabel, color_hex):
         plt.figure(figsize=(9.5, 3.4))
+        
         for i in range(len(y_vals) - 1):
             x_seg = [x_vals[i], x_vals[i+1]]
             y_seg = [y_vals[i], y_vals[i+1]]
@@ -1566,6 +1565,7 @@ with tab_dict["📄 Raport PDF"]:
         
         max_y = max(y_vals) if y_vals and max(y_vals) > 0 else 200
         plt.ylim(0, max(max_y * 1.25, 220))
+
         plt.title(title + " | Legenda: Albastru = Normal, Rosu = Spike / Afara pragului", fontsize=9.5, fontweight="bold", color="#1e3a8a", pad=15)
         plt.ylabel(ylabel, fontsize=9, fontweight="bold")
         plt.xticks(rotation=35, fontsize=7.5, ha="right")
@@ -1581,6 +1581,7 @@ with tab_dict["📄 Raport PDF"]:
 
     def generate_pdf_chart_ta(x_vals, sis_vals, dia_vals, title):
         plt.figure(figsize=(9.5, 3.4))
+        
         for i in range(len(sis_vals) - 1):
             x_seg = [x_vals[i], x_vals[i+1]]
             s_seg = [sis_vals[i], sis_vals[i+1]]
@@ -1610,6 +1611,7 @@ with tab_dict["📄 Raport PDF"]:
         all_ta = [s for s in sis_vals if s > 0] + [d for d in dia_vals if d > 0]
         max_t = max(all_ta) if all_ta else 180
         plt.ylim(0, max(max_t * 1.25, 200))
+
         plt.title(title + " | Legenda: Albastru = Sistolica, Galben = Diastolica, Rosu = Crescuta", fontsize=9.5, fontweight="bold", color="#1e3a8a", pad=15)
         plt.ylabel("mmHg", fontsize=9, fontweight="bold")
         plt.xticks(rotation=35, fontsize=7.5, ha="right")
@@ -1625,6 +1627,7 @@ with tab_dict["📄 Raport PDF"]:
 
     def generate_pdf_chart_puls(x_vals, puls_vals, title):
         plt.figure(figsize=(9.5, 3.4))
+        
         for i in range(len(puls_vals) - 1):
             x_seg = [x_vals[i], x_vals[i+1]]
             p_seg = [puls_vals[i], puls_vals[i+1]]
@@ -1642,6 +1645,7 @@ with tab_dict["📄 Raport PDF"]:
                 
         max_p = max(puls_vals) if puls_vals and max(puls_vals) > 0 else 100
         plt.ylim(30, max(max_p * 1.25, 140))
+
         plt.title(title + " | Legenda: Verde = Normal (60-100), Rosu = Afara intervalului", fontsize=9.5, fontweight="bold", color="#1e3a8a", pad=15)
         plt.ylabel("bpm", fontsize=9, fontweight="bold")
         plt.xticks(rotation=35, fontsize=7.5, ha="right")
@@ -1754,28 +1758,29 @@ with tab_dict["📄 Raport PDF"]:
                     else:
                         t_style.append(('BACKGROUND', (0, r_idx), (-1, r_idx), colors.HexColor("#ffffff")))
                     
+                    ev_g = evaluate_glic(glic_v, mm)
+                    if "🟢" in ev_g: t_style.append(('TEXTCOLOR', (2, r_idx), (2, r_idx), colors.HexColor("#16a34a")))
+                    elif "🔴" in ev_g: t_style.append(('TEXTCOLOR', (2, r_idx), (2, r_idx), colors.HexColor("#dc2626")))
+                    
+                    ev_ta = evaluate_ta(sis_val=sis_v, dia_val=dia_v)
+                    if "🟢" in ev_ta: t_style.append(('TEXTCOLOR', (3, r_idx), (3, r_idx), colors.HexColor("#16a34a")))
+                    elif "🔴" in ev_ta: t_style.append(('TEXTCOLOR', (3, r_idx), (3, r_idx), colors.HexColor("#dc2626")))
+                    
                     r_idx += 1
 
-                t_obj = Table(table_data, colWidths=[60, 90, 45, 60, 40, 185])
-                t_obj.setStyle(TableStyle(t_style))
-                story.append(t_obj)
+                t = Table(table_data, colWidths=[60, 110, 45, 60, 45, 160])
+                t.setStyle(TableStyle(t_style))
+                story.append(t)
 
         doc.build(story)
         buffer.seek(0)
-        return buffer.getvalue()
+        return buffer
 
-    # Buton de generare și download direct (fără preview care blochează aplicația)
-    if st.button("⚙️ Generează Fișierul PDF", type="primary"):
-        with st.spinner("Se generează raportul PDF..."):
-            pdf_bytes = make_pdf_report(view_df, opt_glic, opt_ta, opt_puls, opt_tabele)
-            st.session_state["pdf_bytes"] = pdf_bytes
-            st.success("Raportul PDF a fost generat cu succes!")
-
-    if "pdf_bytes" in st.session_state:
-        st.download_button(
-            label="📥 Descarcă Raportul PDF (Direct în Calculator)",
-            data=st.session_state["pdf_bytes"],
-            file_name=f"Raport_Medical_{datetime.now().strftime('%d_%m_%Y')}.pdf",
-            mime="application/pdf",
-            use_container_width=True
-        )
+    pdf_buffer = make_pdf_report(view_df, opt_glic, opt_ta, opt_puls, opt_tabele)
+    st.download_button(
+        label="📥 Descarcă Raportul PDF Medical",
+        data=pdf_buffer,
+        file_name=f"Raport_Medical_{datetime.now().strftime('%d_%m_%Y')}.pdf",
+        mime="application/pdf",
+        use_container_width=True
+    )

@@ -490,21 +490,6 @@ if "settings" not in st.session_state:
 # ==========================================
 # DECLANȘATOR EXTERN PENTRU BACKUP AUTOMAT ZILNIC (fără autentificare)
 # ==========================================
-# PROBLEMĂ REZOLVATĂ: backup-ul automat rula DOAR când cineva deschidea
-# manual aplicația și se autentifica — dacă nu intra nimeni într-o zi,
-# nu se trimitea niciun email, pentru că acest cod Streamlit nu rulează
-# de la sine la o oră fixă (nu există un "ceas" intern).
-#
-# Acest bloc permite unui serviciu extern GRATUIT de tip cron (ex:
-# cron-job.org, EasyCron, sau un GitHub Actions programat) să "trezească"
-# aplicația o dată pe zi și să declanșeze backup-ul, FĂRĂ să fie nevoie de
-# login manual. Configurează serviciul extern să acceseze (GET), o dată pe
-# zi, adresa:
-#
-#   https://<adresa-ta-streamlit>/?backup_trigger=SCHIMBA-ACEST-COD-SECRET
-#
-# ⚠️ Schimbă valoarea de mai jos cu un cod secret al tău (orice text greu
-# de ghicit), altfel oricine ar putea declanșa manual backup-ul.
 BACKUP_TRIGGER_SECRET = "schimba-acest-cod-secret-1234"
 
 if st.query_params.get("backup_trigger") == BACKUP_TRIGGER_SECRET:
@@ -1496,7 +1481,6 @@ with tab_dict["⚙️ Setări"]:
         st.markdown("<small>💡 *Notă: Nu folosi parola ta principală Apple ID. Generează o App-Specific Password din portalul tău Apple ID.*</small>", unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
 
-        # Stare backup automat: ultima reușită / ultima eroare
         if os.path.exists(BACKUP_LOG_FILE):
             try:
                 with open(BACKUP_LOG_FILE, "r") as f:
@@ -1774,84 +1758,42 @@ with tab_dict["📄 Raport PDF"]:
                     ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
                     ('FONTSIZE', (0,0), (-1,0), 9),
                     ('FONTSIZE', (0,1), (-1,-1), 8),
-                    ('TOPPADDING', (0,0), (-1,0), 7),
-                    ('BOTTOMPADDING', (0,0), (-1,0), 7),
-                    ('TOPPADDING', (0,1), (-1,-1), 6),
-                    ('BOTTOMPADDING', (0,1), (-1,-1), 6),
-                    ('LEFTPADDING', (0,0), (-1,-1), 6),
-                    ('RIGHTPADDING', (0,0), (-1,-1), 6),
-                    ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#cbd5e1")),
+                    ('TOPPADDING', (0,0), (-1,-1), 4),
+                    ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+                    ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#cbd5e1"))
                 ]
-                
-                obs_style_pdf = ParagraphStyle(
-                    'ObsStylePDF',
-                    parent=styles['Normal'],
-                    fontName='Helvetica',
-                    fontSize=8,
-                    leading=11,
-                    textColor=colors.HexColor("#1e293b")
-                )
 
-                r_idx = 1
-                for _, row in df_pdf_measured.iterrows():
-                    dt_str = row[date_col].strftime("%d.%m.%Y")
-                    mm = remove_diacritics(str(row.get(moment_col, "")))
-                    obs_val = clean_obs(row.get(col_obs, ""))
-                    obs_str = remove_diacritics(obs_val)
+                for idx, row in df_pdf_measured.iterrows():
+                    g_v = row.get(col_glic, 0)
+                    s_v = row.get(col_sis, 0)
+                    d_v = row.get(col_dia, 0)
+                    p_v = row.get(col_puls, 0)
                     
-                    obs_paragraph = Paragraph(obs_str, obs_style_pdf)
+                    g_str = str(int(float(g_v))) if pd.notna(g_v) and float(g_v or 0) > 0 else ""
+                    ta_str = f"{int(float(s_v))}/{int(float(d_v))}" if pd.notna(s_v) and pd.notna(d_v) and float(s_v or 0) > 0 and float(d_v or 0) > 0 else ""
+                    p_str = str(int(float(p_v))) if pd.notna(p_v) and float(p_v or 0) > 0 else ""
                     
-                    glic_v = row.get(col_glic, 0)
-                    sis_v = row.get(col_sis, 0)
-                    dia_v = row.get(col_dia, 0)
-                    puls_v = row.get(col_puls, 0)
-                    
-                    g_str = str(int(glic_v)) if pd.notna(glic_v) and float(glic_v)>0 else ""
-                    ta_str = f"{int(sis_v)}/{int(dia_v)}" if pd.notna(sis_v) and float(sis_v)>0 else ""
-                    p_str = str(int(puls_v)) if pd.notna(puls_v) and float(puls_v)>0 else ""
-                    
-                    table_data.append([dt_str, mm, g_str, ta_str, p_str, obs_paragraph])
-                    
-                    if r_idx % 2 == 0:
-                        t_style.append(('BACKGROUND', (0, r_idx), (-1, r_idx), colors.HexColor("#f8fafc")))
-                    else:
-                        t_style.append(('BACKGROUND', (0, r_idx), (-1, r_idx), colors.HexColor("#ffffff")))
-                    
-                    ev_g = evaluate_glic(glic_v, mm)
-                    if "🟢" in ev_g: t_style.append(('TEXTCOLOR', (2, r_idx), (2, r_idx), colors.HexColor("#16a34a")))
-                    elif "🔴" in ev_g: t_style.append(('TEXTCOLOR', (2, r_idx), (2, r_idx), colors.HexColor("#dc2626")))
-                    
-                    ev_ta = evaluate_ta(sis_val=sis_v, dia_val=dia_v)
-                    if "🟢" in ev_ta: t_style.append(('TEXTCOLOR', (3, r_idx), (3, r_idx), colors.HexColor("#16a34a")))
-                    elif "🔴" in ev_ta: t_style.append(('TEXTCOLOR', (3, r_idx), (3, r_idx), colors.HexColor("#dc2626")))
-                    
-                    ev_p = evaluate_puls(puls_v)
-                    if "🟢" in ev_p: t_style.append(('TEXTCOLOR', (4, r_idx), (4, r_idx), colors.HexColor("#16a34a")))
-                    elif "🔴" in ev_p: t_style.append(('TEXTCOLOR', (4, r_idx), (4, r_idx), colors.HexColor("#dc2626")))
-                    
-                    r_idx += 1
-                
-                t = Table(table_data, colWidths=[65, 115, 40, 55, 40, 200], repeatRows=1)
-                t.setStyle(TableStyle(t_style))
-                story.append(t)
-        else:
-            story.append(Paragraph("Nu exista date pentru perioada selectata.", styles["Normal"]))
+                    if g_str or ta_str or p_str:
+                        d_fmt = parse_flexible_date(row[date_col]).strftime('%d.%m.%Y') if pd.notna(row[date_col]) else ""
+                        m_fmt = remove_diacritics(str(row.get(moment_col, "")))
+                        obs_fmt = remove_diacritics(clean_obs(str(row.get(col_obs, ""))))
+                        table_data.append([d_fmt, m_fmt, g_str, ta_str, p_str, obs_fmt])
+
+                if len(table_data) > 1:
+                    t = Table(table_data, colWidths=[55, 110, 40, 55, 35, 185])
+                    t.setStyle(TableStyle(t_style))
+                    story.append(t)
 
         doc.build(story)
         buffer.seek(0)
         return buffer
 
-    if st.button("Crează Raport PDF", type="primary"):
-        pdf_buffer = make_pdf_report(view_df, opt_glic, opt_ta, opt_puls, opt_tabele)
-        file_name = f"Raport_Medical_{filtru_luni_str.replace(', ', '_')}.pdf"
-        
-        b64_pdf = base64.b64encode(pdf_buffer.getvalue()).decode('utf-8')
-        href = f'''
-        <div style="text-align: center; margin-top: 15px;">
-            <a href="data:application/pdf;base64,{b64_pdf}" download="{file_name}" target="_blank" style="display:inline-block; padding: 14px 24px; background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); color: white; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
-                📥 Descarcă / Deschide Raport PDF (Fereastră Nouă)
-            </a>
-        </div>
-        '''
-        st.markdown(href, unsafe_allow_html=True)
-        st.success("✅ Raportul PDF a fost generat cu succes!")
+    if st.button("📥 Generează & Descarcă Raport PDF Complet", type="primary"):
+        pdf_file = make_pdf_report(view_df, opt_glic, opt_ta, opt_puls, opt_tabele)
+        st.download_button(
+            label="💾 Descarcă PDF Acum",
+            data=pdf_file,
+            file_name=f"Raport_Medical_{datetime.now().strftime('%d_%m_%Y')}.pdf",
+            mime="application/pdf",
+            use_container_width=True
+        )

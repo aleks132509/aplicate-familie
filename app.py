@@ -7,6 +7,7 @@ import time
 import unicodedata
 import base64
 from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 from email.message import EmailMessage
 import matplotlib
 
@@ -132,6 +133,14 @@ def trigger_rerun():
         st.rerun()
     else:
         st.experimental_rerun()
+
+# Fus orar folosit pentru toate datele/orele backup-ului.
+# Streamlit Cloud poate rula serverul în UTC, de aceea folosim explicit
+# ora României pentru ca ora afișată în aplicație să fie ora locală.
+APP_TIMEZONE = ZoneInfo("Europe/Bucharest")
+
+def now_local():
+    return datetime.now(APP_TIMEZONE)
 
 # ==========================================
 # GESTIONARE FIȘIERE PERSISTENTE & SETĂRI EMAIL
@@ -394,123 +403,274 @@ def trimite_email_cu_multiple_atasamente(destinatar, subiect, mesaj, file_paths_
                 
     return False, f"Erore trimitere iCloud (toate porturile au eșuat): {last_error}"
 
-def verifica_si_fa_backup_automat():
+def verifica_si_fa_backup_automat(force=False):
+    """
+    Trimite backup-ul automat.
+
+    force=False:
+        - pentru cron: trimite cel mult o dată pe zi;
+        - dacă backup-ul de azi există deja, nu îl retrimite.
+
+    force=True:
+        - folosit la PRIMA autentificare;
+        - ignoră faptul că există deja un backup trimis azi și trimite
+          din nou toate cele 3 fișiere.
+    """
+    temp_files = []
+
     try:
         email_dest = st.session_state.settings.get("email_sender", "").strip()
         if not email_dest:
-            return 
+            return False, "Adresa iCloud nu este configurată."
 
-        azi = datetime.now().date()
+        acum = now_local()
+        azi = acum.date()
+
+        # Verificarea "o dată pe zi" se aplică doar cronului.
+        # La prima logare, force=True și backup-ul se trimite indiferent
+        # dacă există deja un backup pentru ziua de azi.
         ultima_data = None
-        if os.path.exists(BACKUP_LOG_FILE):
+        if os.path.exists(BACKUP_LOG_FILE) and not force:
             try:
-                with open(BACKUP_LOG_FILE, "r") as f:
-                    ultima_data_str = f.read().strip()[:10]
-                    ultima_data = datetime.strptime(ultima_data_str, "%Y-%m-%d").date()
-            except:
-                pass
+                with open(BACKUP_LOG_FILE, "r", encoding="utf-8") as f:
+                    continut = f.read().strip()
+                # Format nou: YYYY-MM-DD HH:MM:SS (...)
+                m = re.match(r"^(\d{4}-\d{2}-\d{2})", continut)
+                if m:
+                    ultima_data = datetime.strptime(
+                        m.group(1), "%Y-%m-%d"
+                    ).date()
+            except Exception:
+                ultima_data = None
 
-        if ultima_data is None or ultima_data < azi:
-            df_cron = get_chronological_backup_df()
-            temp_backup_file = "temp_backup_cron.csv"
-            temp_meds_backup = "temp_meds_backup.csv"
-            temp_prog_backup = "temp_prog_backup.csv"
-            attachments = {}
-            fisiere_incluse = []
-            fisiere_lipsa = []
+        if not force and ultima_data == azi:
+            return True, "Backup-ul automat pentru azi există deja."
 
-            if not df_cron.empty:
-                df_cron.to_csv(temp_backup_file, index=False)
-                attachments["backup_date_medicale.csv"] = temp_backup_file
-                fisiere_incluse.append("backup_date_medicale.csv")
-            elif os.path.exists(DATA_FILE):
-                # Nicio măsurătoare procesată, dar fișierul brut există —
-                # îl trimitem oricum, neprocesat, ca să nu lipsească documentul.
-                try:
-                    df_raw = pd.read_csv(DATA_FILE)
-                    for col in df_raw.columns:
-                        df_raw[col] = df_raw[col].apply(lambda x: remove_diacritics(str(x)) if pd.notna(x) and str(x).strip() not in ["nan", "None", ""] else "")
-                    df_raw.columns = [remove_diacritics(c) for c in df_raw.columns]
-                    df_raw.to_csv(temp_backup_file, index=False)
-                    attachments["backup_date_medicale.csv"] = temp_backup_file
-                    fisiere_incluse.append("backup_date_medicale.csv (date brute, fără măsurători procesate)")
-                except:
-                    fisiere_lipsa.append("backup_date_medicale.csv (eroare la citirea fișierului brut)")
-            else:
-                fisiere_lipsa.append("backup_date_medicale.csv (fișierul nu există deloc)")
+        # ------------------------------------------------------------
+        # 1. DATE MEDICALE — întotdeauna pregătim primul fișier.
+        #    Chiar dacă azi nu s-a introdus nicio măsurătoare, trimitem
+        #    tot conținutul existent în DATA_FILE.
+        # ------------------------------------------------------------
+        temp_backup_file = "temp_backup_cron.csv"
+        temp_meds_backup = "temp_meds_backup.csv"
+        temp_prog_backup = "temp_prog_backup.csv"
 
-            if os.path.exists(MEDS_FILE):
-                try:
-                    df_m_temp = pd.read_csv(MEDS_FILE)
-                    for col in df_m_temp.columns:
-                        df_m_temp[col] = df_m_temp[col].apply(lambda x: remove_diacritics(str(x)) if pd.notna(x) and str(x).strip() not in ["nan", "None", ""] else "")
-                    df_m_temp.columns = [remove_diacritics(c) for c in df_m_temp.columns]
-                    df_m_temp.to_csv(temp_meds_backup, index=False)
-                    attachments["medicamente.csv"] = temp_meds_backup
-                    fisiere_incluse.append("medicamente.csv")
-                except:
-                    attachments["medicamente.csv"] = MEDS_FILE
-                    fisiere_incluse.append("medicamente.csv")
-            else:
-                fisiere_lipsa.append("medicamente.csv (fișierul nu există)")
+        attachments = {}
+        fisiere_incluse = []
+        fisiere_lipsa = []
 
-            if os.path.exists(PROG_FILE):
-                try:
-                    df_p_temp = pd.read_csv(PROG_FILE)
-                    for col in df_p_temp.columns:
-                        df_p_temp[col] = df_p_temp[col].apply(lambda x: remove_diacritics(str(x)) if pd.notna(x) and str(x).strip() not in ["nan", "None", ""] else "")
-                    df_p_temp.columns = [remove_diacritics(c) for c in df_p_temp.columns]
-                    df_p_temp.to_csv(temp_prog_backup, index=False)
-                    attachments["programari_medicale.csv"] = temp_prog_backup
-                    fisiere_incluse.append("programari_medicale.csv")
-                except:
-                    attachments["programari_medicale.csv"] = PROG_FILE
-                    fisiere_incluse.append("programari_medicale.csv")
-            else:
-                fisiere_lipsa.append("programari_medicale.csv (fișierul nu există)")
+        if os.path.exists(DATA_FILE):
+            try:
+                df_cron = get_chronological_backup_df()
 
-            if attachments:
-                mesaj_backup = (
-                    f"Salut!\n\nAcesta este backup-ul tău zilnic automat generat la data de {azi.strftime('%d.%m.%Y')}.\n\n"
-                    f"Fișiere incluse ({len(fisiere_incluse)}/3): {', '.join(fisiere_incluse)}\n"
-                )
-                if fisiere_lipsa:
-                    mesaj_backup += f"⚠️ Fișiere NEincluse: {', '.join(fisiere_lipsa)}\n"
-                mesaj_backup += "\nHealthTrack Pro System"
-
-                succes, _ = trimite_email_cu_multiple_atasamente(
-                    destinatar=email_dest,
-                    subiect=f"💾 [Backup Zilnic Automat] HealthTrack Pro - {azi.strftime('%d.%m.%Y')} ({len(fisiere_incluse)}/3 fișiere)",
-                    mesaj=mesaj_backup,
-                    file_paths_dict=attachments
-                )
-                if os.path.exists(temp_backup_file):
-                    os.remove(temp_backup_file)
-                if os.path.exists(temp_meds_backup):
-                    os.remove(temp_meds_backup)
-                if os.path.exists(temp_prog_backup):
-                    os.remove(temp_prog_backup)
-
-                if succes:
-                    with open(BACKUP_LOG_FILE, "w") as f:
-                        f.write(f"{azi.strftime('%Y-%m-%d')} {datetime.now().strftime('%H:%M')} ({len(fisiere_incluse)}/3 fișiere)")
-                    if fisiere_lipsa:
-                        with open(BACKUP_ERROR_LOG_FILE, "w") as f:
-                            f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} | Backup trimis, dar incomplet — lipsă: {', '.join(fisiere_lipsa)}")
-                    elif os.path.exists(BACKUP_ERROR_LOG_FILE):
-                        os.remove(BACKUP_ERROR_LOG_FILE)
+                if not df_cron.empty:
+                    df_cron.to_csv(temp_backup_file, index=False, encoding="utf-8-sig")
                 else:
-                    with open(BACKUP_ERROR_LOG_FILE, "w") as f:
-                        f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} | {_}")
-            else:
-                with open(BACKUP_ERROR_LOG_FILE, "w") as f:
-                    f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} | Nu există date de backup (df_cron gol).")
+                    # Important: dacă nu există măsurători în ziua curentă,
+                    # NU considerăm backup-ul gol. Trimitem toate datele
+                    # deja înregistrate în fișierul medical.
+                    df_raw = pd.read_csv(DATA_FILE)
+
+                    # Eliminăm doar coloane tehnice, dacă apar.
+                    for col in list(df_raw.columns):
+                        if str(col) in ("Dată_dt", "Moment_Cat"):
+                            df_raw = df_raw.drop(columns=[col])
+
+                    for col in df_raw.columns:
+                        df_raw[col] = df_raw[col].apply(
+                            lambda x: remove_diacritics(str(x))
+                            if pd.notna(x) and str(x).strip() not in ["nan", "None", ""]
+                            else ""
+                        )
+                    df_raw.columns = [remove_diacritics(c) for c in df_raw.columns]
+                    df_raw.to_csv(temp_backup_file, index=False, encoding="utf-8-sig")
+
+                attachments["backup_date_medicale.csv"] = temp_backup_file
+                temp_files.append(temp_backup_file)
+                fisiere_incluse.append("backup_date_medicale.csv")
+
+            except Exception as e:
+                fisiere_lipsa.append(
+                    f"backup_date_medicale.csv (eroare: {e})"
+                )
+        else:
+            # Dacă aplicația este instalată nou și fișierul nu există încă,
+            # creăm un CSV gol cu structura corectă, astfel încât emailul
+            # să conțină totuși toate cele 3 fișiere.
+            try:
+                pd.DataFrame(columns=[
+                    "Data", "Moment Zi", "Glicemie", "Sistolica",
+                    "Diastolica", "Puls", "Observatii"
+                ]).to_csv(
+                    temp_backup_file, index=False, encoding="utf-8-sig"
+                )
+                attachments["backup_date_medicale.csv"] = temp_backup_file
+                temp_files.append(temp_backup_file)
+                fisiere_incluse.append("backup_date_medicale.csv (gol — nu există încă înregistrări)")
+            except Exception as e:
+                fisiere_lipsa.append(
+                    f"backup_date_medicale.csv (nu a putut fi creat: {e})"
+                )
+
+        # ------------------------------------------------------------
+        # 2. MEDICAMENTE — trimis întotdeauna.
+        # ------------------------------------------------------------
+        if os.path.exists(MEDS_FILE):
+            try:
+                df_m_temp = pd.read_csv(MEDS_FILE)
+                for col in df_m_temp.columns:
+                    df_m_temp[col] = df_m_temp[col].apply(
+                        lambda x: remove_diacritics(str(x))
+                        if pd.notna(x) and str(x).strip() not in ["nan", "None", ""]
+                        else ""
+                    )
+                df_m_temp.columns = [remove_diacritics(c) for c in df_m_temp.columns]
+                df_m_temp.to_csv(temp_meds_backup, index=False, encoding="utf-8-sig")
+                attachments["medicamente.csv"] = temp_meds_backup
+                temp_files.append(temp_meds_backup)
+                fisiere_incluse.append("medicamente.csv")
+            except Exception:
+                attachments["medicamente.csv"] = MEDS_FILE
+                fisiere_incluse.append("medicamente.csv")
+        else:
+            try:
+                pd.DataFrame(
+                    columns=["Medicament", "Doza", "Orar / Frecventa", "Observatii"]
+                ).to_csv(temp_meds_backup, index=False, encoding="utf-8-sig")
+                attachments["medicamente.csv"] = temp_meds_backup
+                temp_files.append(temp_meds_backup)
+                fisiere_incluse.append("medicamente.csv (gol)")
+            except Exception as e:
+                fisiere_lipsa.append(f"medicamente.csv (nu a putut fi creat: {e})")
+
+        # ------------------------------------------------------------
+        # 3. PROGRAMĂRI MEDICALE — trimis întotdeauna.
+        # ------------------------------------------------------------
+        if os.path.exists(PROG_FILE):
+            try:
+                df_p_temp = pd.read_csv(PROG_FILE)
+                for col in df_p_temp.columns:
+                    df_p_temp[col] = df_p_temp[col].apply(
+                        lambda x: remove_diacritics(str(x))
+                        if pd.notna(x) and str(x).strip() not in ["nan", "None", ""]
+                        else ""
+                    )
+                df_p_temp.columns = [remove_diacritics(c) for c in df_p_temp.columns]
+                df_p_temp.to_csv(temp_prog_backup, index=False, encoding="utf-8-sig")
+                attachments["programari_medicale.csv"] = temp_prog_backup
+                temp_files.append(temp_prog_backup)
+                fisiere_incluse.append("programari_medicale.csv")
+            except Exception:
+                attachments["programari_medicale.csv"] = PROG_FILE
+                fisiere_incluse.append("programari_medicale.csv")
+        else:
+            try:
+                pd.DataFrame(
+                    columns=[
+                        "Data", "Ora", "Tip", "Clinica",
+                        "Zile_Alerta", "Efectuat", "Observatii"
+                    ]
+                ).to_csv(temp_prog_backup, index=False, encoding="utf-8-sig")
+                attachments["programari_medicale.csv"] = temp_prog_backup
+                temp_files.append(temp_prog_backup)
+                fisiere_incluse.append("programari_medicale.csv (gol)")
+            except Exception as e:
+                fisiere_lipsa.append(
+                    f"programari_medicale.csv (nu a putut fi creat: {e})"
+                )
+
+        # Dacă există măcar un fișier, trimitem emailul.
+        # În mod normal vor fi 3/3.
+        if attachments:
+            tip_backup = "prima logare" if force else "backup automat zilnic"
+
+            mesaj_backup = (
+                "Salut!\n\n"
+                f"Acesta este backup-ul HealthTrack Pro generat la "
+                f"{acum.strftime('%d.%m.%Y %H:%M:%S')} (ora României).\n\n"
+                f"Motiv: {tip_backup}.\n"
+                f"Fișiere incluse ({len(fisiere_incluse)}/3): "
+                f"{', '.join(fisiere_incluse)}\n"
+            )
+
+            if fisiere_lipsa:
+                mesaj_backup += (
+                    f"\n⚠️ Fișiere NEincluse: {', '.join(fisiere_lipsa)}\n"
+                )
+
+            mesaj_backup += (
+                "\nBackup-ul include ceea ce este înregistrat până în "
+                "momentul trimiterii; nu este necesar să existe o "
+                "măsurătoare introdusă în ziua curentă.\n\n"
+                "HealthTrack Pro System"
+            )
+
+            succes, mesaj_rezultat = trimite_email_cu_multiple_atasamente(
+                destinatar=email_dest,
+                subiect=(
+                    f"💾 [Backup {'Prima Logare' if force else 'Zilnic Automat'}] "
+                    f"HealthTrack Pro - {acum.strftime('%d.%m.%Y %H:%M:%S')} "
+                    f"({len(fisiere_incluse)}/3 fișiere)"
+                ),
+                mesaj=mesaj_backup,
+                file_paths_dict=attachments
+            )
+
+            if succes:
+                # Salvăm DATA + ORA completă. Interfața va afișa acum și ora.
+                with open(BACKUP_LOG_FILE, "w", encoding="utf-8") as f:
+                    f.write(
+                        f"{acum.strftime('%Y-%m-%d %H:%M:%S')} "
+                        f"({len(fisiere_incluse)}/3 fișiere)"
+                    )
+
+                if fisiere_lipsa:
+                    with open(BACKUP_ERROR_LOG_FILE, "w", encoding="utf-8") as f:
+                        f.write(
+                            f"{acum.strftime('%Y-%m-%d %H:%M:%S')} | "
+                            f"Backup trimis, dar incomplet — lipsă: "
+                            f"{', '.join(fisiere_lipsa)}"
+                        )
+                elif os.path.exists(BACKUP_ERROR_LOG_FILE):
+                    try:
+                        os.remove(BACKUP_ERROR_LOG_FILE)
+                    except Exception:
+                        pass
+
+                return True, mesaj_rezultat
+
+            with open(BACKUP_ERROR_LOG_FILE, "w", encoding="utf-8") as f:
+                f.write(
+                    f"{acum.strftime('%Y-%m-%d %H:%M:%S')} | "
+                    f"{mesaj_rezultat}"
+                )
+            return False, mesaj_rezultat
+
+        with open(BACKUP_ERROR_LOG_FILE, "w", encoding="utf-8") as f:
+            f.write(
+                f"{acum.strftime('%Y-%m-%d %H:%M:%S')} | "
+                "Nu a putut fi pregătit niciun fișier de backup."
+            )
+        return False, "Nu a putut fi pregătit niciun fișier de backup."
+
     except Exception as e:
         try:
-            with open(BACKUP_ERROR_LOG_FILE, "w") as f:
-                f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} | Eroare neașteptată: {e}")
-        except:
+            with open(BACKUP_ERROR_LOG_FILE, "w", encoding="utf-8") as f:
+                f.write(
+                    f"{now_local().strftime('%Y-%m-%d %H:%M:%S')} | "
+                    f"Eroare neașteptată: {e}"
+                )
+        except Exception:
             pass
+        return False, str(e)
+
+    finally:
+        for f in temp_files:
+            try:
+                if os.path.exists(f):
+                    os.remove(f)
+            except Exception:
+                pass
 
 # ==========================================
 # SESSION STATE INITIALIZATION & PERSISTENȚĂ LOGARE
@@ -588,7 +748,11 @@ if not st.session_state.logged_in:
                 if user_data and user_data["pass"] == password:
                     st.session_state.logged_in = True
                     st.session_state.user = username
-                    verifica_si_fa_backup_automat()
+
+                    # PRIMA LOGARE: trimite backup-ul chiar dacă există deja
+                    # un backup înregistrat pentru azi.
+                    verifica_si_fa_backup_automat(force=True)
+
                     trigger_rerun()
                 else:
                     st.error("Utilizator sau parolă incorectă!")
@@ -1638,7 +1802,7 @@ with tab_dict["⚙️ Setări"]:
 
                 if success_t:
                     with open(BACKUP_LOG_FILE, "w") as f:
-                        f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} ({len(fisiere_incluse)}/3 fișiere)")
+                        f.write(f"{now_local().strftime('%Y-%m-%d %H:%M:%S')} ({len(fisiere_incluse)}/3 fișiere)")
                     if fisiere_lipsa:
                         st.warning(f"⚠️ Emailul a fost trimis, dar INCOMPLET — {len(fisiere_incluse)}/3 fișiere. Lipsă: {', '.join(fisiere_lipsa)}")
                     else:

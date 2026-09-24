@@ -296,64 +296,116 @@ def get_chronological_backup_df():
     if not os.path.exists(DATA_FILE):
         return pd.DataFrame()
     try:
-        df_b = pd.read_csv(DATA_FILE)
-        date_col_name = 'Data' if 'Data' in df_b.columns else 'Dată'
-        moment_col_name = 'Moment Zi' if 'Moment Zi' in df_b.columns else 'Moment Zi'
-        glic_col_name = 'Glicemie'
-        sis_col_name = 'Sistolică' if 'Sistolică' in df_b.columns else 'Sistolica'
-        dia_col_name = 'Diastolică' if 'Diastolică' in df_b.columns else 'Diastolica'
-        puls_col_name = 'Puls'
-        obs_col_name = 'Observații' if 'Observații' in df_b.columns else 'Observatii'
-
-        if date_col_name in df_b.columns:
-            df_b["Dată_dt"] = parse_flexible_date(df_b[date_col_name])
-            df_b["Moment_Cat"] = pd.Categorical(df_b[moment_col_name], categories=moment_order, ordered=True)
-            df_b = df_b.dropna(subset=["Dată_dt"]).sort_values(by=["Dată_dt", "Moment_Cat"]).drop(columns=["Dată_dt", "Moment_Cat"])
-        
-        # Include un rând dacă are ORICE măsurătoare reală (glicemie, tensiune SAU puls),
-        # nu doar dacă are glicemie — altfel rândurile cu doar tensiune/puls erau
-        # eliminate complet, iar backup-ul nu se mai trimitea deloc.
-        cols_masuratori = [c for c in [glic_col_name, sis_col_name, dia_col_name, puls_col_name] if c in df_b.columns]
-        if cols_masuratori:
-            mask_are_date = pd.Series(False, index=df_b.index)
-            for c in cols_masuratori:
-                mask_are_date = mask_are_date | (pd.to_numeric(df_b[c], errors="coerce").fillna(0) > 0)
-            df_b = df_b[mask_are_date]
-
-        df_all = df_b.copy()
-        if date_col_name in df_all.columns:
-            df_all[date_col_name] = parse_flexible_date(df_all[date_col_name]).dt.strftime("%d.%m.%Y")
-        
-        if glic_col_name in df_all.columns:
-            df_all["St. Glicemie"] = df_all.apply(lambda r: evaluate_glic(r[glic_col_name], r[moment_col_name]), axis=1)
-            df_all[glic_col_name] = format_table_column(df_all[glic_col_name])
-        
-        if sis_col_name in df_all.columns and dia_col_name in df_all.columns:
-            df_all["St. Tensiune"] = df_all.apply(lambda r: evaluate_ta(r[sis_col_name], r[dia_col_name]), axis=1)
-            df_all[sis_col_name] = format_table_column(df_all[sis_col_name])
-            df_all[dia_col_name] = format_table_column(df_all[dia_col_name])
-        
-        if puls_col_name in df_all.columns:
-            df_all["St. Puls"] = df_all[puls_col_name].apply(evaluate_puls)
-            df_all[puls_col_name] = format_table_column(df_all[puls_col_name])
-        
-        if obs_col_name in df_all.columns:
-            df_all[obs_col_name] = df_all[obs_col_name].apply(clean_obs)
-        
-        if 'Luna_An' in df_all.columns:
-            df_all = df_all.drop(columns=['Luna_An'])
-
-        cols_order_all = [date_col_name, moment_col_name, glic_col_name, "St. Glicemie", sis_col_name, dia_col_name, "St. Tensiune", puls_col_name, "St. Puls", obs_col_name]
-        existing_cols_all = [c for c in cols_order_all if c in df_all.columns]
-        df_all = df_all[existing_cols_all]
-
-        for col in df_all.columns:
-            df_all[col] = df_all[col].apply(lambda x: remove_diacritics(str(x)) if pd.notna(x) and str(x).strip() not in ["nan", "None", ""] else "")
-        
-        df_all.columns = [remove_diacritics(c) for c in df_all.columns]
-        return df_all
-    except:
+        return _build_chronological_backup_from_df(pd.read_csv(DATA_FILE))
+    except Exception:
         return pd.DataFrame()
+
+
+def pregateste_backup_date_medicale_csv(cale_fisier):
+    """
+    Creeaza EXACT acelasi CSV medical pentru backup-ul automat si pentru
+    butonul "Forteaza Trimite Backup". Contine aceleasi coloane, aceleasi
+    statusuri cu buline 🟢/🔴 si aceeasi ordine cronologica.
+
+    Returneaza (True, descriere) daca fisierul a fost creat. Chiar daca
+    pentru ziua curenta nu exista nicio inregistrare, sunt folosite toate
+    datele medicale existente in DATA_FILE.
+    """
+    try:
+        df_backup = get_chronological_backup_df()
+
+        if df_backup.empty and os.path.exists(DATA_FILE):
+            # Nu exista masuratori procesate -> citim toate datele existente.
+            # Incercam sa pastram acelasi format chiar si cand fisierul contine
+            # doar inregistrari vechi sau valori partiale.
+            df_raw = pd.read_csv(DATA_FILE)
+            if not df_raw.empty:
+                # Refacem formatul cronologic/statusurile folosind temporar
+                # aceeasi functie, astfel incat cele doua tipuri de backup sa
+                # nu mai poata produce formate diferite.
+                df_backup = _build_chronological_backup_from_df(df_raw)
+
+        if df_backup.empty:
+            # Fisierul exista, dar nu are inca masuratori reale.
+            # Pastram totusi structura standard a backupului.
+            df_backup = pd.DataFrame(columns=[
+                "Data", "Moment Zi", "Glicemie", "St Glicemie",
+                "Sistolica", "Diastolica", "St Tensiune",
+                "Puls", "St Puls", "Observatii"
+            ])
+
+        df_backup.to_csv(cale_fisier, index=False, encoding="utf-8-sig")
+        return True, "backup_date_medicale.csv"
+    except Exception as e:
+        return False, str(e)
+
+
+def _build_chronological_backup_from_df(df_b):
+    """Construieste formatul standard al CSV-ului medical dintr-un DataFrame."""
+    df_b = df_b.copy()
+    date_col_name = 'Data' if 'Data' in df_b.columns else 'Dată'
+    moment_col_name = 'Moment Zi'
+    glic_col_name = 'Glicemie'
+    sis_col_name = 'Sistolică' if 'Sistolică' in df_b.columns else 'Sistolica'
+    dia_col_name = 'Diastolică' if 'Diastolică' in df_b.columns else 'Diastolica'
+    puls_col_name = 'Puls'
+    obs_col_name = 'Observații' if 'Observații' in df_b.columns else 'Observatii'
+
+    if date_col_name in df_b.columns:
+        df_b["Dată_dt"] = parse_flexible_date(df_b[date_col_name])
+        if moment_col_name in df_b.columns:
+            df_b["Moment_Cat"] = pd.Categorical(
+                df_b[moment_col_name], categories=moment_order, ordered=True
+            )
+            df_b = df_b.dropna(subset=["Dată_dt"]).sort_values(
+                by=["Dată_dt", "Moment_Cat"]
+            ).drop(columns=["Dată_dt", "Moment_Cat"])
+        else:
+            df_b = df_b.dropna(subset=["Dată_dt"]).sort_values(by=["Dată_dt"]).drop(columns=["Dată_dt"])
+
+    cols_masuratori = [c for c in [glic_col_name, sis_col_name, dia_col_name, puls_col_name] if c in df_b.columns]
+    if cols_masuratori:
+        mask_are_date = pd.Series(False, index=df_b.index)
+        for c in cols_masuratori:
+            mask_are_date = mask_are_date | (pd.to_numeric(df_b[c], errors="coerce").fillna(0) > 0)
+        df_b = df_b[mask_are_date]
+
+    df_all = df_b.copy()
+    if date_col_name in df_all.columns:
+        df_all[date_col_name] = parse_flexible_date(df_all[date_col_name]).dt.strftime("%d.%m.%Y")
+
+    if glic_col_name in df_all.columns and moment_col_name in df_all.columns:
+        df_all["St. Glicemie"] = df_all.apply(lambda r: evaluate_glic(r[glic_col_name], r[moment_col_name]), axis=1)
+        df_all[glic_col_name] = format_table_column(df_all[glic_col_name])
+    if sis_col_name in df_all.columns and dia_col_name in df_all.columns:
+        df_all["St. Tensiune"] = df_all.apply(lambda r: evaluate_ta(r[sis_col_name], r[dia_col_name]), axis=1)
+        df_all[sis_col_name] = format_table_column(df_all[sis_col_name])
+        df_all[dia_col_name] = format_table_column(df_all[dia_col_name])
+    if puls_col_name in df_all.columns:
+        df_all["St. Puls"] = df_all[puls_col_name].apply(evaluate_puls)
+        df_all[puls_col_name] = format_table_column(df_all[puls_col_name])
+    if obs_col_name in df_all.columns:
+        df_all[obs_col_name] = df_all[obs_col_name].apply(clean_obs)
+
+    if 'Luna_An' in df_all.columns:
+        df_all = df_all.drop(columns=['Luna_An'])
+
+    cols_order_all = [
+        date_col_name, moment_col_name, glic_col_name, "St. Glicemie",
+        sis_col_name, dia_col_name, "St. Tensiune", puls_col_name,
+        "St. Puls", obs_col_name
+    ]
+    existing_cols_all = [c for c in cols_order_all if c in df_all.columns]
+    df_all = df_all[existing_cols_all]
+
+    for col in df_all.columns:
+        df_all[col] = df_all[col].apply(
+            lambda x: remove_diacritics(str(x))
+            if pd.notna(x) and str(x).strip() not in ["nan", "None", ""]
+            else ""
+        )
+    df_all.columns = [remove_diacritics(c) for c in df_all.columns]
+    return df_all
 
 def trimite_email_cu_multiple_atasamente(destinatar, subiect, mesaj, file_paths_dict):
     email_sender = st.session_state.settings.get("email_sender", "").strip()
@@ -417,6 +469,16 @@ def verifica_si_fa_backup_automat(force=False):
           din nou toate cele 3 fișiere.
     """
     temp_files = []
+    # Fișiere temporare unice pentru fiecare rulare; evită erori de tip
+    # "name is not defined" și permite ca automat/forțat să folosească
+    # exact aceeași pregătire a celor 3 atașamente.
+    stamp = now_local().strftime("%Y%m%d_%H%M%S_%f")
+    temp_backup_file = f"temp_backup_medical_{stamp}.csv"
+    temp_meds_backup = f"temp_meds_{stamp}.csv"
+    temp_prog_backup = f"temp_prog_{stamp}.csv"
+    attachments = {}
+    fisiere_incluse = []
+    fisiere_lipsa = []
 
     try:
         email_dest = st.session_state.settings.get("email_sender", "").strip()
@@ -447,70 +509,16 @@ def verifica_si_fa_backup_automat(force=False):
             return True, "Backup-ul automat pentru azi există deja."
 
         # ------------------------------------------------------------
-        # 1. DATE MEDICALE — întotdeauna pregătim primul fișier.
-        #    Chiar dacă azi nu s-a introdus nicio măsurătoare, trimitem
-        #    tot conținutul existent în DATA_FILE.
+        # 1. DATE MEDICALE — EXACT același format ca backup-ul forțat.
+        #    Nu depinde de existența unei măsurători în ziua curentă.
         # ------------------------------------------------------------
-        temp_backup_file = "temp_backup_cron.csv"
-        temp_meds_backup = "temp_meds_backup.csv"
-        temp_prog_backup = "temp_prog_backup.csv"
-
-        attachments = {}
-        fisiere_incluse = []
-        fisiere_lipsa = []
-
-        if os.path.exists(DATA_FILE):
-            try:
-                df_cron = get_chronological_backup_df()
-
-                if not df_cron.empty:
-                    df_cron.to_csv(temp_backup_file, index=False, encoding="utf-8-sig")
-                else:
-                    # Important: dacă nu există măsurători în ziua curentă,
-                    # NU considerăm backup-ul gol. Trimitem toate datele
-                    # deja înregistrate în fișierul medical.
-                    df_raw = pd.read_csv(DATA_FILE)
-
-                    # Eliminăm doar coloane tehnice, dacă apar.
-                    for col in list(df_raw.columns):
-                        if str(col) in ("Dată_dt", "Moment_Cat"):
-                            df_raw = df_raw.drop(columns=[col])
-
-                    for col in df_raw.columns:
-                        df_raw[col] = df_raw[col].apply(
-                            lambda x: remove_diacritics(str(x))
-                            if pd.notna(x) and str(x).strip() not in ["nan", "None", ""]
-                            else ""
-                        )
-                    df_raw.columns = [remove_diacritics(c) for c in df_raw.columns]
-                    df_raw.to_csv(temp_backup_file, index=False, encoding="utf-8-sig")
-
-                attachments["backup_date_medicale.csv"] = temp_backup_file
-                temp_files.append(temp_backup_file)
-                fisiere_incluse.append("backup_date_medicale.csv")
-
-            except Exception as e:
-                fisiere_lipsa.append(
-                    f"backup_date_medicale.csv (eroare: {e})"
-                )
+        ok_med, info_med = pregateste_backup_date_medicale_csv(temp_backup_file)
+        if ok_med:
+            attachments["backup_date_medicale.csv"] = temp_backup_file
+            temp_files.append(temp_backup_file)
+            fisiere_incluse.append("backup_date_medicale.csv")
         else:
-            # Dacă aplicația este instalată nou și fișierul nu există încă,
-            # creăm un CSV gol cu structura corectă, astfel încât emailul
-            # să conțină totuși toate cele 3 fișiere.
-            try:
-                pd.DataFrame(columns=[
-                    "Data", "Moment Zi", "Glicemie", "Sistolica",
-                    "Diastolica", "Puls", "Observatii"
-                ]).to_csv(
-                    temp_backup_file, index=False, encoding="utf-8-sig"
-                )
-                attachments["backup_date_medicale.csv"] = temp_backup_file
-                temp_files.append(temp_backup_file)
-                fisiere_incluse.append("backup_date_medicale.csv (gol — nu există încă înregistrări)")
-            except Exception as e:
-                fisiere_lipsa.append(
-                    f"backup_date_medicale.csv (nu a putut fi creat: {e})"
-                )
+            fisiere_lipsa.append(f"backup_date_medicale.csv (eroare: {info_med})")
 
         # ------------------------------------------------------------
         # 2. MEDICAMENTE — trimis întotdeauna.
@@ -689,6 +697,90 @@ if "user" not in st.session_state:
 
 if "settings" not in st.session_state:
     st.session_state.settings = load_persisted_settings()
+
+def format_table_column(series):
+    return series.astype(str).str.strip().replace(["0", "0.0", "nan", "None", "", "<NA>"], "")
+
+def evaluate_glic(val, moment_zi=""):
+    try:
+        v = float(val)
+        if v == 0 or pd.isna(v): return ""
+        m_clean = remove_diacritics(str(moment_zi)).lower()
+        if "dupa masa" in m_clean:
+            t_min, t_max = st.session_state.settings.get("target_glic_post_min", 70), st.session_state.settings.get("target_glic_post_max", 160)
+        else:
+            t_min, t_max = st.session_state.settings.get("target_glic_min", 70), st.session_state.settings.get("target_glic_max", 120)
+
+        if t_min <= v <= t_max: return "🟢 Normală"
+        elif v < t_min: return "🔴 Mică"
+        else: return "🔴 Mare"
+    except:
+        return ""
+
+def evaluate_ta(sis_val, dia_val):
+    try:
+        s, d = float(sis_val), float(dia_val)
+        if s == 0 or d == 0 or pd.isna(s) or pd.isna(d): return ""
+        max_s, max_d = st.session_state.settings["target_ta_sis"], st.session_state.settings["target_ta_dia"]
+        if s <= max_s and d <= max_d: return "🟢 Normală"
+        else: return "🔴 Crescută"
+    except:
+        return ""
+
+def evaluate_puls(val):
+    try:
+        v = float(val)
+        if v == 0 or pd.isna(v): return ""
+        if 60 <= v <= 100: return "🟢 Normal"
+        elif v < 60: return "🔴 Scăzut"
+        else: return "🔴 Ridicat"
+    except:
+        return ""
+
+def is_glic_spike(val, moment_zi=""):
+    try:
+        v = float(val)
+        if v == 0 or pd.isna(v): return False
+        m_clean = remove_diacritics(str(moment_zi)).lower()
+        if "dupa masa" in m_clean:
+            t_max = st.session_state.settings.get("target_glic_post_max", 160)
+        else:
+            t_max = st.session_state.settings.get("target_glic_max", 120)
+        return v > t_max
+    except:
+        return False
+
+def is_ta_spike(sis_val, dia_val):
+    try:
+        s, d = float(sis_val), float(dia_val)
+        if s == 0 or d == 0 or pd.isna(s) or pd.isna(d): return False
+        max_s = st.session_state.settings.get("target_ta_sis", 120)
+        max_d = st.session_state.settings.get("target_ta_dia", 80)
+        return s > max_s or d > max_d
+    except:
+        return False
+
+def is_puls_spike(val):
+    try:
+        v = float(val)
+        if v == 0 or pd.isna(v): return False
+        return v < 60 or v > 100
+    except:
+        return False
+
+def color_status(val):
+    if not isinstance(val, str) or not val.strip(): return ""
+    if "🟢" in val: return "background-color: #047857; color: #ffffff; font-weight: bold; text-align: center;"
+    elif "🔴" in val: return "background-color: #b91c1c; color: #ffffff; font-weight: bold; text-align: center;"
+    return ""
+
+def apply_color_styling(df_to_style, subset_cols):
+    try:
+        if hasattr(df_to_style.style, "map"): return df_to_style.style.map(color_status, subset=subset_cols)
+        else: return df_to_style.style.applymap(color_status, subset=subset_cols)
+    except:
+        return df_to_style
+
 
 # ==========================================
 # DECLANȘATOR EXTERN PENTRU BACKUP AUTOMAT ZILNIC (fără autentificare)
@@ -948,89 +1040,6 @@ def save_local_record(date_str, moment_str, glic_v, sis_v, dia_v, puls_v, obs_v)
         df_to_save.to_csv(DATA_FILE, index=False)
     except Exception as e:
         print(f"Erore: {e}")
-
-def format_table_column(series):
-    return series.astype(str).str.strip().replace(["0", "0.0", "nan", "None", "", "<NA>"], "")
-
-def evaluate_glic(val, moment_zi=""):
-    try:
-        v = float(val)
-        if v == 0 or pd.isna(v): return ""
-        m_clean = remove_diacritics(str(moment_zi)).lower()
-        if "dupa masa" in m_clean:
-            t_min, t_max = st.session_state.settings.get("target_glic_post_min", 70), st.session_state.settings.get("target_glic_post_max", 160)
-        else:
-            t_min, t_max = st.session_state.settings.get("target_glic_min", 70), st.session_state.settings.get("target_glic_max", 120)
-
-        if t_min <= v <= t_max: return "🟢 Normală"
-        elif v < t_min: return "🔴 Mică"
-        else: return "🔴 Mare"
-    except:
-        return ""
-
-def evaluate_ta(sis_val, dia_val):
-    try:
-        s, d = float(sis_val), float(dia_val)
-        if s == 0 or d == 0 or pd.isna(s) or pd.isna(d): return ""
-        max_s, max_d = st.session_state.settings["target_ta_sis"], st.session_state.settings["target_ta_dia"]
-        if s <= max_s and d <= max_d: return "🟢 Normală"
-        else: return "🔴 Crescută"
-    except:
-        return ""
-
-def evaluate_puls(val):
-    try:
-        v = float(val)
-        if v == 0 or pd.isna(v): return ""
-        if 60 <= v <= 100: return "🟢 Normal"
-        elif v < 60: return "🔴 Scăzut"
-        else: return "🔴 Ridicat"
-    except:
-        return ""
-
-def is_glic_spike(val, moment_zi=""):
-    try:
-        v = float(val)
-        if v == 0 or pd.isna(v): return False
-        m_clean = remove_diacritics(str(moment_zi)).lower()
-        if "dupa masa" in m_clean:
-            t_max = st.session_state.settings.get("target_glic_post_max", 160)
-        else:
-            t_max = st.session_state.settings.get("target_glic_max", 120)
-        return v > t_max
-    except:
-        return False
-
-def is_ta_spike(sis_val, dia_val):
-    try:
-        s, d = float(sis_val), float(dia_val)
-        if s == 0 or d == 0 or pd.isna(s) or pd.isna(d): return False
-        max_s = st.session_state.settings.get("target_ta_sis", 120)
-        max_d = st.session_state.settings.get("target_ta_dia", 80)
-        return s > max_s or d > max_d
-    except:
-        return False
-
-def is_puls_spike(val):
-    try:
-        v = float(val)
-        if v == 0 or pd.isna(v): return False
-        return v < 60 or v > 100
-    except:
-        return False
-
-def color_status(val):
-    if not isinstance(val, str) or not val.strip(): return ""
-    if "🟢" in val: return "background-color: #047857; color: #ffffff; font-weight: bold; text-align: center;"
-    elif "🔴" in val: return "background-color: #b91c1c; color: #ffffff; font-weight: bold; text-align: center;"
-    return ""
-
-def apply_color_styling(df_to_style, subset_cols):
-    try:
-        if hasattr(df_to_style.style, "map"): return df_to_style.style.map(color_status, subset=subset_cols)
-        else: return df_to_style.style.applymap(color_status, subset=subset_cols)
-    except:
-        return df_to_style
 
 # ==========================================
 # SIDEBAR & FILTRARE
@@ -1729,31 +1738,23 @@ with tab_dict["⚙️ Setări"]:
             if not test_dest:
                 st.error("Completează și salvează mai întâi adresa de email a expeditorului.")
             else:
-                temp_test_file = "temp_test_backup.csv"
-                temp_meds_backup = "temp_meds_backup.csv"
-                temp_prog_backup = "temp_prog_backup.csv"
+                stamp_test = now_local().strftime("%Y%m%d_%H%M%S_%f")
+                temp_test_file = f"temp_test_backup_{stamp_test}.csv"
+                temp_meds_backup = f"temp_test_meds_{stamp_test}.csv"
+                temp_prog_backup = f"temp_test_prog_{stamp_test}.csv"
                 attachments = {}
                 fisiere_incluse = []
                 fisiere_lipsa = []
 
-                df_test_cron = get_chronological_backup_df()
-                if not df_test_cron.empty:
-                    df_test_cron.to_csv(temp_test_file, index=False)
+                # IMPORTANT: folosim EXACT aceeași funcție ca backup-ul automat,
+                # deci fișierul medical trimis manual și automat are identic:
+                # coloane + ordine + buline 🟢/🔴 + valori formatate.
+                ok_med, info_med = pregateste_backup_date_medicale_csv(temp_test_file)
+                if ok_med:
                     attachments["backup_date_medicale.csv"] = temp_test_file
                     fisiere_incluse.append("backup_date_medicale.csv")
-                elif os.path.exists(DATA_FILE):
-                    try:
-                        df_raw = pd.read_csv(DATA_FILE)
-                        for col in df_raw.columns:
-                            df_raw[col] = df_raw[col].apply(lambda x: remove_diacritics(str(x)) if pd.notna(x) and str(x).strip() not in ["nan", "None", ""] else "")
-                        df_raw.columns = [remove_diacritics(c) for c in df_raw.columns]
-                        df_raw.to_csv(temp_test_file, index=False)
-                        attachments["backup_date_medicale.csv"] = temp_test_file
-                        fisiere_incluse.append("backup_date_medicale.csv (date brute, fără măsurători procesate)")
-                    except:
-                        fisiere_lipsa.append("backup_date_medicale.csv (eroare la citirea fișierului brut)")
                 else:
-                    fisiere_lipsa.append("backup_date_medicale.csv (fișierul nu există deloc)")
+                    fisiere_lipsa.append(f"backup_date_medicale.csv (eroare: {info_med})")
 
                 if os.path.exists(MEDS_FILE):
                     try:
@@ -1768,7 +1769,11 @@ with tab_dict["⚙️ Setări"]:
                         attachments["medicamente.csv"] = MEDS_FILE
                         fisiere_incluse.append("medicamente.csv")
                 else:
-                    fisiere_lipsa.append("medicamente.csv (fișierul nu există)")
+                    pd.DataFrame(
+                        columns=["Medicament", "Doza", "Orar / Frecventa", "Observatii"]
+                    ).to_csv(temp_meds_backup, index=False, encoding="utf-8-sig")
+                    attachments["medicamente.csv"] = temp_meds_backup
+                    fisiere_incluse.append("medicamente.csv")
 
                 if os.path.exists(PROG_FILE):
                     try:
@@ -1783,7 +1788,11 @@ with tab_dict["⚙️ Setări"]:
                         attachments["programari_medicale.csv"] = PROG_FILE
                         fisiere_incluse.append("programari_medicale.csv")
                 else:
-                    fisiere_lipsa.append("programari_medicale.csv (fișierul nu există)")
+                    pd.DataFrame(
+                        columns=["Data", "Ora", "Tip", "Clinica", "Zile_Alerta", "Efectuat", "Observatii"]
+                    ).to_csv(temp_prog_backup, index=False, encoding="utf-8-sig")
+                    attachments["programari_medicale.csv"] = temp_prog_backup
+                    fisiere_incluse.append("programari_medicale.csv")
 
                 success_t, msg_t = trimite_email_cu_multiple_atasamente(
                     test_dest,
@@ -1812,39 +1821,16 @@ with tab_dict["⚙️ Setări"]:
 
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("#### 💾 Backup Manual (CSV Cronologic Date Medicale)")
-        st.markdown(
-            "<div style='padding:10px 14px; border-radius:10px; background:#1e222d; border:1px solid #2e3545; margin-bottom:10px;'>"
-            "🟢 <b>Normal</b> &nbsp;&nbsp; 🔴 <b>În afara intervalului</b>"
-            "</div>",
-            unsafe_allow_html=True,
-        )
-
+        # Doar butonul de descărcare; nu afișăm tabelul în interfață.
         df_backup_cron = get_chronological_backup_df()
-        if not df_backup_cron.empty:
-            # Afișăm și aici exact statusurile medicale, cu buline verzi/roșii,
-            # înainte de descărcarea CSV-ului. CSV-ul rămâne neschimbat ca structură.
-            status_cols_backup = [
-                c for c in ["St. Glicemie", "St. Tensiune", "St. Puls"]
-                if c in df_backup_cron.columns
-            ]
-            st.dataframe(
-                apply_color_styling(df_backup_cron, status_cols_backup)
-                if status_cols_backup else df_backup_cron,
-                use_container_width=True,
-                height=520,
-                hide_index=True,
-            )
-
-            csv_data = df_backup_cron.to_csv(index=False).encode('utf-8-sig')
-            st.download_button(
-                label="📥 Descarcă Backup CSV Cronologic",
-                data=csv_data,
-                file_name="backup_date_medicale.csv",
-                mime="text/csv",
-                use_container_width=True,
-            )
-        else:
-            st.info("ℹ️ Nu există încă măsurători medicale înregistrate pentru backup-ul cronologic.")
+        csv_data = df_backup_cron.to_csv(index=False).encode("utf-8-sig")
+        st.download_button(
+            label="📥 Descarcă Backup CSV Cronologic",
+            data=csv_data,
+            file_name="backup_date_medicale.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
 
     with col_set2:
         st.markdown("#### 🎯 Valori Țintă Medicale")

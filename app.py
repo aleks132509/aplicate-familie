@@ -1812,10 +1812,39 @@ with tab_dict["⚙️ Setări"]:
 
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown("#### 💾 Backup Manual (CSV Cronologic Date Medicale)")
+        st.markdown(
+            "<div style='padding:10px 14px; border-radius:10px; background:#1e222d; border:1px solid #2e3545; margin-bottom:10px;'>"
+            "🟢 <b>Normal</b> &nbsp;&nbsp; 🔴 <b>În afara intervalului</b>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+
         df_backup_cron = get_chronological_backup_df()
         if not df_backup_cron.empty:
-            csv_data = df_backup_cron.to_csv(index=False).encode('utf-8')
-            st.download_button(label="📥 Descarcă Backup CSV Cronologic", data=csv_data, file_name="backup_date_medicale.csv", mime="text/csv", use_container_width=True)
+            # Afișăm și aici exact statusurile medicale, cu buline verzi/roșii,
+            # înainte de descărcarea CSV-ului. CSV-ul rămâne neschimbat ca structură.
+            status_cols_backup = [
+                c for c in ["St. Glicemie", "St. Tensiune", "St. Puls"]
+                if c in df_backup_cron.columns
+            ]
+            st.dataframe(
+                apply_color_styling(df_backup_cron, status_cols_backup)
+                if status_cols_backup else df_backup_cron,
+                use_container_width=True,
+                height=520,
+                hide_index=True,
+            )
+
+            csv_data = df_backup_cron.to_csv(index=False).encode('utf-8-sig')
+            st.download_button(
+                label="📥 Descarcă Backup CSV Cronologic",
+                data=csv_data,
+                file_name="backup_date_medicale.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
+        else:
+            st.info("ℹ️ Nu există încă măsurători medicale înregistrate pentru backup-ul cronologic.")
 
     with col_set2:
         st.markdown("#### 🎯 Valori Țintă Medicale")

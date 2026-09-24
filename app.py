@@ -347,16 +347,6 @@ def trimite_email_cu_multiple_atasamente(destinatar, subiect, mesaj, file_paths_
     if not email_sender or not email_password:
         return False, "Datele de configurare email lipsesc din Setări."
 
-    domain = email_sender.split("@")[-1].lower() if "@" in email_sender else ""
-    if "gmail" in domain:
-        smtp_server = "smtp.gmail.com"
-    elif "yahoo" in domain:
-        smtp_server = "smtp.mail.yahoo.com"
-    elif "outlook" in domain or "hotmail" in domain or "live" in domain:
-        smtp_server = "smtp.office365.com"
-    else:
-        smtp_server = "smtp.mail.me.com"
-
     configs = [
         {"port": 587, "use_ssl": False},
         {"port": 465, "use_ssl": True}
@@ -382,21 +372,21 @@ def trimite_email_cu_multiple_atasamente(destinatar, subiect, mesaj, file_paths_
                         msg.add_attachment(file_data, maintype="application", subtype="octet-stream", filename=f_name)
 
                 if use_ssl:
-                    with smtplib.SMTP_SSL(smtp_server, port, timeout=30) as smtp:
+                    with smtplib.SMTP_SSL('smtp.mail.me.com', port, timeout=30) as smtp:
                         smtp.login(email_sender, email_password)
                         smtp.send_message(msg)
                 else:
-                    with smtplib.SMTP(smtp_server, port, timeout=30) as smtp:
+                    with smtplib.SMTP('smtp.mail.me.com', port, timeout=30) as smtp:
                         smtp.starttls()
                         smtp.login(email_sender, email_password)
                         smtp.send_message(msg)
                         
-                return True, f"Email cu toate fișierele de backup trimis cu succes prin {smtp_server}!"
+                return True, "Email cu toate fișierele de backup trimis cu succes prin iCloud!"
             except Exception as e:
                 last_error = str(e)
                 time.sleep(1)
                 
-    return False, f"Erore trimitere email (toate porturile au eșuat pentru {smtp_server}): {last_error}"
+    return False, f"Erore trimitere iCloud (toate porturile au eșuat): {last_error}"
 
 def verifica_si_fa_backup_automat():
     try:
@@ -416,45 +406,44 @@ def verifica_si_fa_backup_automat():
 
         if ultima_data is None or ultima_data < azi:
             df_cron = get_chronological_backup_df()
-            temp_backup_file = "temp_backup_cron.csv"
-            
-            attachments = {}
             if not df_cron.empty:
+                temp_backup_file = "temp_backup_cron.csv"
                 df_cron.to_csv(temp_backup_file, index=False)
-                attachments["backup_date_medicale.csv"] = temp_backup_file
                 
-            temp_meds_backup = "temp_meds_backup.csv"
-            if os.path.exists(MEDS_FILE):
-                try:
-                    df_m_temp = pd.read_csv(MEDS_FILE)
-                    for col in df_m_temp.columns:
-                        df_m_temp[col] = df_m_temp[col].apply(lambda x: remove_diacritics(str(x)) if pd.notna(x) and str(x).strip() not in ["nan", "None", ""] else "")
-                    df_m_temp.columns = [remove_diacritics(c) for c in df_m_temp.columns]
-                    df_m_temp.to_csv(temp_meds_backup, index=False)
-                    attachments["medicamente.csv"] = temp_meds_backup
-                except:
-                    attachments["medicamente.csv"] = MEDS_FILE
+                attachments = {
+                    "backup_date_medicale.csv": temp_backup_file,
+                }
+                
+                temp_meds_backup = "temp_meds_backup.csv"
+                if os.path.exists(MEDS_FILE):
+                    try:
+                        df_m_temp = pd.read_csv(MEDS_FILE)
+                        for col in df_m_temp.columns:
+                            df_m_temp[col] = df_m_temp[col].apply(lambda x: remove_diacritics(str(x)) if pd.notna(x) and str(x).strip() not in ["nan", "None", ""] else "")
+                        df_m_temp.columns = [remove_diacritics(c) for c in df_m_temp.columns]
+                        df_m_temp.to_csv(temp_meds_backup, index=False)
+                        attachments["medicamente.csv"] = temp_meds_backup
+                    except:
+                        attachments["medicamente.csv"] = MEDS_FILE
 
-            temp_prog_backup = "temp_prog_backup.csv"
-            if os.path.exists(PROG_FILE):
-                try:
-                    df_p_temp = pd.read_csv(PROG_FILE)
-                    for col in df_p_temp.columns:
-                        df_p_temp[col] = df_p_temp[col].apply(lambda x: remove_diacritics(str(x)) if pd.notna(x) and str(x).strip() not in ["nan", "None", ""] else "")
-                    df_p_temp.columns = [remove_diacritics(c) for c in df_p_temp.columns]
-                    df_p_temp.to_csv(temp_prog_backup, index=False)
-                    attachments["programari_medicale.csv"] = temp_prog_backup
-                except:
-                    attachments["programari_medicale.csv"] = PROG_FILE
+                temp_prog_backup = "temp_prog_backup.csv"
+                if os.path.exists(PROG_FILE):
+                    try:
+                        df_p_temp = pd.read_csv(PROG_FILE)
+                        for col in df_p_temp.columns:
+                            df_p_temp[col] = df_p_temp[col].apply(lambda x: remove_diacritics(str(x)) if pd.notna(x) and str(x).strip() not in ["nan", "None", ""] else "")
+                        df_p_temp.columns = [remove_diacritics(c) for c in df_p_temp.columns]
+                        df_p_temp.to_csv(temp_prog_backup, index=False)
+                        attachments["programari_medicale.csv"] = temp_prog_backup
+                    except:
+                        attachments["programari_medicale.csv"] = PROG_FILE
 
-            if attachments:
-                succes, err_msg = trimite_email_cu_multiple_atasamente(
+                succes, _ = trimite_email_cu_multiple_atasamente(
                     destinatar=email_dest,
                     subiect=f"💾 [Backup Zilnic Automat] HealthTrack Pro - {azi.strftime('%d.%m.%Y')}",
-                    mesaj=f"Salut!\n\nAcesta este backup-ul tău zilnic automat generat la data de {azi.strftime('%d.%m.%Y')}.\nSunt atașate fișierele disponibile cu datele medicale, schema de tratament și programările.\n\nHealthTrack Pro System",
+                    mesaj=f"Salut!\n\nAcesta este backup-ul tău zilnic automat generat la data de {azi.strftime('%d.%m.%Y')}.\nSunt atașate fișierele CSV cu datele medicale (filtrate doar cu valori măsurate), schema de tratament și programările medicale.\n\nHealthTrack Pro System",
                     file_paths_dict=attachments
                 )
-                
                 if os.path.exists(temp_backup_file):
                     os.remove(temp_backup_file)
                 if os.path.exists(temp_meds_backup):
@@ -469,10 +458,10 @@ def verifica_si_fa_backup_automat():
                         os.remove(BACKUP_ERROR_LOG_FILE)
                 else:
                     with open(BACKUP_ERROR_LOG_FILE, "w") as f:
-                        f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} | {err_msg}")
+                        f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} | {_}")
             else:
-                with open(BACKUP_LOG_FILE, "w") as f:
-                    f.write(azi.strftime("%Y-%m-%d"))
+                with open(BACKUP_ERROR_LOG_FILE, "w") as f:
+                    f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M')} | Nu există date de backup (df_cron gol).")
     except Exception as e:
         try:
             with open(BACKUP_ERROR_LOG_FILE, "w") as f:
@@ -501,7 +490,22 @@ if "settings" not in st.session_state:
 # ==========================================
 # DECLANȘATOR EXTERN PENTRU BACKUP AUTOMAT ZILNIC (fără autentificare)
 # ==========================================
-BACKUP_TRIGGER_SECRET = "hb2026-backup-x7k9q"
+# PROBLEMĂ REZOLVATĂ: backup-ul automat rula DOAR când cineva deschidea
+# manual aplicația și se autentifica — dacă nu intra nimeni într-o zi,
+# nu se trimitea niciun email, pentru că acest cod Streamlit nu rulează
+# de la sine la o oră fixă (nu există un "ceas" intern).
+#
+# Acest bloc permite unui serviciu extern GRATUIT de tip cron (ex:
+# cron-job.org, EasyCron, sau un GitHub Actions programat) să "trezească"
+# aplicația o dată pe zi și să declanșeze backup-ul, FĂRĂ să fie nevoie de
+# login manual. Configurează serviciul extern să acceseze (GET), o dată pe
+# zi, adresa:
+#
+#   https://<adresa-ta-streamlit>/?backup_trigger=SCHIMBA-ACEST-COD-SECRET
+#
+# ⚠️ Schimbă valoarea de mai jos cu un cod secret al tău (orice text greu
+# de ghicit), altfel oricine ar putea declanșa manual backup-ul.
+BACKUP_TRIGGER_SECRET = "schimba-acest-cod-secret-1234"
 
 if st.query_params.get("backup_trigger") == BACKUP_TRIGGER_SECRET:
     verifica_si_fa_backup_automat()
@@ -1348,7 +1352,7 @@ if is_admin and "📅 Programări" in tab_dict:
 
         with col_p3:
             with st.container(border=True):
-                st.markdown("#### 📨 Trimitere & Test Mail")
+                st.markdown("#### 📨 Trimitere & Test iCloud")
                 destinatar_auto = st.text_input("Email Destinatar", value=st.session_state.settings.get("email_sender", ""))
                 
                 if st.button("🚀 Trimite Alerte Automat Acum", type="primary"):
@@ -1380,7 +1384,7 @@ if is_admin and "📅 Programări" in tab_dict:
                                 "programari_medicale.csv": PROG_FILE
                             })
                             if succes:
-                                st.success("Notificările automate au fost trimise cu succes împreună cu fișierele!")
+                                st.success("Notificările automate au fost trimise prin iCloud împreună cu fișierele!")
                             else:
                                 st.error(rez)
                         else:
@@ -1388,7 +1392,7 @@ if is_admin and "📅 Programări" in tab_dict:
 
 # ----------------- TAB: SETĂRI & ADMIN -----------------
 with tab_dict["⚙️ Setări"]:
-    st.markdown("### ⚙️ Setări Generale, Test Conexiune Mail & Gestiune Utilizatori")
+    st.markdown("### ⚙️ Setări Generale, Test Conexiune iCloud & Gestiune Utilizatori")
     
     if is_admin:
         col_u1, col_u2 = st.columns(2)
@@ -1478,10 +1482,10 @@ with tab_dict["⚙️ Setări"]:
     st.markdown("---")
     col_set1, col_set2 = st.columns(2)
     with col_set1:
-        st.markdown("#### ✉️ Configurare Server Mail & Test Zilnic (Salvare Permanentă)")
+        st.markdown("#### ✉️ Configurare Server iCloud Mail & Test Zilnic (Salvare Permanentă)")
         
-        entered_sender = st.text_input("Adresa ta de email (expeditor)", value=st.session_state.settings.get("email_sender", ""))
-        entered_password = st.text_input("Parolă / App-Specific Password", type="password", value=st.session_state.settings.get("email_password", ""))
+        entered_sender = st.text_input("Adresa ta de iCloud (expeditor)", value=st.session_state.settings.get("email_sender", ""))
+        entered_password = st.text_input("Parolă specifică de aplicație iCloud (App-Specific Password)", type="password", value=st.session_state.settings.get("email_password", ""))
         
         if st.button("💾 Salvează Datele Email Permanent", type="primary"):
             st.session_state.settings["email_sender"] = entered_sender
@@ -1489,9 +1493,10 @@ with tab_dict["⚙️ Setări"]:
             save_persisted_settings(st.session_state.settings)
             st.success("✅ Datele de email au fost salvate permanent pe disc!")
 
-        st.markdown("<small>💡 *Notă: Pentru iCloud folosește o App-Specific Password. Pentru Gmail folosește o App Password.*</small>", unsafe_allow_html=True)
+        st.markdown("<small>💡 *Notă: Nu folosi parola ta principală Apple ID. Generează o App-Specific Password din portalul tău Apple ID.*</small>", unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
 
+        # Stare backup automat: ultima reușită / ultima eroare
         if os.path.exists(BACKUP_LOG_FILE):
             try:
                 with open(BACKUP_LOG_FILE, "r") as f:
@@ -1519,10 +1524,12 @@ with tab_dict["⚙️ Setări"]:
             else:
                 temp_test_file = "temp_test_backup.csv"
                 df_test_cron = get_chronological_backup_df()
-                attachments = {}
                 if not df_test_cron.empty:
                     df_test_cron.to_csv(temp_test_file, index=False)
-                    attachments["backup_date_medicale.csv"] = temp_test_file
+                
+                attachments = {
+                    "backup_date_medicale.csv": temp_test_file,
+                }
                 
                 temp_meds_backup = "temp_meds_backup.csv"
                 if os.path.exists(MEDS_FILE):
@@ -1551,7 +1558,7 @@ with tab_dict["⚙️ Setări"]:
                 success_t, msg_t = trimite_email_cu_multiple_atasamente(
                     test_dest, 
                     "🧪 Test Forțat / Backup Complet HealthTrack Pro", 
-                    "Salut! Acesta este un email de test forțat cu toate fișierele atașate.", 
+                    "Salut! Acesta este un email de test forțat cu toate cele 3 fișiere atașate (date medicale filtrate doar cu valori, tratament și programări).", 
                     attachments
                 )
                 
@@ -1565,9 +1572,7 @@ with tab_dict["⚙️ Setări"]:
                 if success_t:
                     with open(BACKUP_LOG_FILE, "w") as f:
                         f.write(datetime.now().strftime("%Y-%m-%d"))
-                    if os.path.exists(BACKUP_ERROR_LOG_FILE):
-                        os.remove(BACKUP_ERROR_LOG_FILE)
-                    st.success("✅ Emailul de backup complet a fost trimis cu succes!")
+                    st.success("✅ Emailul de backup complet a fost trimis cu succes prin iCloud!")
                 else:
                     st.error(f"❌ {msg_t}")
 
@@ -1771,46 +1776,82 @@ with tab_dict["📄 Raport PDF"]:
                     ('FONTSIZE', (0,1), (-1,-1), 8),
                     ('TOPPADDING', (0,0), (-1,0), 7),
                     ('BOTTOMPADDING', (0,0), (-1,0), 7),
-                    ('TOPPADDING', (0,1), (-1,-1), 5),
-                    ('BOTTOMPADDING', (0,1), (-1,-1), 5),
-                    ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#cbd5e1"))
+                    ('TOPPADDING', (0,1), (-1,-1), 6),
+                    ('BOTTOMPADDING', (0,1), (-1,-1), 6),
+                    ('LEFTPADDING', (0,0), (-1,-1), 6),
+                    ('RIGHTPADDING', (0,0), (-1,-1), 6),
+                    ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#cbd5e1")),
                 ]
+                
+                obs_style_pdf = ParagraphStyle(
+                    'ObsStylePDF',
+                    parent=styles['Normal'],
+                    fontName='Helvetica',
+                    fontSize=8,
+                    leading=11,
+                    textColor=colors.HexColor("#1e293b")
+                )
 
+                r_idx = 1
                 for _, row in df_pdf_measured.iterrows():
-                    d_s = row[date_col].strftime("%d.%m.%Y")
-                    m_s = str(row[moment_col])
-                    g_s = str(int(row[col_glic])) if pd.notna(row[col_glic]) and float(row[col_glic]) > 0 else "-"
+                    dt_str = row[date_col].strftime("%d.%m.%Y")
+                    mm = remove_diacritics(str(row.get(moment_col, "")))
+                    obs_val = clean_obs(row.get(col_obs, ""))
+                    obs_str = remove_diacritics(obs_val)
                     
+                    obs_paragraph = Paragraph(obs_str, obs_style_pdf)
+                    
+                    glic_v = row.get(col_glic, 0)
                     sis_v = row.get(col_sis, 0)
                     dia_v = row.get(col_dia, 0)
-                    if pd.notna(sis_v) and pd.notna(dia_v) and float(sis_v) > 0 and float(dia_v) > 0:
-                        ta_s = f"{int(sis_v)}/{int(dia_v)}"
+                    puls_v = row.get(col_puls, 0)
+                    
+                    g_str = str(int(glic_v)) if pd.notna(glic_v) and float(glic_v)>0 else ""
+                    ta_str = f"{int(sis_v)}/{int(dia_v)}" if pd.notna(sis_v) and float(sis_v)>0 else ""
+                    p_str = str(int(puls_v)) if pd.notna(puls_v) and float(puls_v)>0 else ""
+                    
+                    table_data.append([dt_str, mm, g_str, ta_str, p_str, obs_paragraph])
+                    
+                    if r_idx % 2 == 0:
+                        t_style.append(('BACKGROUND', (0, r_idx), (-1, r_idx), colors.HexColor("#f8fafc")))
                     else:
-                        ta_s = "-"
-                        
-                    p_v = row.get(col_puls, 0)
-                    p_s = str(int(p_v)) if pd.notna(p_v) and float(p_v) > 0 else "-"
+                        t_style.append(('BACKGROUND', (0, r_idx), (-1, r_idx), colors.HexColor("#ffffff")))
                     
-                    o_s = remove_diacritics(str(row.get(col_obs, "")))
-                    if o_s.lower() in ["nan", "none", ""]: o_s = "-"
+                    ev_g = evaluate_glic(glic_v, mm)
+                    if "🟢" in ev_g: t_style.append(('TEXTCOLOR', (2, r_idx), (2, r_idx), colors.HexColor("#16a34a")))
+                    elif "🔴" in ev_g: t_style.append(('TEXTCOLOR', (2, r_idx), (2, r_idx), colors.HexColor("#dc2626")))
                     
-                    table_data.append([d_s, m_s, g_s, ta_s, p_s, o_s])
-
-                col_widths = [55, 110, 40, 50, 40, 185]
-                t = Table(table_data, colWidths=col_widths, repeatRows=1)
+                    ev_ta = evaluate_ta(sis_val=sis_v, dia_val=dia_v)
+                    if "🟢" in ev_ta: t_style.append(('TEXTCOLOR', (3, r_idx), (3, r_idx), colors.HexColor("#16a34a")))
+                    elif "🔴" in ev_ta: t_style.append(('TEXTCOLOR', (3, r_idx), (3, r_idx), colors.HexColor("#dc2626")))
+                    
+                    ev_p = evaluate_puls(puls_v)
+                    if "🟢" in ev_p: t_style.append(('TEXTCOLOR', (4, r_idx), (4, r_idx), colors.HexColor("#16a34a")))
+                    elif "🔴" in ev_p: t_style.append(('TEXTCOLOR', (4, r_idx), (4, r_idx), colors.HexColor("#dc2626")))
+                    
+                    r_idx += 1
+                
+                t = Table(table_data, colWidths=[65, 115, 40, 55, 40, 200], repeatRows=1)
                 t.setStyle(TableStyle(t_style))
                 story.append(t)
+        else:
+            story.append(Paragraph("Nu exista date pentru perioada selectata.", styles["Normal"]))
 
         doc.build(story)
         buffer.seek(0)
         return buffer
 
-    if not view_df.empty:
-        pdf_file = make_pdf_report(view_df, opt_glic, opt_ta, opt_puls, opt_tabele)
-        st.download_button(
-            label="📥 Descarcă Raportul PDF Medical",
-            data=pdf_file,
-            file_name=f"Raport_Medical_HealthTrack_{datetime.now().strftime('%d_%m_%Y')}.pdf",
-            mime="application/pdf",
-            use_container_width=True
-        )
+    if st.button("Crează Raport PDF", type="primary"):
+        pdf_buffer = make_pdf_report(view_df, opt_glic, opt_ta, opt_puls, opt_tabele)
+        file_name = f"Raport_Medical_{filtru_luni_str.replace(', ', '_')}.pdf"
+        
+        b64_pdf = base64.b64encode(pdf_buffer.getvalue()).decode('utf-8')
+        href = f'''
+        <div style="text-align: center; margin-top: 15px;">
+            <a href="data:application/pdf;base64,{b64_pdf}" download="{file_name}" target="_blank" style="display:inline-block; padding: 14px 24px; background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); color: white; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
+                📥 Descarcă / Deschide Raport PDF (Fereastră Nouă)
+            </a>
+        </div>
+        '''
+        st.markdown(href, unsafe_allow_html=True)
+        st.success("✅ Raportul PDF a fost generat cu succes!")

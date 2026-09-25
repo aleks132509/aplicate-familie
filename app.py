@@ -306,9 +306,10 @@ def get_chronological_backup_df():
             for c in cols_masuratori:
                 mask_are_date = mask_are_date | (pd.to_numeric(df_b[c], errors="coerce").fillna(0) > 0)
         if obs_col_name in df_b.columns:
-            mask_are_date = mask_are_date | (df_b[obs_col_name].astype(str).str.strip() != "")
+            cleaned_obs = df_b[obs_col_name].apply(clean_obs)
+            mask_are_date = mask_are_date | (cleaned_obs != "")
         
-        # Păstrăm exclusiv rândurile care au date sau observații
+        # Păstrăm exclusiv rândurile care au date sau observații valide
         df_b = df_b[mask_are_date]
 
         df_all = df_b.copy()
@@ -403,6 +404,9 @@ def verifica_si_fa_backup_automat():
         azi = datetime.now().date()
         ora_curenta = datetime.now().hour
 
+        # Sincronizăm fișierele de pe disc înainte de verificare/backup
+        save_all_files()
+
         # 1. VERIFICARE ALERTĂ ORA 23:00 (dacă azi nu s-a introdus nicio valoare)
         if ora_curenta >= 23:
             ultima_alerta_23 = ""
@@ -425,8 +429,8 @@ def verifica_si_fa_backup_automat():
                         s = float(r.get("Sistolică" if "Sistolică" in df_azi.columns else "Sistolica", 0) or 0)
                         d = float(r.get("Diastolică" if "Diastolică" in df_azi.columns else "Diastolica", 0) or 0)
                         p = float(r.get("Puls", 0) or 0)
-                        o = str(r.get("Observații" if "Observații" in df_azi.columns else "Observatii", "")).strip()
-                        if g > 0 or s > 0 or d > 0 or p > 0 or (o and o.lower() not in ["nan", "none", ""]):
+                        o = clean_obs(r.get("Observații" if "Observații" in df_azi.columns else "Observatii", ""))
+                        if g > 0 or s > 0 or d > 0 or p > 0 or o:
                             are_date_azi = True
                             break
                     
@@ -462,8 +466,8 @@ def verifica_si_fa_backup_automat():
                         s = float(r.get("Sistolică" if "Sistolică" in df_gaps.columns else "Sistolica", 0) or 0)
                         d = float(r.get("Diastolică" if "Diastolică" in df_gaps.columns else "Diastolica", 0) or 0)
                         p = float(r.get("Puls", 0) or 0)
-                        o = str(r.get("Observații" if "Observații" in df_gaps.columns else "Observatii", "")).strip()
-                        if g > 0 or s > 0 or d > 0 or p > 0 or (o and o.lower() not in ["nan", "none", ""]):
+                        o = clean_obs(r.get("Observații" if "Observații" in df_gaps.columns else "Observatii", ""))
+                        if g > 0 or s > 0 or d > 0 or p > 0 or o:
                             zi_valida = True
                             break
                     if not zi_valida:
@@ -1299,6 +1303,11 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
 # ----------------- TAB: TRATAMENT -----------------
 with tab_dict["💊 Tratament"]:
     st.markdown("### 💊 Schemă Tratament Medical")
+    
+    if "success_message" in st.session_state:
+        st.success(st.session_state["success_message"])
+        del st.session_state["success_message"]
+
     st.dataframe(st.session_state.meds_df, use_container_width=True, hide_index=True)
 
     if is_admin:
@@ -1320,7 +1329,7 @@ with tab_dict["💊 Tratament"]:
                             st.session_state.meds_df = pd.concat([st.session_state.meds_df, new_row], ignore_index=True)
                             add_history_entry("Adăugare", m_nume, f"Doză: {m_doza}, Orar: {m_orar}")
                             save_all_files()
-                            st.success(f"{m_nume} adăugat!")
+                            st.session_state["success_message"] = f"Medicamentul {m_nume} a fost adăugat cu succes!"
                             trigger_rerun()
 
         with col_m2:
@@ -1340,7 +1349,7 @@ with tab_dict["💊 Tratament"]:
                             st.session_state.meds_df.loc[idx, "Observații"] = e_obs_med
                             add_history_entry("Modificare", med_to_edit, f"Doză: -> {e_doza}")
                             save_all_files()
-                            st.success("Actualizat!")
+                            st.session_state["success_message"] = "Modificările au fost salvate cu succes!"
                             trigger_rerun()
 
         with col_m3:
@@ -1354,7 +1363,7 @@ with tab_dict["💊 Tratament"]:
                             st.session_state.meds_df = st.session_state.meds_df[st.session_state.meds_df["Medicament"] != to_delete].reset_index(drop=True)
                             add_history_entry("Ștergere", to_delete, "Eliminat din schemă.")
                             save_all_files()
-                            st.success(f"{to_delete} șters cu succes!")
+                            st.session_state["success_message"] = f"Medicamentul {to_delete} a fost șters!"
                             trigger_rerun()
 
 # ----------------- TAB: PROGRAMĂRI -----------------
@@ -1454,6 +1463,7 @@ if is_admin and "📅 Programări" in tab_dict:
                     if not destinatar_auto:
                         st.error("Completează adresa de email.")
                     else:
+                        save_all_files()
                         trimis_ok = 0
                         azi = datetime.now().date()
                         mesaj_final = "🔔 ALERTE AUTOMATE PROGRAMĂRI MEDICALE - HEALTHTRACK PRO\n\n"
@@ -1612,6 +1622,7 @@ with tab_dict["⚙️ Setări"]:
         st.markdown("<br>", unsafe_allow_html=True)
 
         if st.button("🔌 Forțează Trimite Backup Complet Acum (Toate Fișierele)", type="primary"):
+            save_all_files() # Sincronizăm starea pe disc înainte de backup forțat
             test_dest = st.session_state.settings.get("email_sender", "")
             if not test_dest:
                 st.error("Completează și salvează mai întâi adresa de email a expeditorului.")

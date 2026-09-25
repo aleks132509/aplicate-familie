@@ -309,7 +309,6 @@ def get_chronological_backup_df():
             cleaned_obs = df_b[obs_col_name].apply(clean_obs)
             mask_are_date = mask_are_date | (cleaned_obs != "")
         
-        # Păstrăm exclusiv rândurile care au date sau observații valide
         df_b = df_b[mask_are_date]
 
         df_all = df_b.copy()
@@ -404,10 +403,8 @@ def verifica_si_fa_backup_automat():
         azi = datetime.now().date()
         ora_curenta = datetime.now().hour
 
-        # Sincronizăm fișierele de pe disc înainte de verificare/backup
         save_all_files()
 
-        # 1. VERIFICARE ALERTĂ ORA 23:00 (dacă azi nu s-a introdus nicio valoare)
         if ora_curenta >= 23:
             ultima_alerta_23 = ""
             if os.path.exists(ALERT_23_LOG):
@@ -440,7 +437,6 @@ def verifica_si_fa_backup_automat():
                         with open(ALERT_23_LOG, "w") as f:
                             f.write(azi.strftime("%Y-%m-%d"))
 
-        # 2. VERIFICARE ZILE LIPSĂ / GAP DETECTION
         ultima_alerta_gap = ""
         if os.path.exists(ALERT_GAP_LOG):
             try:
@@ -484,7 +480,6 @@ def verifica_si_fa_backup_automat():
                     with open(ALERT_GAP_LOG, "w") as f:
                         f.write(azi.strftime("%Y-%m-%d"))
 
-        # 3. BACKUP ZILNIC AUTOMAT
         ultima_data = None
         if os.path.exists(BACKUP_LOG_FILE):
             try:
@@ -1601,6 +1596,55 @@ with tab_dict["⚙️ Setări"]:
         st.markdown("<small>💡 *Notă: Nu folosi parola ta principală Apple ID. Generează o App-Specific Password din portalul tău Apple ID.*</small>", unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
 
+        # --- BUTON NOU: VERIFICARE MANUALĂ ZILE LIPSĂ ---
+        st.markdown("#### 🔍 Verificare Integritate Jurnal (Zile Lipsă)")
+        check_start_mode = st.radio("Perioada de verificare:", ["De la prima înregistrare (12.09)", "De la 1 ale lunii curente"], horizontal=True, key="chk_mode_radio")
+        
+        if st.button("🔍 Verifică dacă există zile fără valori", type="secondary", use_container_width=True):
+            if os.path.exists(DATA_FILE):
+                df_gap_chk = pd.read_csv(DATA_FILE)
+                df_gap_chk["Dată_dt"] = parse_flexible_date(df_gap_chk["Dată" if "Dată" in df_gap_chk.columns else "Data"])
+                df_gap_chk = df_gap_chk.dropna(subset=["Dată_dt"])
+                
+                if not df_gap_chk.empty:
+                    abs_min = df_gap_chk["Dată_dt"].dt.date.min()
+                    azi_dt = datetime.now().date()
+                    
+                    if "1 ale lunii" in check_start_mode:
+                        start_d = date(azi_dt.year, azi_dt.month, 1)
+                    else:
+                        start_d = abs_min
+                        
+                    zile_goale = []
+                    curr_d = start_d
+                    while curr_d <= azi_dt:
+                        df_zi = df_gap_chk[df_gap_chk["Dată_dt"].dt.date == curr_d]
+                         zi_ok = False
+                        for _, r in df_zi.iterrows():
+                            g = float(r.get("Glicemie", 0) or 0)
+                            s = float(r.get("Sistolică" if "Sistolică" in df_gap_chk.columns else "Sistolica", 0) or 0)
+                            d = float(r.get("Diastolică" if "Diastolică" in df_gap_chk.columns else "Diastolica", 0) or 0)
+                            p = float(r.get("Puls", 0) or 0)
+                            o = clean_obs(r.get("Observații" if "Observații" in df_gap_chk.columns else "Observatii", ""))
+                            if g > 0 or s > 0 or d > 0 or p > 0 or o:
+                                zi_ok = True
+                                break
+                        if not zi_ok:
+                            zile_goale.append(curr_d.strftime("%d.%m.%Y"))
+                        curr_d += timedelta(days=1)
+                        
+                    if zile_goale:
+                        st.error(f"⚠️ S-au detectat {len(zile_goale)} zile fără nicio valoare înregistrată între {start_d.strftime('%d.%m.%Y')} și {azi_dt.strftime('%d.%m.%Y')}:")
+                        st.write(", ".join(zile_goale))
+                    else:
+                        st.success(f"✅ Excelent! Toate zilele din intervalul {start_d.strftime('%d.%m.%Y')} - {azi_dt.strftime('%d.%m.%Y')} conțin cel puțin o valoare sau observație.")
+                else:
+                    st.info("Nicio înregistrare găsită.")
+            else:
+                st.info("Fișierul de date nu există.")
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
         if os.path.exists(BACKUP_LOG_FILE):
             try:
                 with open(BACKUP_LOG_FILE, "r") as f:
@@ -1622,7 +1666,7 @@ with tab_dict["⚙️ Setări"]:
         st.markdown("<br>", unsafe_allow_html=True)
 
         if st.button("🔌 Forțează Trimite Backup Complet Acum (Toate Fișierele)", type="primary"):
-            save_all_files() # Sincronizăm starea pe disc înainte de backup forțat
+            save_all_files()
             test_dest = st.session_state.settings.get("email_sender", "")
             if not test_dest:
                 st.error("Completează și salvează mai întâi adresa de email a expeditorului.")

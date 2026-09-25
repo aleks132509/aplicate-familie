@@ -1619,7 +1619,7 @@ with tab_dict["⚙️ Setări"]:
                     curr_d = start_d
                     while curr_d <= azi_dt:
                         df_zi = df_gap_chk[df_gap_chk["Dată_dt"].dt.date == curr_d]
-                         zi_ok = False
+                        zi_ok = False
                         for _, r in df_zi.iterrows():
                             g = float(r.get("Glicemie", 0) or 0)
                             s = float(r.get("Sistolică" if "Sistolică" in df_gap_chk.columns else "Sistolica", 0) or 0)

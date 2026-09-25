@@ -308,7 +308,7 @@ def get_chronological_backup_df():
         if obs_col_name in df_b.columns:
             mask_are_date = mask_are_date | (df_b[obs_col_name].astype(str).str.strip() != "")
         
-        # Păstrăm exclusiv rândurile care au date sau observații (fără rânduri goale)
+        # Păstrăm exclusiv rândurile care au date sau observații
         df_b = df_b[mask_are_date]
 
         df_all = df_b.copy()
@@ -414,7 +414,6 @@ def verifica_si_fa_backup_automat():
                     pass
             
             if ultima_alerta_23 != azi.strftime("%Y-%m-%d"):
-                # Verificăm dacă există date azi
                 if os.path.exists(DATA_FILE):
                     df_chk = pd.read_csv(DATA_FILE)
                     df_chk["Dată_dt"] = parse_flexible_date(df_chk["Dată" if "Dată" in df_chk.columns else "Data"])
@@ -437,7 +436,7 @@ def verifica_si_fa_backup_automat():
                         with open(ALERT_23_LOG, "w") as f:
                             f.write(azi.strftime("%Y-%m-%d"))
 
-        # 2. VERIFICARE ZILE LIPSĂ / GAP DETECTION (ex: zile din trecut fără nicio valoare)
+        # 2. VERIFICARE ZILE LIPSĂ / GAP DETECTION
         ultima_alerta_gap = ""
         if os.path.exists(ALERT_GAP_LOG):
             try:
@@ -453,12 +452,11 @@ def verifica_si_fa_backup_automat():
             
             if not df_gaps.empty:
                 min_d = df_gaps["Dată_dt"].dt.date.min()
-                # Verificăm fiecare zi de la prima înregistrare până ieri
                 zile_lipsa = []
                 curr_d = min_d
                 while curr_d < azi:
                     df_zi = df_gaps[df_gaps["Dată_dt"].dt.date == curr_d]
-                     zi_valida = False
+                    zi_valida = False
                     for _, r in df_zi.iterrows():
                         g = float(r.get("Glicemie", 0) or 0)
                         s = float(r.get("Sistolică" if "Sistolică" in df_gaps.columns else "Sistolica", 0) or 0)
@@ -474,7 +472,7 @@ def verifica_si_fa_backup_automat():
                 
                 if zile_lipsa:
                     msg_gap = f"🚨 ALERTĂ INTEGRITATE JURNAL - HEALTHTRACK PRO\n\nS-au detectat zile anterioare în care nu există nicio valoare sau observație înregistrată:\n"
-                    for z_l in zile_lipsa[-5:]: # Ultimele 5 zile lipsă detectate
+                    for z_l in zile_lipsa[-5:]:
                         msg_gap += f"• Data de {z_l} este complet goală sau lipsă.\n"
                     msg_gap += "\nVă rugăm să verificați aplicația pentru a asigura continuitatea istoricului medical."
                     
@@ -495,8 +493,6 @@ def verifica_si_fa_backup_automat():
         if ultima_data is None or ultima_data < azi:
             df_cron = get_chronological_backup_df()
             temp_backup_file = "temp_backup_cron.csv"
-            temp_meds_backup = "temp_meds_backup.csv"
-            temp_prog_backup = "temp_prog_backup.csv"
             attachments = {}
             fisiere_incluse = []
 
@@ -522,8 +518,6 @@ def verifica_si_fa_backup_automat():
                     file_paths_dict=attachments
                 )
                 if os.path.exists(temp_backup_file): os.remove(temp_backup_file)
-                if os.path.exists(temp_meds_backup): os.remove(temp_meds_backup)
-                if os.path.exists(temp_prog_backup): os.remove(temp_prog_backup)
 
                 if succes:
                     with open(BACKUP_LOG_FILE, "w") as f:

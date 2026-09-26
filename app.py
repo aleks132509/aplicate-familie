@@ -210,10 +210,10 @@ def get_initial_meds():
         {"Medicament": "Lipantil Nano", "Doză": "145 mg", "Orar / Frecvență": "Pranz, dupa masa", "Observații": ""},
         {"Medicament": "Sortis", "Doză": "20 mg", "Orar / Frecvență": "Seara, dupa masa", "Observații": ""},
         {"Medicament": "Omacor", "Doză": "1000 mg", "Orar / Frecvență": "Dimineața, la prânz și seara, dupa masa", "Observații": ""},
-        {"Medicament": "Diaprel MR", "Doză": "60 mg", "Orar / Frecvență": "Dimineața, inainte masa", "Observații": "1/2 din doza"},
+        {"Medicament": "Diaprel MR", "Doză": "60 mg 1/2", "Orar / Frecvență": "Dimineața, inainte masa", "Observații": "1/2 din doza"},
         {"Medicament": "Larginina", "Doză": "1000 mg", "Orar / Frecvență": "Pranz, dupa masa", "Observații": "10 zile pe luna"},
-        {"Medicament": "Atacand", "Doză": "8 mg", "Orar / Frecvență": "Seara, dupa masa", "Observații": ""},
-        {"Medicament": "Nebilet", "Doză": "5 mg", "Orar / Frecvență": "Dimineața, dupa masa", "Observații": ""},
+        {"Medicament": "Atacand", "Doză": "8 mg 1/2", "Orar / Frecvență": "Seara, dupa masa", "Observații": "1/2 optional"},
+        {"Medicament": "Nebilet", "Doză": "5 mg 1/2", "Orar / Frecvență": "Dimineața, dupa masa", "Observații": "1/2 din doza"},
         {"Medicament": "Aspenter", "Doză": "75 mg", "Orar / Frecvență": "Pranz, dupa masa", "Observații": ""},
     ])
     df_init_m.to_csv(MEDS_FILE, index=False)
@@ -385,7 +385,17 @@ def get_filtered_daily_data_df():
         if obs_col_name in df_r.columns:
             mask_are_date = mask_are_date | (df_r[obs_col_name].apply(clean_obs) != "")
 
-        return df_r[mask_are_date]
+        df_r = df_r[mask_are_date].copy()
+
+        if obs_col_name in df_r.columns:
+            df_r[obs_col_name] = df_r[obs_col_name].apply(clean_obs)
+
+        # Fără diacritice, la fel ca în CSV-ul cronologic (backup_date_medicale.csv)
+        for col in df_r.columns:
+            df_r[col] = df_r[col].apply(lambda x: remove_diacritics(str(x)) if pd.notna(x) and str(x).strip() not in ["nan", "None", ""] else "")
+        df_r.columns = [remove_diacritics(c) for c in df_r.columns]
+
+        return df_r
     except:
         return pd.DataFrame()
 

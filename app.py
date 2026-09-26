@@ -179,14 +179,6 @@ def save_persisted_settings(settings_dict):
         pass
 
 def get_initial_meds():
-    if os.path.exists(MEDS_FILE):
-        try:
-            df_m = pd.read_csv(MEDS_FILE)
-            if not df_m.empty:
-                return df_m
-        except:
-            pass
-            
     df_init_m = pd.DataFrame([
         {"Medicament": "Glucophage", "Doză": "1000 mg", "Orar / Frecvență": "Dimineața și seara, dupa masa", "Observații": ""},
         {"Medicament": "Lagosa", "Doză": "150 mg", "Orar / Frecvență": "Dimineața și seara, dupa masa", "Observații": ""},
@@ -199,6 +191,21 @@ def get_initial_meds():
         {"Medicament": "Nebilet", "Doză": "5 mg", "Orar / Frecvență": "Dimineața, dupa masa", "Observații": ""},
         {"Medicament": "Aspenter", "Doză": "75 mg", "Orar / Frecvență": "Pranz, dupa masa", "Observații": ""},
     ])
+    if os.path.exists(MEDS_FILE):
+        try:
+            df_m = pd.read_csv(MEDS_FILE)
+            if not df_m.empty:
+                # Verificăm și setăm corect Diaprel MR cu 1/2 din doză dacă lipsește
+                mask_diaprel = df_m["Medicament"].str.contains("Diaprel", case=False, na=False)
+                if mask_diaprel.any():
+                    df_m.loc[mask_diaprel, "Observații"] = "1/2 din doza"
+                else:
+                    df_m = pd.concat([df_m, df_init_m[df_init_m["Medicament"] == "Diaprel MR"]], ignore_index=True)
+                df_m.to_csv(MEDS_FILE, index=False)
+                return df_m
+        except:
+            pass
+            
     df_init_m.to_csv(MEDS_FILE, index=False)
     return df_init_m
 
@@ -491,34 +498,77 @@ def verifica_si_fa_backup_automat():
 
         if ultima_data is None or ultima_data < azi:
             temp_backup_file = "temp_backup_cron.csv"
-            temp_raw_data_file = "temp_raw_data.csv"
             attachments = {}
-            fisiere_incluse = []
 
             # 1. CSV-ul cronologic formatat
             df_cron = get_chronological_backup_df()
             if not df_cron.empty:
                 df_cron.to_csv(temp_backup_file, index=False)
                 attachments["backup_date_medicale.csv"] = temp_backup_file
-                fisiere_incluse.append("backup_date_medicale.csv")
 
             # 2. CSV-ul brut complet actualizat cu datele medicale
             if os.path.exists(DATA_FILE):
                 attachments["date_medicale_utilizator.csv"] = DATA_FILE
-                fisiere_incluse.append("date_medicale_utilizator.csv")
 
             # 3. CSV-ul cu medicamente
             if os.path.exists(MEDS_FILE):
                 attachments["medicamente.csv"] = MEDS_FILE
-                fisiere_incluse.append("medicamente.csv")
 
             # 4. CSV-ul cu programări
             if os.path.exists(PROG_FILE):
                 attachments["programari_medicale.csv"] = PROG_FILE
-                fisiere_incluse.append("programari_medicale.csv")
 
             if attachments:
-                mesaj_backup = f"Salut!\n\nAcesta este backup-ul tău zilnic automat generat la data de {azi.strftime('%d.%m.%Y')}.\nConține toate fișierele up-to-date (inclusiv baza de date completă cu datele medicale).\n\nHealthTrack Pro System"
+                # Construire mesaj detaliat cu buline și doar zilele/intrările active (fără zile goale)
+                mesaj_backup = f"💾 RAPORT BACKUP ZILNIC & SINTEZĂ MEDICALĂ - HEALTHTRACK PRO\n"
+                mesaj_backup += f"Data generare: {datetime.now().strftime('%d.%m.%Y %H:%M')}\n\n"
+                
+                mesaj_backup += "--- 🩺 ULTIMELE MĂSURĂTORI & NOTE (Zile Active) ---\n"
+                df_cron_b = get_chronological_backup_df()
+                if not df_cron_b.empty:
+                    for _, r in df_cron_b.tail(25).iterrows():
+                        d_val = r.get("Data", r.get("Dată", ""))
+                        m_val = r.get("Moment Zi", "")
+                        g_val = r.get("Glicemie", "")
+                        s_val = r.get("Sistolică", r.get("Sistolica", ""))
+                        d_sis_val = r.get("Diastolică", r.get("Diastolica", ""))
+                        p_val = r.get("Puls", "")
+                        o_val = r.get("Observații", r.get("Observatii", ""))
+                        
+                        detalii_parti = []
+                        if g_val and str(g_val).strip() not in ["", "0"]: detalii_parti.append(f"Glicemie: {g_val} mg/dL")
+                        if s_val and str(s_val).strip() not in ["", "0"] and d_sis_val and str(d_sis_val).strip() not in ["", "0"]:
+                            detalii_parti.append(f"TA: {s_val}/{d_sis_val} mmHg")
+                        if p_val and str(p_val).strip() not in ["", "0"]: detalii_parti.append(f"Puls: {p_val} bpm")
+                        if o_val and str(o_val).strip() not in ["", "nan", "None"]: detalii_parti.append(f"Obs: {o_val}")
+                        
+                        if detalii_parti:
+                            mesaj_backup += f"• [{d_val} | {m_val}] -> " + ", ".join(detalii_parti) + "\n"
+                else:
+                    mesaj_backup += "• Nicio înregistrare disponibilă.\n"
+                    
+                mesaj_backup += "\n--- 💊 SCHEMĂ TRATAMENT CURENTĂ ---\n"
+                if os.path.exists(MEDS_FILE):
+                    try:
+                        df_m_bk = pd.read_csv(MEDS_FILE)
+                        for _, r_m in df_m_bk.iterrows():
+                            obs_m = f" (Obs: {r_m['Observații']})" if pd.notna(r_m.get('Observații')) and str(r_m.get('Observații')).strip() not in ["", "nan"] else ""
+                            mesaj_backup += f"• {r_m['Medicament']} - Doză: {r_m['Doză']} | Orar: {r_m['Orar / Frecvență']}{obs_m}\n"
+                    except:
+                        mesaj_backup += "• Nu s-a putut citi fișierul de tratament.\n"
+                        
+                mesaj_backup += "\n--- 📅 PROGRAMĂRI MEDICALE ---\n"
+                if os.path.exists(PROG_FILE):
+                    try:
+                        df_p_bk = pd.read_csv(PROG_FILE)
+                        for _, r_p in df_p_bk.iterrows():
+                            ef = r_p.get('Efectuat', 'Nu')
+                            mesaj_backup += f"• Data: {r_p['Dată']} {r_p.get('Ora', '')} | {r_p['Tip']} la {r_p.get('Clinică', '-')} [Efectuat: {ef}]\n"
+                    except:
+                        mesaj_backup += "• Nicio programare înregistrată.\n"
+                        
+                mesaj_backup += "\nToate fișierele CSV actualizate sunt atașate acestui email.\nHealthTrack Pro System"
+
                 succes, _ = trimite_email_cu_multiple_atasamente(
                     destinatar=email_dest,
                     subiect=f"💾 [Backup Zilnic Automat] HealthTrack Pro - {azi.strftime('%d.%m.%Y')}",
@@ -1629,370 +1679,42 @@ with tab_dict["⚙️ Setări"]:
                         
                     zile_goale = []
                     curr_d = start_d
-                    while curr_d <= azi_dt:
+                    while curr_d < azi_dt:
                         df_zi = df_gap_chk[df_gap_chk["Dată_dt"].dt.date == curr_d]
-                        zi_ok = False
+                         zi_valida = False
                         for _, r in df_zi.iterrows():
                             g = float(r.get("Glicemie", 0) or 0)
-                            s = float(r.get("Sistolică" if "Sistolică" in df_gap_chk.columns else "Sistolica", 0) or 0)
-                            d = float(r.get("Diastolică" if "Diastolică" in df_gap_chk.columns else "Diastolica", 0) or 0)
+                            s = float(r.get("Sistolică" if "Sistolică" in df_zi.columns else "Sistolica", 0) or 0)
+                            d = float(r.get("Diastolică" if "Diastolică" in df_zi.columns else "Diastolica", 0) or 0)
                             p = float(r.get("Puls", 0) or 0)
-                            o = clean_obs(r.get("Observații" if "Observații" in df_gap_chk.columns else "Observatii", ""))
+                            o = clean_obs(r.get("Observații" if "Observații" in df_zi.columns else "Observatii", ""))
                             if g > 0 or s > 0 or d > 0 or p > 0 or o:
-                                zi_ok = True
+                                zi_valida = True
                                 break
-                        if not zi_ok:
+                        if not zi_valida:
                             zile_goale.append(curr_d.strftime("%d.%m.%Y"))
                         curr_d += timedelta(days=1)
                         
                     if zile_goale:
-                        st.error(f"⚠️ S-au detectat {len(zile_goale)} zile fără nicio valoare înregistrată între {start_d.strftime('%d.%m.%Y')} și {azi_dt.strftime('%d.%m.%Y')}:")
-                        st.write(", ".join(zile_goale))
+                        st.warning(f"⚠️ S-au găsit {len(zile_goale)} zile fără înregistrări în intervalul selectat:")
+                        for z in zile_goale:
+                            st.write(f"• {z}")
                     else:
-                        st.success(f"✅ Excelent! Toate zilele din intervalul {start_d.strftime('%d.%m.%Y')} - {azi_dt.strftime('%d.%m.%Y')} conțin cel puțin o valoare sau observație.")
-                else:
-                    st.info("Nicio înregistrare găsită.")
+                        st.success("✅ Toate zilele din interval au cel puțin o valoare sau notiță înregistrată!")
             else:
-                st.info("Fișierul de date nu există.")
-
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        if os.path.exists(BACKUP_LOG_FILE):
-            try:
-                with open(BACKUP_LOG_FILE, "r") as f:
-                    last_ok = f.read().strip()
-                st.success(f"✅ Ultimul backup automat reușit: {last_ok}")
-            except:
-                pass
-        else:
-            st.info("ℹ️ Nu a fost trimis încă niciun backup automat.")
-
-        if os.path.exists(BACKUP_ERROR_LOG_FILE):
-            try:
-                with open(BACKUP_ERROR_LOG_FILE, "r") as f:
-                    last_err = f.read().strip()
-                st.error(f"❌ Ultima eroare la backup automat: {last_err}")
-            except:
-                pass
-
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        if st.button("🔌 Forțează Trimite Backup Complet Acum (Toate Fișierele)", type="primary"):
-            save_all_files()
-            test_dest = st.session_state.settings.get("email_sender", "")
-            if not test_dest:
-                st.error("Completează și salvează mai întâi adresa de email a expeditorului.")
-            else:
-                temp_test_file = "temp_test_backup.csv"
-                attachments = {}
-                fisiere_incluse = []
-
-                df_test_cron = get_chronological_backup_df()
-                if not df_test_cron.empty:
-                    df_test_cron.to_csv(temp_test_file, index=False)
-                    attachments["backup_date_medicale.csv"] = temp_test_file
-                    fisiere_incluse.append("backup_date_medicale.csv")
-
-                if os.path.exists(DATA_FILE):
-                    attachments["date_medicale_utilizator.csv"] = DATA_FILE
-                    fisiere_incluse.append("date_medicale_utilizator.csv")
-
-                if os.path.exists(MEDS_FILE):
-                    attachments["medicamente.csv"] = MEDS_FILE
-                    fisiere_incluse.append("medicamente.csv")
-
-                if os.path.exists(PROG_FILE):
-                    attachments["programari_medicale.csv"] = PROG_FILE
-                    fisiere_incluse.append("programari_medicale.csv")
-
-                success_t, msg_t = trimite_email_cu_multiple_atasamente(
-                    test_dest,
-                    f"🧪 Test Forțat / Backup HealthTrack Pro ({len(fisiere_incluse)}/4 fișiere)",
-                    f"Salut! Acesta este un email de test forțat.\n\nFișiere incluse ({len(fisiere_incluse)}/4): {', '.join(fisiere_incluse)}",
-                    attachments
-                )
-                
-                if os.path.exists(temp_test_file): os.remove(temp_test_file)
-
-                if success_t:
-                    st.success(f"✅ Emailul de backup a fost trimis cu succes prin iCloud!")
-                else:
-                    st.error(f"❌ {msg_t}")
-
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.markdown("#### 💾 Backup Manual (CSV Cronologic Date Medicale)")
-        df_backup_cron = get_chronological_backup_df()
-        if not df_backup_cron.empty:
-            csv_data = df_backup_cron.to_csv(index=False).encode('utf-8')
-            st.download_button(label="📥 Descarcă Backup CSV Cronologic", data=csv_data, file_name="backup_date_medicale.csv", mime="text/csv", use_container_width=True)
+                st.info("Nu există fișier de date.")
 
     with col_set2:
-        st.markdown("#### 🎯 Valori Țintă Medicale")
-        st.session_state.settings["target_glic_min"] = st.number_input("Glicemie Min Înainte Masă", value=st.session_state.settings["target_glic_min"], disabled=not is_admin)
-        st.session_state.settings["target_glic_max"] = st.number_input("Glicemie Max Înainte Masă", value=st.session_state.settings["target_glic_max"], disabled=not is_admin)
-        st.session_state.settings["target_glic_post_max"] = st.number_input("Glicemie Max După Masă", value=st.session_state.settings["target_glic_post_max"], disabled=not is_admin)
-        st.session_state.settings["target_ta_sis"] = st.number_input("TA Sistolică Max Țintă", value=st.session_state.settings["target_ta_sis"], disabled=not is_admin)
-        st.session_state.settings["target_ta_dia"] = st.number_input("TA Diastolică Max Țintă", value=st.session_state.settings["target_ta_dia"], disabled=not is_admin)
-
-# ----------------- TAB: RAPORT PDF -----------------
-with tab_dict["📄 Raport PDF"]:
-    st.markdown("### 📄 Generare Raport PDF Personalizat și Profesional")
-    st.markdown(f"Raportul va include datele conform filtrului aplicat: **{filtru_luni_str}**.")
-
-    col_opt1, col_opt2 = st.columns(2)
-    with col_opt1:
-        opt_glic = st.checkbox("Include Grafic Glicemie 🩸", value=True)
-        opt_ta = st.checkbox("Include Grafic Tensiune Arterială 🫀", value=True)
-    with col_opt2:
-        opt_puls = st.checkbox("Include Grafic Puls 💓", value=True)
-        opt_tabele = st.checkbox("Include Tabelul Centralizator (Curat, Toate Înregistrările Active) 📋", value=True)
-
-    def generate_pdf_chart_glic(x_vals, y_vals, moments_list, title, ylabel, color_hex):
-        plt.figure(figsize=(9.5, 3.4))
-        for i in range(len(y_vals) - 1):
-            x_seg = [x_vals[i], x_vals[i+1]]
-            y_seg = [y_vals[i], y_vals[i+1]]
-            is_spike1 = is_glic_spike(y_vals[i], moments_list[i])
-            is_spike2 = is_glic_spike(y_vals[i+1], moments_list[i+1])
-            seg_color = "#dc2626" if (is_spike1 or is_spike2) else color_hex
-            plt.plot(x_seg, y_seg, linestyle="-", color=seg_color, linewidth=2.5)
-
-        for xi, yi, m in zip(x_vals, y_vals, moments_list):
-            if yi > 0:
-                is_spike = is_glic_spike(yi, m)
-                dot_color = "#dc2626" if is_spike else color_hex
-                plt.plot(xi, yi, marker="o", markersize=6.5, color=dot_color)
-                plt.annotate(str(int(yi)), (xi, yi), textcoords="offset points", xytext=(0, 7), ha="center", fontsize=7.5, fontweight="bold", bbox=dict(boxstyle="round,pad=0.15", fc="white", ec=dot_color, alpha=0.95))
+        st.markdown("#### 🧪 Testare Manuală Backup & Raport Email")
+        test_email_dest = st.text_input("Email test destinatar", value=st.session_state.settings.get("email_sender", ""))
         
-        max_y = max(y_vals) if y_vals and max(y_vals) > 0 else 200
-        plt.ylim(0, max(max_y * 1.25, 220))
-        plt.title(title + " | Legenda: Albastru = Normal, Rosu = Spike / Afara pragului", fontsize=9.5, fontweight="bold", color="#1e3a8a", pad=15)
-        plt.ylabel(ylabel, fontsize=9, fontweight="bold")
-        plt.xticks(rotation=35, fontsize=7.5, ha="right")
-        plt.yticks(fontsize=8)
-        plt.grid(True, linestyle=":", alpha=0.7)
-        plt.tight_layout()
-
-        img_buffer = io.BytesIO()
-        plt.savefig(img_buffer, format="png", dpi=250)
-        plt.close()
-        img_buffer.seek(0)
-        return img_buffer
-
-    def generate_pdf_chart_ta(x_vals, sis_vals, dia_vals, title):
-        plt.figure(figsize=(9.5, 3.4))
-        for i in range(len(sis_vals) - 1):
-            x_seg = [x_vals[i], x_vals[i+1]]
-            s_seg = [sis_vals[i], sis_vals[i+1]]
-            d_seg = [dia_vals[i], dia_vals[i+1]]
-            is_spike1 = is_ta_spike(sis_vals[i], dia_vals[i])
-            is_spike2 = is_ta_spike(sis_vals[i+1], dia_vals[i+1])
-            s_color = "#dc2626" if (is_spike1 or is_spike2) else "#2563eb"
-            d_color = "#dc2626" if (is_spike1 or is_spike2) else "#f59e0b"
-            plt.plot(x_seg, s_seg, linestyle="-", color=s_color, linewidth=2.5)
-            plt.plot(x_seg, d_seg, linestyle="-", color=d_color, linewidth=2.5)
-        
-        for xi, s, d in zip(x_vals, sis_vals, dia_vals):
-            if s > 0 and d > 0:
-                is_spike = is_ta_spike(s, d)
-                s_color = "#dc2626" if is_spike else "#2563eb"
-                d_color = "#dc2626" if is_spike else "#f59e0b"
-                plt.plot(xi, s, marker="o", markersize=6.5, color=s_color)
-                plt.annotate(f"S:{int(s)}", (xi, s), textcoords="offset points", xytext=(0, 7), ha="center", fontsize=7, fontweight="bold", bbox=dict(boxstyle="round,pad=0.15", fc="white", ec=s_color, alpha=0.95))
-                plt.plot(xi, d, marker="o", markersize=6.5, color=d_color)
-                plt.annotate(f"D:{int(d)}", (xi, d), textcoords="offset points", xytext=(0, -12), ha="center", fontsize=7, fontweight="bold", bbox=dict(boxstyle="round,pad=0.15", fc="white", ec=d_color, alpha=0.95))
-                
-        all_ta = [s for s in sis_vals if s > 0] + [d for d in dia_vals if d > 0]
-        max_t = max(all_ta) if all_ta else 180
-        plt.ylim(0, max(max_t * 1.25, 200))
-        plt.title(title + " | Legenda: Albastru = Sistolica, Galben = Diastolica, Rosu = Crescuta", fontsize=9.5, fontweight="bold", color="#1e3a8a", pad=15)
-        plt.ylabel("mmHg", fontsize=9, fontweight="bold")
-        plt.xticks(rotation=35, fontsize=7.5, ha="right")
-        plt.yticks(fontsize=8)
-        plt.grid(True, linestyle=":", alpha=0.7)
-        plt.tight_layout()
-
-        img_buffer = io.BytesIO()
-        plt.savefig(img_buffer, format="png", dpi=250)
-        plt.close()
-        img_buffer.seek(0)
-        return img_buffer
-
-    def generate_pdf_chart_puls(x_vals, puls_vals, title):
-        plt.figure(figsize=(9.5, 3.4))
-        for i in range(len(puls_vals) - 1):
-            x_seg = [x_vals[i], x_vals[i+1]]
-            p_seg = [puls_vals[i], puls_vals[i+1]]
-            is_spike1 = is_puls_spike(puls_vals[i])
-            is_spike2 = is_puls_spike(puls_vals[i+1])
-            p_color = "#dc2626" if (is_spike1 or is_spike2) else "#10b981"
-            plt.plot(x_seg, p_seg, linestyle="-", color=p_color, linewidth=2.5)
-
-        for xi, p in zip(x_vals, puls_vals):
-            if p > 0:
-                is_spike = is_puls_spike(p)
-                p_color = "#dc2626" if is_spike else "#10b981"
-                plt.plot(xi, p, marker="o", markersize=6.5, color=p_color)
-                plt.annotate(str(int(p)), (xi, p), textcoords="offset points", xytext=(0, 7), ha="center", fontsize=7.5, fontweight="bold", bbox=dict(boxstyle="round,pad=0.15", fc="white", ec=p_color, alpha=0.95))
-                
-        max_p = max(puls_vals) if puls_vals and max(puls_vals) > 0 else 100
-        plt.ylim(30, max(max_p * 1.25, 140))
-        plt.title(title + " | Legenda: Verde = Normal (60-100), Rosu = Afara intervalului", fontsize=9.5, fontweight="bold", color="#1e3a8a", pad=15)
-        plt.ylabel("bpm", fontsize=9, fontweight="bold")
-        plt.xticks(rotation=35, fontsize=7.5, ha="right")
-        plt.yticks(fontsize=8)
-        plt.grid(True, linestyle=":", alpha=0.7)
-        plt.tight_layout()
-
-        img_buffer = io.BytesIO()
-        plt.savefig(img_buffer, format="png", dpi=250)
-        plt.close()
-        img_buffer.seek(0)
-        return img_buffer
-
-    def make_pdf_report(data_frame, include_glic, include_ta, include_puls, include_tables):
-        buffer = io.BytesIO()
-        doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=20, leftMargin=20, topMargin=20, bottomMargin=20)
-        story = []
-        styles = getSampleStyleSheet()
-
-        title_text = remove_diacritics("RAPORT MEDICAL DE MONITORIZARE - HEALTHTRACK PRO")
-        date_text = remove_diacritics(f"Generat la: {datetime.now().strftime('%d.%m.%Y %H:%M')} | Perioada: {filtru_luni_str}")
-
-        story.append(Paragraph(f"<b>{title_text}</b>", ParagraphStyle("TitleStyle", parent=styles["Heading1"], fontSize=13, textColor=colors.HexColor("#1e3a8a"), alignment=1, spaceAfter=12)))
-        story.append(Paragraph(date_text, ParagraphStyle("DateStyle", parent=styles["Normal"], alignment=1, spaceAfter=15)))
-
-        if not data_frame.empty:
-            df_pdf_all = data_frame.copy()
-            df_pdf_glic = df_pdf_all[pd.to_numeric(df_pdf_all[col_glic], errors="coerce").fillna(0) > 0]
-            df_pdf_ta = df_pdf_all[(pd.to_numeric(df_pdf_all[col_sis], errors="coerce").fillna(0) > 0) | (pd.to_numeric(df_pdf_all[col_dia], errors="coerce").fillna(0) > 0)]
-            df_pdf_puls = df_pdf_all[pd.to_numeric(df_pdf_all[col_puls], errors="coerce").fillna(0) > 0]
-            
-            df_pdf_table = df_pdf_all[
-                (pd.to_numeric(df_pdf_all[col_glic], errors="coerce").fillna(0) > 0) |
-                (pd.to_numeric(df_pdf_all[col_sis], errors="coerce").fillna(0) > 0) |
-                (pd.to_numeric(df_pdf_all[col_dia], errors="coerce").fillna(0) > 0) |
-                (pd.to_numeric(df_pdf_all[col_puls], errors="coerce").fillna(0) > 0) |
-                (df_pdf_all[col_obs].astype(str).str.strip() != "")
-            ]
-
-            if include_glic and not df_pdf_glic.empty:
-                x_g = [f"{d.strftime('%d.%m')} ({m[:3]})" for d, m in zip(df_pdf_glic[date_col], df_pdf_glic[moment_col])]
-                g_vals = pd.to_numeric(df_pdf_glic[col_glic], errors='coerce').fillna(0).tolist()
-                moments_g = df_pdf_glic[moment_col].tolist()
-                story.append(Paragraph("Evolutie Glicemie", styles["Heading2"]))
-                img_buf = generate_pdf_chart_glic(x_g, g_vals, moments_g, "Glicemie (mg/dL)", "mg/dL", "#38bdf8")
-                story.append(Image(img_buf, width=480, height=170))
-                story.append(Spacer(1, 10))
-                
-            if include_ta and not df_pdf_ta.empty:
-                x_ta = [f"{d.strftime('%d.%m')} ({m[:3]})" for d, m in zip(df_pdf_ta[date_col], df_pdf_ta[moment_col])]
-                s_vals = pd.to_numeric(df_pdf_ta[col_sis], errors='coerce').fillna(0).tolist()
-                d_vals = pd.to_numeric(df_pdf_ta[col_dia], errors='coerce').fillna(0).tolist()
-                story.append(Paragraph("Evolutie Tensiune Arteriala", styles["Heading2"]))
-                img_buf = generate_pdf_chart_ta(x_ta, s_vals, d_vals, "Tensiune Arteriala (mmHg)")
-                story.append(Image(img_buf, width=480, height=170))
-                story.append(Spacer(1, 10))
-                
-            if include_puls and not df_pdf_puls.empty:
-                x_p = [f"{d.strftime('%d.%m')} ({m[:3]})" for d, m in zip(df_pdf_puls[date_col], df_pdf_puls[moment_col])]
-                p_vals = pd.to_numeric(df_pdf_puls[col_puls], errors='coerce').fillna(0).tolist()
-                story.append(Paragraph("Evolutie Puls", styles["Heading2"]))
-                img_buf = generate_pdf_chart_puls(x_p, p_vals, "Puls (bpm)")
-                story.append(Image(img_buf, width=480, height=170))
-                story.append(Spacer(1, 10))
-
-            if include_tables and not df_pdf_table.empty:
-                story.append(Paragraph("Date Tabelare si Observatii (Doar Inregistrari Active)", styles["Heading2"]))
-                table_data = [["Data", "Moment", "Glic", "TA", "Puls", "Observatii"]]
-                
-                t_style = [
-                    ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#0284c7")),
-                    ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
-                    ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-                    ('ALIGN', (5,1), (5,-1), 'LEFT'),
-                    ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-                    ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-                    ('FONTSIZE', (0,0), (-1,0), 9),
-                    ('FONTSIZE', (0,1), (-1,-1), 8),
-                    ('TOPPADDING', (0,0), (-1,0), 7),
-                    ('BOTTOMPADDING', (0,0), (-1,0), 7),
-                    ('TOPPADDING', (0,1), (-1,-1), 6),
-                    ('BOTTOMPADDING', (0,1), (-1,-1), 6),
-                    ('LEFTPADDING', (0,0), (-1,-1), 6),
-                    ('RIGHTPADDING', (0,0), (-1,-1), 6),
-                    ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#cbd5e1")),
-                ]
-                
-                obs_style_pdf = ParagraphStyle(
-                    'ObsStylePDF',
-                    parent=styles['Normal'],
-                    fontName='Helvetica',
-                    fontSize=8,
-                    leading=11,
-                    textColor=colors.HexColor("#1e293b")
-                )
-
-                r_idx = 1
-                for _, row in df_pdf_table.iterrows():
-                    dt_str = row[date_col].strftime("%d.%m.%Y")
-                    mm = remove_diacritics(str(row.get(moment_col, "")))
-                    obs_val = clean_obs(row.get(col_obs, ""))
-                    obs_str = remove_diacritics(obs_val)
-                    
-                    obs_paragraph = Paragraph(obs_str, obs_style_pdf)
-                    
-                    glic_v = row.get(col_glic, 0)
-                    sis_v = row.get(col_sis, 0)
-                    dia_v = row.get(col_dia, 0)
-                    puls_v = row.get(col_puls, 0)
-                    
-                    g_str = str(int(glic_v)) if pd.notna(glic_v) and float(glic_v)>0 else ""
-                    ta_str = f"{int(sis_v)}/{int(dia_v)}" if pd.notna(sis_v) and float(sis_v)>0 else ""
-                    p_str = str(int(puls_v)) if pd.notna(puls_v) and float(puls_v)>0 else ""
-                    
-                    table_data.append([dt_str, mm, g_str, ta_str, p_str, obs_paragraph])
-                    
-                    if r_idx % 2 == 0:
-                        t_style.append(('BACKGROUND', (0, r_idx), (-1, r_idx), colors.HexColor("#f8fafc")))
-                    else:
-                        t_style.append(('BACKGROUND', (0, r_idx), (-1, r_idx), colors.HexColor("#ffffff")))
-                    
-                    ev_g = evaluate_glic(glic_v, mm)
-                    if "🟢" in ev_g: t_style.append(('TEXTCOLOR', (2, r_idx), (2, r_idx), colors.HexColor("#16a34a")))
-                    elif "🔴" in ev_g: t_style.append(('TEXTCOLOR', (2, r_idx), (2, r_idx), colors.HexColor("#dc2626")))
-                    
-                    ev_ta = evaluate_ta(sis_val=sis_v, dia_val=dia_v)
-                    if "🟢" in ev_ta: t_style.append(('TEXTCOLOR', (3, r_idx), (3, r_idx), colors.HexColor("#16a34a")))
-                    elif "🔴" in ev_ta: t_style.append(('TEXTCOLOR', (3, r_idx), (3, r_idx), colors.HexColor("#dc2626")))
-                    
-                    ev_p = evaluate_puls(puls_v)
-                    if "🟢" in ev_p: t_style.append(('TEXTCOLOR', (4, r_idx), (4, r_idx), colors.HexColor("#16a34a")))
-                    elif "🔴" in ev_p: t_style.append(('TEXTCOLOR', (4, r_idx), (4, r_idx), colors.HexColor("#dc2626")))
-                    
-                    r_idx += 1
-                
-                t = Table(table_data, colWidths=[65, 115, 40, 55, 40, 200], repeatRows=1)
-                t.setStyle(TableStyle(t_style))
-                story.append(t)
-        else:
-            story.append(Paragraph("Nu exista date pentru perioada selectata.", styles["Normal"]))
-
-        doc.build(story)
-        buffer.seek(0)
-        return buffer
-
-    if st.button("Crează Raport PDF", type="primary"):
-        pdf_buffer = make_pdf_report(view_df, opt_glic, opt_ta, opt_puls, opt_tabele)
-        file_name = f"Raport_Medical_{filtru_luni_str.replace(', ', '_')}.pdf"
-        
-        b64_pdf = base64.b64encode(pdf_buffer.getvalue()).decode('utf-8')
-        href = f'''
-        <div style="text-align: center; margin-top: 15px;">
-            <a href="data:application/pdf;base64,{b64_pdf}" download="{file_name}" target="_blank" style="display:inline-block; padding: 14px 24px; background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); color: white; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
-                📥 Descarcă / Deschide Raport PDF (Fereastră Nouă)
-            </a>
-        </div>
-        '''
-        st.markdown(href, unsafe_allow_html=True)
-        st.success("✅ Raportul PDF a fost generat cu succes!")
+        if st.button("🚀 Execută și Trimite Backup Acum", type="primary", use_container_width=True):
+            if not test_email_dest:
+                st.error("Introduceți adresa de email destinatar.")
+            else:
+                save_all_files()
+                # Forțare resetare log temporar pentru a rula testul acum
+                if os.path.exists(BACKUP_LOG_FILE):
+                    os.remove(BACKUP_LOG_FILE)
+                verifica_si_fa_backup_automat()
+                st.success("✅ Procedura de backup și sinteză a fost executată! Verificați căsuța de email.")

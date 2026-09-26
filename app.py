@@ -681,7 +681,11 @@ def get_initial_data():
         {"Dată": "24.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 118, "Sistolică": 110, "Diastolică": 69, "Puls": 74, "Observații": ""},
         {"Dată": "24.09.2026", "Moment Zi": "Prânz - Înainte de masă", "Glicemie": 113, "Sistolică": 123, "Diastolică": 83, "Puls": 71, "Observații": ""},
         {"Dată": "24.09.2026", "Moment Zi": "Prânz - După masă", "Glicemie": 107, "Sistolică": 118, "Diastolică": 79, "Puls": 76, "Observații": ""},
-        {"Dată": "24.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 110, "Sistolică": 115, "Diastolică": 72, "Puls": 74, "Observații": ""}
+        {"Dată": "24.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 110, "Sistolică": 115, "Diastolică": 72, "Puls": 74, "Observații": ""},
+        {"Dată": "25.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 123, "Sistolică": 115, "Diastolică": 71, "Puls": 78, "Observații": ""},
+        {"Dată": "25.09.2026", "Moment Zi": "Prânz - Înainte de masă", "Glicemie": 92, "Sistolică": 128, "Diastolică": 78, "Puls": 86, "Observații": ""},
+        {"Dată": "25.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 113, "Sistolică": 130, "Diastolică": 88, "Puls": 74, "Observații": ""},
+        {"Dată": "26.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 121, "Sistolică": 116, "Diastolică": 72, "Puls": 81, "Observații": "mancat tarziu"}
     ]
 
     for r_def in initial_defaults:
@@ -1596,7 +1600,6 @@ with tab_dict["⚙️ Setări"]:
         st.markdown("<small>💡 *Notă: Nu folosi parola ta principală Apple ID. Generează o App-Specific Password din portalul tău Apple ID.*</small>", unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
 
-        # --- BUTON NOU: VERIFICARE MANUALĂ ZILE LIPSĂ ---
         st.markdown("#### 🔍 Verificare Integritate Jurnal (Zile Lipsă)")
         check_start_mode = st.radio("Perioada de verificare:", ["De la prima înregistrare (12.09)", "De la 1 ale lunii curente"], horizontal=True, key="chk_mode_radio")
         

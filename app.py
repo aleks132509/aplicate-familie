@@ -21,10 +21,10 @@ from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Tabl
 import streamlit as st
 
 # ==========================================
-# CONFIGURARE PAGINĂ & THEME (DARK MODE + MULTISELECT LUX)
+# CONFIGURARE PAGINA & THEME (DARK MODE + MULTISELECT LUX)
 # ==========================================
 st.set_page_config(
-    page_title="HealthTrack Pro - Monitorizare Sănătate",
+    page_title="HealthTrack Pro - Monitorizare Sanatate",
     layout="wide",
     page_icon="🩺",
     initial_sidebar_state="expanded",
@@ -131,7 +131,7 @@ def trigger_rerun():
         st.experimental_rerun()
 
 # ==========================================
-# GESTIONARE FIȘIERE PERSISTENTE & SETĂRI EMAIL
+# GESTIONARE FISIERE PERSISTENTE & SETARI EMAIL
 # ==========================================
 DATA_FILE = "date_medicale_utilizator.csv"
 MEDS_FILE = "medicamente.csv"
@@ -145,12 +145,12 @@ ALERT_GAP_LOG = "ultima_alerta_gap.txt"
 SETTINGS_FILE = "setari_email.json"
 
 moment_order = [
-    'Dimineața - Înainte de masă',
-    'Dimineața - După masă',
-    'Prânz - Înainte de masă',
-    'Prânz - După masă',
-    'Seara - Înainte de masă',
-    'Seara - După masă'
+    'Dimineata - Inainte de masa',
+    'Dimineata - Dupa masa',
+    'Pranz - Inainte de masa',
+    'Pranz - Dupa masa',
+    'Seara - Inainte de masa',
+    'Seara - Dupa masa'
 ]
 
 def load_persisted_settings():
@@ -179,40 +179,33 @@ def save_persisted_settings(settings_dict):
         pass
 
 def get_initial_meds():
-    df_init_m = pd.DataFrame([
-        {"Medicament": "Glucophage", "Doză": "1000 mg", "Orar / Frecvență": "Dimineața și seara, dupa masa", "Observații": ""},
-        {"Medicament": "Lagosa", "Doză": "150 mg", "Orar / Frecvență": "Dimineața și seara, dupa masa", "Observații": ""},
-        {"Medicament": "Lipantil Nano", "Doză": "145 mg", "Orar / Frecvență": "Pranz, dupa masa", "Observații": ""},
-        {"Medicament": "Sortis", "Doză": "20 mg", "Orar / Frecvență": "Seara, dupa masa", "Observații": ""},
-        {"Medicament": "Omacor", "Doză": "1000 mg", "Orar / Frecvență": "Dimineața, la prânz și seara, dupa masa", "Observații": ""},
-        {"Medicament": "Diaprel MR", "Doză": "60 mg", "Orar / Frecvență": "Dimineața, inainte masa", "Observații": "1/2 din doza"},
-        {"Medicament": "Larginina", "Doză": "1000 mg", "Orar / Frecvență": "Pranz, dupa masa", "Observații": "10 zile pe luna"},
-        {"Medicament": "Atacand", "Doză": "8 mg", "Orar / Frecvență": "Seara, dupa masa", "Observații": ""},
-        {"Medicament": "Nebilet", "Doză": "5 mg", "Orar / Frecvență": "Dimineața, dupa masa", "Observații": ""},
-        {"Medicament": "Aspenter", "Doză": "75 mg", "Orar / Frecvență": "Pranz, dupa masa", "Observații": ""},
-    ])
     if os.path.exists(MEDS_FILE):
         try:
             df_m = pd.read_csv(MEDS_FILE)
             if not df_m.empty:
-                # Verificăm și setăm corect Diaprel MR cu 1/2 din doză dacă lipsește
-                mask_diaprel = df_m["Medicament"].str.contains("Diaprel", case=False, na=False)
-                if mask_diaprel.any():
-                    df_m.loc[mask_diaprel, "Observații"] = "1/2 din doza"
-                else:
-                    df_m = pd.concat([df_m, df_init_m[df_init_m["Medicament"] == "Diaprel MR"]], ignore_index=True)
-                df_m.to_csv(MEDS_FILE, index=False)
                 return df_m
         except:
             pass
             
+    df_init_m = pd.DataFrame([
+        {"Medicament": "Glucophage", "Doza": "1000 mg", "Orar / Frecventa": "Dimineata si seara, dupa masa", "Observatii": ""},
+        {"Medicament": "Lagosa", "Doza": "150 mg", "Orar / Frecventa": "Dimineata si seara, dupa masa", "Observatii": ""},
+        {"Medicament": "Lipantil Nano", "Doza": "145 mg", "Orar / Frecventa": "Pranz, dupa masa", "Observatii": ""},
+        {"Medicament": "Sortis", "Doza": "20 mg", "Orar / Frecventa": "Seara, dupa masa", "Observatii": ""},
+        {"Medicament": "Omacor", "Doza": "1000 mg", "Orar / Frecventa": "Dimineata, la pranz si seara, dupa masa", "Observatii": ""},
+        {"Medicament": "Diaprel MR", "Doza": "60 mg", "Orar / Frecventa": "Dimineata, inainte masa", "Observatii": "1/2 din doza"},
+        {"Medicament": "Larginina", "Doza": "1000 mg", "Orar / Frecventa": "Pranz, dupa masa", "Observatii": "10 zile pe luna"},
+        {"Medicament": "Atacand", "Doza": "8 mg", "Orar / Frecventa": "Seara, dupa masa", "Observatii": ""},
+        {"Medicament": "Nebilet", "Doza": "5 mg", "Orar / Frecventa": "Dimineata, dupa masa", "Observatii": ""},
+        {"Medicament": "Aspenter", "Doza": "75 mg", "Orar / Frecventa": "Pranz, dupa masa", "Observatii": ""},
+    ])
     df_init_m.to_csv(MEDS_FILE, index=False)
     return df_init_m
 
 def get_initial_history():
     if os.path.exists(MEDS_HIST_FILE):
         return pd.read_csv(MEDS_HIST_FILE)
-    return pd.DataFrame(columns=["Data_Ora", "Acțiune", "Medicament", "Detalii"])
+    return pd.DataFrame(columns=["Data_Ora", "Actiune", "Medicament", "Detalii"])
 
 def get_initial_prog():
     if os.path.exists(PROG_FILE):
@@ -221,17 +214,17 @@ def get_initial_prog():
             if not df_p.empty:
                 if "Ora" not in df_p.columns: df_p["Ora"] = "10:00"
                 if "Efectuat" not in df_p.columns: df_p["Efectuat"] = "Nu"
-                if "Clinică" not in df_p.columns: df_p["Clinică"] = "-"
+                if "Clinica" not in df_p.columns: df_p["Clinica"] = "-"
                 if "Zile_Alerta" not in df_p.columns: df_p["Zile_Alerta"] = "1, 3"
-                if "Observații" not in df_p.columns: df_p["Observații"] = ""
+                if "Observatii" not in df_p.columns: df_p["Observatii"] = ""
                 return df_p
         except:
             pass
             
     df_init_p = pd.DataFrame([
-        {"Dată": "2026-10-05", "Ora": "10:00", "Tip": "Eliberare reteta", "Clinică": "Medic de familie", "Zile_Alerta": "1, 3", "Efectuat": "Nu", "Observații": "Ridicare reteta lunara"},
-        {"Dată": "2026-11-29", "Ora": "09:00", "Tip": "Analize de laborator", "Clinică": "Regina Maria", "Zile_Alerta": "1, 3, 7", "Efectuat": "Nu", "Observații": "Repetare analize Diabet"},
-        {"Dată": "2026-12-05", "Ora": "14:30", "Tip": "Consult Diabet", "Clinică": "Dr. Clenciu Craiova", "Zile_Alerta": "2, 5", "Efectuat": "Nu", "Observații": "Reteta 3 luni"},
+        {"Data": "2026-10-05", "Ora": "10:00", "Tip": "Eliberare reteta", "Clinica": "Medic de familie", "Zile_Alerta": "1, 3", "Efectuat": "Nu", "Observatii": "Ridicare reteta lunara"},
+        {"Data": "2026-11-29", "Ora": "09:00", "Tip": "Analize de laborator", "Clinica": "Regina Maria", "Zile_Alerta": "1, 3, 7", "Efectuat": "Nu", "Observatii": "Repetare analize Diabet"},
+        {"Data": "2026-12-05", "Ora": "14:30", "Tip": "Consult Diabet", "Clinica": "Dr. Clenciu Craiova", "Zile_Alerta": "2, 5", "Efectuat": "Nu", "Observatii": "Reteta 3 luni"},
     ])
     df_init_p.to_csv(PROG_FILE, index=False)
     return df_init_p
@@ -248,7 +241,7 @@ def get_initial_foods():
             "fulgi de ovaz", "fulgi de mei", "fulgi de secara", "cartofi fierti", "porumb", "malai (mamaliga)", "mazare", "fasole boabe"
         ],
         "🟢 Indice Glicemic Scazut / Altele": [
-            "cola 0", "pepsi zero", "apa minerala", "cafea fara zahăr", "ceai neindulcit", 
+            "cola 0", "pepsi zero", "apa minerala", "cafea fara zahar", "ceai neindulcit", 
             "stres", "oboseala", "dupa efort fizic", "masa copioasa", "salata verde", "castraveti", "rosii"
         ]
     }
@@ -282,7 +275,7 @@ def save_custom_foods():
 def add_history_entry(actiune, medicament, detalii):
     new_entry = {
         "Data_Ora": datetime.now().strftime("%d.%m.%Y %H:%M"),
-        "Acțiune": actiune,
+        "Actiune": actiune,
         "Medicament": medicament,
         "Detalii": detalii
     }
@@ -294,18 +287,18 @@ def get_chronological_backup_df():
         return pd.DataFrame()
     try:
         df_b = pd.read_csv(DATA_FILE)
-        date_col_name = 'Data' if 'Data' in df_b.columns else 'Dată'
+        date_col_name = 'Data' if 'Data' in df_b.columns else 'Data'
         moment_col_name = 'Moment Zi' if 'Moment Zi' in df_b.columns else 'Moment Zi'
         glic_col_name = 'Glicemie'
-        sis_col_name = 'Sistolică' if 'Sistolică' in df_b.columns else 'Sistolica'
-        dia_col_name = 'Diastolică' if 'Diastolică' in df_b.columns else 'Diastolica'
+        sis_col_name = 'Sistolica' if 'Sistolica' in df_b.columns else 'Sistolica'
+        dia_col_name = 'Diastolica' if 'Diastolica' in df_b.columns else 'Diastolica'
         puls_col_name = 'Puls'
-        obs_col_name = 'Observații' if 'Observații' in df_b.columns else 'Observatii'
+        obs_col_name = 'Observatii' if 'Observatii' in df_b.columns else 'Observatii'
 
         if date_col_name in df_b.columns:
-            df_b["Dată_dt"] = parse_flexible_date(df_b[date_col_name])
+            df_b["Data_dt"] = parse_flexible_date(df_b[date_col_name])
             df_b["Moment_Cat"] = pd.Categorical(df_b[moment_col_name], categories=moment_order, ordered=True)
-            df_b = df_b.dropna(subset=["Dată_dt"]).sort_values(by=["Dată_dt", "Moment_Cat"]).drop(columns=["Dată_dt", "Moment_Cat"])
+            df_b = df_b.dropna(subset=["Data_dt"]).sort_values(by=["Data_dt", "Moment_Cat"]).drop(columns=["Data_dt", "Moment_Cat"])
         
         cols_masuratori = [c for c in [glic_col_name, sis_col_name, dia_col_name, puls_col_name] if c in df_b.columns]
         mask_are_date = pd.Series(False, index=df_b.index)
@@ -358,7 +351,7 @@ def trimite_email_cu_multiple_atasamente(destinatar, subiect, mesaj, file_paths_
     email_password = st.session_state.settings.get("email_password", "").strip()
     
     if not email_sender or not email_password:
-        return False, "Datele de configurare email lipsesc din Setări."
+        return False, "Datele de configurare email lipsesc din Setari."
 
     configs = [
         {"port": 587, "use_ssl": False},
@@ -399,7 +392,7 @@ def trimite_email_cu_multiple_atasamente(destinatar, subiect, mesaj, file_paths_
                 last_error = str(e)
                 time.sleep(1)
                 
-    return False, f"Erore trimitere iCloud: {last_error}"
+    return False, f"Eroare trimitere iCloud: {last_error}"
 
 def verifica_si_fa_backup_automat():
     try:
@@ -424,23 +417,23 @@ def verifica_si_fa_backup_automat():
             if ultima_alerta_23 != azi.strftime("%Y-%m-%d"):
                 if os.path.exists(DATA_FILE):
                     df_chk = pd.read_csv(DATA_FILE)
-                    df_chk["Dată_dt"] = parse_flexible_date(df_chk["Dată" if "Dată" in df_chk.columns else "Data"])
-                    df_azi = df_chk[df_chk["Dată_dt"].dt.date == azi]
+                    df_chk["Data_dt"] = parse_flexible_date(df_chk["Data" if "Data" in df_chk.columns else "Data"])
+                    df_azi = df_chk[df_chk["Data_dt"].dt.date == azi]
                     
                     are_date_azi = False
                     for _, r in df_azi.iterrows():
                         g = float(r.get("Glicemie", 0) or 0)
-                        s = float(r.get("Sistolică" if "Sistolică" in df_azi.columns else "Sistolica", 0) or 0)
-                        d = float(r.get("Diastolică" if "Diastolică" in df_azi.columns else "Diastolica", 0) or 0)
+                        s = float(r.get("Sistolica" if "Sistolica" in df_azi.columns else "Sistolica", 0) or 0)
+                        d = float(r.get("Diastolica" if "Diastolica" in df_azi.columns else "Diastolica", 0) or 0)
                         p = float(r.get("Puls", 0) or 0)
-                        o = clean_obs(r.get("Observații" if "Observații" in df_azi.columns else "Observatii", ""))
+                        o = clean_obs(r.get("Observatii" if "Observatii" in df_azi.columns else "Observatii", ""))
                         if g > 0 or s > 0 or d > 0 or p > 0 or o:
                             are_date_azi = True
                             break
                     
                     if not are_date_azi:
-                        msg_23 = f"⚠️ ATENȚIE! Este ora {datetime.now().strftime('%H:%M')} și nu ați înregistrat nicio măsurătoare sau notiță pentru ziua de astăzi ({azi.strftime('%d.%m.%Y')}). Vă rugăm să actualizați jurnalul în HealthTrack Pro."
-                        trimite_email_cu_multiple_atasamente(email_dest, f"⏰ [Alertă Jurnal Gol] HealthTrack Pro - {azi.strftime('%d.%m.%Y')}", msg_23, {})
+                        msg_23 = f"ATENTIE! Este ora {datetime.now().strftime('%H:%M')} si nu ați înregistrat nicio masuratoare sau notita pentru ziua de astazi ({azi.strftime('%d.%m.%Y')}). Va rugam sa actualizati jurnalul in HealthTrack Pro."
+                        trimite_email_cu_multiple_atasamente(email_dest, f"[Alerta Jurnal Gol] HealthTrack Pro - {azi.strftime('%d.%m.%Y')}", msg_23, {})
                         with open(ALERT_23_LOG, "w") as f:
                             f.write(azi.strftime("%Y-%m-%d"))
 
@@ -454,22 +447,22 @@ def verifica_si_fa_backup_automat():
 
         if ultima_alerta_gap != azi.strftime("%Y-%m-%d") and os.path.exists(DATA_FILE):
             df_gaps = pd.read_csv(DATA_FILE)
-            df_gaps["Dată_dt"] = parse_flexible_date(df_gaps["Dată" if "Dată" in df_gaps.columns else "Data"])
-            df_gaps = df_gaps.dropna(subset=["Dată_dt"])
+            df_gaps["Data_dt"] = parse_flexible_date(df_gaps["Data" if "Data" in df_gaps.columns else "Data"])
+            df_gaps = df_gaps.dropna(subset=["Data_dt"])
             
             if not df_gaps.empty:
-                min_d = df_gaps["Dată_dt"].dt.date.min()
+                min_d = df_gaps["Data_dt"].dt.date.min()
                 zile_lipsa = []
                 curr_d = min_d
                 while curr_d < azi:
-                    df_zi = df_gaps[df_gaps["Dată_dt"].dt.date == curr_d]
+                    df_zi = df_gaps[df_gaps["Data_dt"].dt.date == curr_d]
                     zi_valida = False
                     for _, r in df_zi.iterrows():
                         g = float(r.get("Glicemie", 0) or 0)
-                        s = float(r.get("Sistolică" if "Sistolică" in df_gaps.columns else "Sistolica", 0) or 0)
-                        d = float(r.get("Diastolică" if "Diastolică" in df_gaps.columns else "Diastolica", 0) or 0)
+                        s = float(r.get("Sistolica" if "Sistolica" in df_gaps.columns else "Sistolica", 0) or 0)
+                        d = float(r.get("Diastolica" if "Diastolica" in df_gaps.columns else "Diastolica", 0) or 0)
                         p = float(r.get("Puls", 0) or 0)
-                        o = clean_obs(r.get("Observații" if "Observații" in df_gaps.columns else "Observatii", ""))
+                        o = clean_obs(r.get("Observatii" if "Observatii" in df_gaps.columns else "Observatii", ""))
                         if g > 0 or s > 0 or d > 0 or p > 0 or o:
                             zi_valida = True
                             break
@@ -478,12 +471,12 @@ def verifica_si_fa_backup_automat():
                     curr_d += timedelta(days=1)
                 
                 if zile_lipsa:
-                    msg_gap = f"🚨 ALERTĂ INTEGRITATE JURNAL - HEALTHTRACK PRO\n\nS-au detectat zile anterioare în care nu există nicio valoare sau observație înregistrată:\n"
+                    msg_gap = f"ALERTA INTEGRITATE JURNAL - HEALTHTRACK PRO\n\nS-au detectat zile anterioare in care nu exista nicio valoare sau observatie inregistrata:\n"
                     for z_l in zile_lipsa[-5:]:
-                        msg_gap += f"• Data de {z_l} este complet goală sau lipsă.\n"
-                    msg_gap += "\nVă rugăm să verificați aplicația pentru a asigura continuitatea istoricului medical."
+                        msg_gap += f"- Data de {z_l} este complet goala sau lipsa.\n"
+                    msg_gap += "\nVa rugam sa verificati aplicatia pentru a asigura continuitatea istoricului medical."
                     
-                    trimite_email_cu_multiple_atasamente(email_dest, f"🚨 [Alertă Zile Lipsă] HealthTrack Pro - Detectat gap în jurnal", msg_gap, {})
+                    trimite_email_cu_multiple_atasamente(email_dest, f"[Alerta Zile Lipsa] HealthTrack Pro - Detectat gap in jurnal", msg_gap, {})
                     with open(ALERT_GAP_LOG, "w") as f:
                         f.write(azi.strftime("%Y-%m-%d"))
 
@@ -499,79 +492,31 @@ def verifica_si_fa_backup_automat():
         if ultima_data is None or ultima_data < azi:
             temp_backup_file = "temp_backup_cron.csv"
             attachments = {}
+            fisiere_incluse = []
 
-            # 1. CSV-ul cronologic formatat
             df_cron = get_chronological_backup_df()
             if not df_cron.empty:
                 df_cron.to_csv(temp_backup_file, index=False)
                 attachments["backup_date_medicale.csv"] = temp_backup_file
+                fisiere_incluse.append("backup_date_medicale.csv")
 
-            # 2. CSV-ul brut complet actualizat cu datele medicale
             if os.path.exists(DATA_FILE):
                 attachments["date_medicale_utilizator.csv"] = DATA_FILE
+                fisiere_incluse.append("date_medicale_utilizator.csv")
 
-            # 3. CSV-ul cu medicamente
             if os.path.exists(MEDS_FILE):
                 attachments["medicamente.csv"] = MEDS_FILE
+                fisiere_incluse.append("medicamente.csv")
 
-            # 4. CSV-ul cu programări
             if os.path.exists(PROG_FILE):
                 attachments["programari_medicale.csv"] = PROG_FILE
+                fisiere_incluse.append("programari_medicale.csv")
 
             if attachments:
-                # Construire mesaj detaliat cu buline și doar zilele/intrările active (fără zile goale)
-                mesaj_backup = f"💾 RAPORT BACKUP ZILNIC & SINTEZĂ MEDICALĂ - HEALTHTRACK PRO\n"
-                mesaj_backup += f"Data generare: {datetime.now().strftime('%d.%m.%Y %H:%M')}\n\n"
-                
-                mesaj_backup += "--- 🩺 ULTIMELE MĂSURĂTORI & NOTE (Zile Active) ---\n"
-                df_cron_b = get_chronological_backup_df()
-                if not df_cron_b.empty:
-                    for _, r in df_cron_b.tail(25).iterrows():
-                        d_val = r.get("Data", r.get("Dată", ""))
-                        m_val = r.get("Moment Zi", "")
-                        g_val = r.get("Glicemie", "")
-                        s_val = r.get("Sistolică", r.get("Sistolica", ""))
-                        d_sis_val = r.get("Diastolică", r.get("Diastolica", ""))
-                        p_val = r.get("Puls", "")
-                        o_val = r.get("Observații", r.get("Observatii", ""))
-                        
-                        detalii_parti = []
-                        if g_val and str(g_val).strip() not in ["", "0"]: detalii_parti.append(f"Glicemie: {g_val} mg/dL")
-                        if s_val and str(s_val).strip() not in ["", "0"] and d_sis_val and str(d_sis_val).strip() not in ["", "0"]:
-                            detalii_parti.append(f"TA: {s_val}/{d_sis_val} mmHg")
-                        if p_val and str(p_val).strip() not in ["", "0"]: detalii_parti.append(f"Puls: {p_val} bpm")
-                        if o_val and str(o_val).strip() not in ["", "nan", "None"]: detalii_parti.append(f"Obs: {o_val}")
-                        
-                        if detalii_parti:
-                            mesaj_backup += f"• [{d_val} | {m_val}] -> " + ", ".join(detalii_parti) + "\n"
-                else:
-                    mesaj_backup += "• Nicio înregistrare disponibilă.\n"
-                    
-                mesaj_backup += "\n--- 💊 SCHEMĂ TRATAMENT CURENTĂ ---\n"
-                if os.path.exists(MEDS_FILE):
-                    try:
-                        df_m_bk = pd.read_csv(MEDS_FILE)
-                        for _, r_m in df_m_bk.iterrows():
-                            obs_m = f" (Obs: {r_m['Observații']})" if pd.notna(r_m.get('Observații')) and str(r_m.get('Observații')).strip() not in ["", "nan"] else ""
-                            mesaj_backup += f"• {r_m['Medicament']} - Doză: {r_m['Doză']} | Orar: {r_m['Orar / Frecvență']}{obs_m}\n"
-                    except:
-                        mesaj_backup += "• Nu s-a putut citi fișierul de tratament.\n"
-                        
-                mesaj_backup += "\n--- 📅 PROGRAMĂRI MEDICALE ---\n"
-                if os.path.exists(PROG_FILE):
-                    try:
-                        df_p_bk = pd.read_csv(PROG_FILE)
-                        for _, r_p in df_p_bk.iterrows():
-                            ef = r_p.get('Efectuat', 'Nu')
-                            mesaj_backup += f"• Data: {r_p['Dată']} {r_p.get('Ora', '')} | {r_p['Tip']} la {r_p.get('Clinică', '-')} [Efectuat: {ef}]\n"
-                    except:
-                        mesaj_backup += "• Nicio programare înregistrată.\n"
-                        
-                mesaj_backup += "\nToate fișierele CSV actualizate sunt atașate acestui email.\nHealthTrack Pro System"
-
+                mesaj_backup = f"Salut!\n\nAcesta este backup-ul tau zilnic automat generat la data de {azi.strftime('%d.%m.%Y')}.\nContine toate fisierele up-to-date.\n\nHealthTrack Pro System"
                 succes, _ = trimite_email_cu_multiple_atasamente(
                     destinatar=email_dest,
-                    subiect=f"💾 [Backup Zilnic Automat] HealthTrack Pro - {azi.strftime('%d.%m.%Y')}",
+                    subiect=f"[Backup Zilnic Automat] HealthTrack Pro - {azi.strftime('%d.%m.%Y')}",
                     mesaj=mesaj_backup,
                     file_paths_dict=attachments
                 )
@@ -633,12 +578,12 @@ if not st.session_state.logged_in:
 
     with col_b:
         st.markdown("<h1 style='text-align: center; color: #38bdf8;'>🩺 HealthTrack Pro</h1>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align: center; color: #94a3b8; font-size: 16px;'>Platformă de Monitorizare Medicală de Familie</p>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: #94a3b8; font-size: 16px;'>Platforma de Monitorizare Medicala de Familie</p>", unsafe_allow_html=True)
 
         with st.container(border=True):
             username = st.text_input("👤 Utilizator")
-            password = st.text_input("🔑 Parolă", type="password")
-            remember_me = st.checkbox("🧠 Ține-mă minte", value=True)
+            password = st.text_input("🔑 Parola", type="password")
+            remember_me = st.checkbox("🧠 Tine-ma minte", value=True)
 
             if st.button("🔓 Autentificare", type="primary", use_container_width=True):
                 user_data = st.session_state.users.get(username)
@@ -648,7 +593,7 @@ if not st.session_state.logged_in:
                     verifica_si_fa_backup_automat()
                     trigger_rerun()
                 else:
-                    st.error("Utilizator sau parolă incorectă!")
+                    st.error("Utilizator sau parola incorecta!")
     st.stop()
 
 current_user_info = st.session_state.users.get(st.session_state.user, {"role": "Membru"})
@@ -666,7 +611,7 @@ def get_initial_data():
     if os.path.exists(DATA_FILE):
         try:
             df_temp_check = pd.read_csv(DATA_FILE)
-            date_col_name = 'Data' if 'Data' in df_temp_check.columns else 'Dată'
+            date_col_name = 'Data' if 'Data' in df_temp_check.columns else 'Data'
             if date_col_name in df_temp_check.columns:
                 dt_parsed = parse_flexible_date(df_temp_check[date_col_name]).dt.date.dropna()
                 if not dt_parsed.empty:
@@ -678,7 +623,7 @@ def get_initial_data():
     if os.path.exists(DATA_FILE):
         try:
             df_temp_check = pd.read_csv(DATA_FILE)
-            date_col_name = 'Data' if 'Data' in df_temp_check.columns else 'Dată'
+            date_col_name = 'Data' if 'Data' in df_temp_check.columns else 'Data'
             if date_col_name in df_temp_check.columns:
                 dt_parsed = parse_flexible_date(df_temp_check[date_col_name]).dt.date.dropna()
                 if not dt_parsed.empty:
@@ -696,85 +641,85 @@ def get_initial_data():
     for d_str in all_dates_str:
         for m in moment_order:
             full_template.append({
-                "Dată": d_str,
+                "Data": d_str,
                 "Moment Zi": m,
                 "Glicemie": 0,
-                "Sistolică": 0,
-                "Diastolică": 0,
+                "Sistolica": 0,
+                "Diastolica": 0,
                 "Puls": 0,
-                "Observații": ""
+                "Observatii": ""
             })
     df_template = pd.DataFrame(full_template)
-    df_template["Dată_dt"] = parse_flexible_date(df_template["Dată"])
+    df_template["Data_dt"] = parse_flexible_date(df_template["Data"])
 
     initial_defaults = [
-        {"Dată": "12.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 137, "Sistolică": 108, "Diastolică": 61, "Puls": 0, "Observații": "Prima zi cu tratament"},
-        {"Dată": "12.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 134, "Sistolică": 132, "Diastolică": 61, "Puls": 0, "Observații": "Prima zi cu tratament"},
-        {"Dată": "13.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 143, "Sistolică": 115, "Diastolică": 52, "Puls": 0, "Observații": "A doua zi cu tratament"},
-        {"Dată": "13.09.2026", "Moment Zi": "Seara - După masă", "Glicemie": 133, "Sistolică": 114, "Diastolică": 50, "Puls": 0, "Observații": ""},
-        {"Dată": "14.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 114, "Sistolică": 133, "Diastolică": 62, "Puls": 0, "Observații": ""},
-        {"Dată": "14.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 114, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
-        {"Dată": "15.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 116, "Sistolică": 111, "Diastolică": 70, "Puls": 0, "Observații": ""},
-        {"Dată": "15.09.2026", "Moment Zi": "Dimineața - După masă", "Glicemie": 151, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
-        {"Dată": "15.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 102, "Sistolică": 120, "Diastolică": 80, "Puls": 0, "Observații": ""},
-        {"Dată": "16.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 108, "Sistolică": 105, "Diastolică": 64, "Puls": 0, "Observații": ""},
-        {"Dată": "16.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 111, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
-        {"Dată": "17.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 105, "Sistolică": 106, "Diastolică": 68, "Puls": 78, "Observații": ""},
-        {"Dată": "17.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 100, "Sistolică": 106, "Diastolică": 62, "Puls": 84, "Observații": ""},
-        {"Dată": "18.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 127, "Sistolică": 114, "Diastolică": 72, "Puls": 78, "Observații": "mancat tarziu, baton orez expandat cu ciocolata 0 zahar, chipsuri proteice, inghetata fara zahar"},
-        {"Dată": "18.09.2026", "Moment Zi": "Dimineața - După masă", "Glicemie": 143, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
-        {"Dată": "18.09.2026", "Moment Zi": "Prânz - Înainte de masă", "Glicemie": 112, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
-        {"Dată": "18.09.2026", "Moment Zi": "Seara - După masă", "Glicemie": 112, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
-        {"Dată": "19.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 95, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
-        {"Dată": "19.09.2026", "Moment Zi": "Seara - După masă", "Glicemie": 150, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": "cartofi prajiti, paine alba"},
-        {"Dată": "20.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 122, "Sistolică": 120, "Diastolică": 78, "Puls": 70, "Observații": "mancat seara prost"},
-        {"Dată": "20.09.2026", "Moment Zi": "Prânz - Înainte de masă", "Glicemie": 154, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": "cartofi prajiti, paine alba"},
-        {"Dată": "20.09.2026", "Moment Zi": "Seara - După masă", "Glicemie": 149, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": "paine alba, pizza, prajitura"},
-        {"Dată": "21.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 126, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
-        {"Dată": "21.09.2026", "Moment Zi": "Prânz - După masă", "Glicemie": 127, "Sistolică": 114, "Diastolică": 73, "Puls": 80, "Observații": ""},
-        {"Dată": "21.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 87, "Sistolică": 118, "Diastolică": 73, "Puls": 67, "Observații": "Sarmale si inghetata fara zahar"},
-        {"Dată": "22.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 118, "Sistolică": 109, "Diastolică": 72, "Puls": 75, "Observații": ""},
-        {"Dată": "22.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 104, "Sistolică": 115, "Diastolică": 70, "Puls": 72, "Observații": ""},
-        {"Dată": "23.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 148, "Sistolică": 119, "Diastolică": 68, "Puls": 73, "Observații": "mancat seara tarziu, inghetata fara zahar"},
-        {"Dată": "23.09.2026", "Moment Zi": "Seara - După masă", "Glicemie": 102, "Sistolică": 116, "Diastolică": 73, "Puls": 81, "Observații": ""},
-        {"Dată": "24.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 118, "Sistolică": 110, "Diastolică": 69, "Puls": 74, "Observații": ""},
-        {"Dată": "24.09.2026", "Moment Zi": "Prânz - Înainte de masă", "Glicemie": 113, "Sistolică": 123, "Diastolică": 83, "Puls": 71, "Observații": ""},
-        {"Dată": "24.09.2026", "Moment Zi": "Prânz - După masă", "Glicemie": 107, "Sistolică": 118, "Diastolică": 79, "Puls": 76, "Observații": ""},
-        {"Dată": "24.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 110, "Sistolică": 115, "Diastolică": 72, "Puls": 74, "Observații": ""},
-        {"Dată": "25.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 123, "Sistolică": 115, "Diastolică": 71, "Puls": 78, "Observații": ""},
-        {"Dată": "25.09.2026", "Moment Zi": "Prânz - Înainte de masă", "Glicemie": 92, "Sistolică": 128, "Diastolică": 78, "Puls": 86, "Observații": ""},
-        {"Dată": "25.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 113, "Sistolică": 130, "Diastolică": 88, "Puls": 74, "Observații": ""},
-        {"Dată": "26.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 121, "Sistolică": 116, "Diastolică": 72, "Puls": 81, "Observații": "mancat tarziu"}
+        {"Data": "12.09.2026", "Moment Zi": "Dimineata - Inainte de masa", "Glicemie": 137, "Sistolica": 108, "Diastolica": 61, "Puls": 0, "Observatii": "Prima zi cu tratament"},
+        {"Data": "12.09.2026", "Moment Zi": "Seara - Inainte de masa", "Glicemie": 134, "Sistolica": 132, "Diastolica": 61, "Puls": 0, "Observatii": "Prima zi cu tratament"},
+        {"Data": "13.09.2026", "Moment Zi": "Dimineata - Inainte de masa", "Glicemie": 143, "Sistolica": 115, "Diastolica": 52, "Puls": 0, "Observatii": "A doua zi cu tratament"},
+        {"Data": "13.09.2026", "Moment Zi": "Seara - Dupa masa", "Glicemie": 133, "Sistolica": 114, "Diastolica": 50, "Puls": 0, "Observatii": ""},
+        {"Data": "14.09.2026", "Moment Zi": "Dimineata - Inainte de masa", "Glicemie": 114, "Sistolica": 133, "Diastolica": 62, "Puls": 0, "Observatii": ""},
+        {"Data": "14.09.2026", "Moment Zi": "Seara - Inainte de masa", "Glicemie": 114, "Sistolica": 0, "Diastolica": 0, "Puls": 0, "Observatii": ""},
+        {"Data": "15.09.2026", "Moment Zi": "Dimineata - Inainte de masa", "Glicemie": 116, "Sistolica": 111, "Diastolica": 70, "Puls": 0, "Observatii": ""},
+        {"Data": "15.09.2026", "Moment Zi": "Dimineata - Dupa masa", "Glicemie": 151, "Sistolica": 0, "Diastolica": 0, "Puls": 0, "Observatii": ""},
+        {"Data": "15.09.2026", "Moment Zi": "Seara - Inainte de masa", "Glicemie": 102, "Sistolica": 120, "Diastolica": 80, "Puls": 0, "Observatii": ""},
+        {"Data": "16.09.2026", "Moment Zi": "Dimineata - Inainte de masa", "Glicemie": 108, "Sistolica": 105, "Diastolica": 64, "Puls": 0, "Observatii": ""},
+        {"Data": "16.09.2026", "Moment Zi": "Seara - Inainte de masa", "Glicemie": 111, "Sistolica": 0, "Diastolica": 0, "Puls": 0, "Observatii": ""},
+        {"Data": "17.09.2026", "Moment Zi": "Dimineata - Inainte de masa", "Glicemie": 105, "Sistolica": 106, "Diastolica": 68, "Puls": 78, "Observatii": ""},
+        {"Data": "17.09.2026", "Moment Zi": "Seara - Inainte de masa", "Glicemie": 100, "Sistolica": 106, "Diastolica": 62, "Puls": 84, "Observatii": ""},
+        {"Data": "18.09.2026", "Moment Zi": "Dimineata - Inainte de masa", "Glicemie": 127, "Sistolica": 114, "Diastolica": 72, "Puls": 78, "Observatii": "mancat tarziu, baton orez expandat cu ciocolata 0 zahar, chipsuri proteice, inghetata fara zahar"},
+        {"Data": "18.09.2026", "Moment Zi": "Dimineata - Dupa masa", "Glicemie": 143, "Sistolica": 0, "Diastolica": 0, "Puls": 0, "Observatii": ""},
+        {"Data": "18.09.2026", "Moment Zi": "Pranz - Inainte de masa", "Glicemie": 112, "Sistolica": 0, "Diastolica": 0, "Puls": 0, "Observatii": ""},
+        {"Data": "18.09.2026", "Moment Zi": "Seara - Dupa masa", "Glicemie": 112, "Sistolica": 0, "Diastolica": 0, "Puls": 0, "Observatii": ""},
+        {"Data": "19.09.2026", "Moment Zi": "Dimineata - Inainte de masa", "Glicemie": 95, "Sistolica": 0, "Diastolica": 0, "Puls": 0, "Observatii": ""},
+        {"Data": "19.09.2026", "Moment Zi": "Seara - Dupa masa", "Glicemie": 150, "Sistolica": 0, "Diastolica": 0, "Puls": 0, "Observatii": "cartofi prajiti, paine alba"},
+        {"Data": "20.09.2026", "Moment Zi": "Dimineata - Inainte de masa", "Glicemie": 122, "Sistolica": 120, "Diastolica": 78, "Puls": 70, "Observatii": "mancat seara prost"},
+        {"Data": "20.09.2026", "Moment Zi": "Pranz - Inainte de masa", "Glicemie": 154, "Sistolica": 0, "Diastolica": 0, "Puls": 0, "Observatii": "cartofi prajiti, paine alba"},
+        {"Data": "20.09.2026", "Moment Zi": "Seara - Dupa masa", "Glicemie": 149, "Sistolica": 0, "Diastolica": 0, "Puls": 0, "Observatii": "paine alba, pizza, prajitura"},
+        {"Data": "21.09.2026", "Moment Zi": "Dimineata - Inainte de masa", "Glicemie": 126, "Sistolica": 0, "Diastolica": 0, "Puls": 0, "Observatii": ""},
+        {"Data": "21.09.2026", "Moment Zi": "Pranz - Dupa masa", "Glicemie": 127, "Sistolica": 114, "Diastolica": 73, "Puls": 80, "Observatii": ""},
+        {"Data": "21.09.2026", "Moment Zi": "Seara - Inainte de masa", "Glicemie": 87, "Sistolica": 118, "Diastolica": 73, "Puls": 67, "Observatii": "Sarmale si inghetata fara zahar"},
+        {"Data": "22.09.2026", "Moment Zi": "Dimineata - Inainte de masa", "Glicemie": 118, "Sistolica": 109, "Diastolica": 72, "Puls": 75, "Observatii": ""},
+        {"Data": "22.09.2026", "Moment Zi": "Seara - Inainte de masa", "Glicemie": 104, "Sistolica": 115, "Diastolica": 70, "Puls": 72, "Observatii": ""},
+        {"Data": "23.09.2026", "Moment Zi": "Dimineata - Inainte de masa", "Glicemie": 148, "Sistolica": 119, "Diastolica": 68, "Puls": 73, "Observatii": "mancat seara tarziu, inghetata fara zahar"},
+        {"Data": "23.09.2026", "Moment Zi": "Seara - Dupa masa", "Glicemie": 102, "Sistolica": 116, "Diastolica": 73, "Puls": 81, "Observatii": ""},
+        {"Data": "24.09.2026", "Moment Zi": "Dimineata - Inainte de masa", "Glicemie": 118, "Sistolica": 110, "Diastolica": 69, "Puls": 74, "Observatii": ""},
+        {"Data": "24.09.2026", "Moment Zi": "Pranz - Inainte de masa", "Glicemie": 113, "Sistolica": 123, "Diastolica": 83, "Puls": 71, "Observatii": ""},
+        {"Data": "24.09.2026", "Moment Zi": "Pranz - Dupa masa", "Glicemie": 107, "Sistolica": 118, "Diastolica": 79, "Puls": 76, "Observatii": ""},
+        {"Data": "24.09.2026", "Moment Zi": "Seara - Inainte de masa", "Glicemie": 110, "Sistolica": 115, "Diastolica": 72, "Puls": 74, "Observatii": ""},
+        {"Data": "25.09.2026", "Moment Zi": "Dimineata - Inainte de masa", "Glicemie": 123, "Sistolica": 115, "Diastolica": 71, "Puls": 78, "Observatii": ""},
+        {"Data": "25.09.2026", "Moment Zi": "Pranz - Inainte de masa", "Glicemie": 92, "Sistolica": 128, "Diastolica": 78, "Puls": 86, "Observatii": ""},
+        {"Data": "25.09.2026", "Moment Zi": "Seara - Inainte de masa", "Glicemie": 113, "Sistolica": 130, "Diastolica": 88, "Puls": 74, "Observatii": ""},
+        {"Data": "26.09.2026", "Moment Zi": "Dimineata - Inainte de masa", "Glicemie": 121, "Sistolica": 116, "Diastolica": 72, "Puls": 81, "Observatii": "mancat tarziu"}
     ]
 
     for r_def in initial_defaults:
-        d_dt = parse_flexible_date(r_def["Dată"])
+        d_dt = parse_flexible_date(r_def["Data"])
         m_val = r_def["Moment Zi"]
-        mask = (df_template["Dată_dt"] == d_dt) & (df_template["Moment Zi"] == m_val)
+        mask = (df_template["Data_dt"] == d_dt) & (df_template["Moment Zi"] == m_val)
         if mask.any():
-            for col in ["Glicemie", "Sistolică", "Diastolică", "Puls"]:
+            for col in ["Glicemie", "Sistolica", "Diastolica", "Puls"]:
                 if col in r_def:
                     df_template.loc[mask, col] = r_def[col]
-            if r_def.get("Observații"):
-                df_template.loc[mask, "Observații"] = clean_obs(r_def["Observații"])
+            if r_def.get("Observatii"):
+                df_template.loc[mask, "Observatii"] = clean_obs(r_def["Observatii"])
 
     if os.path.exists(DATA_FILE):
         try:
             df_saved = pd.read_csv(DATA_FILE)
             if not df_saved.empty:
-                date_col_name = 'Data' if 'Data' in df_saved.columns else 'Dată'
+                date_col_name = 'Data' if 'Data' in df_saved.columns else 'Data'
                 if "Sistolica" in df_saved.columns:
-                    df_saved = df_saved.rename(columns={"Sistolica": "Sistolică", "Diastolica": "Diastolică", "Observatii": "Observații"})
+                    df_saved = df_saved.rename(columns={"Sistolica": "Sistolica", "Diastolica": "Diastolica", "Observatii": "Observatii"})
                 
-                df_saved["Dată_dt"] = parse_flexible_date(df_saved[date_col_name])
-                df_saved = df_saved.dropna(subset=["Dată_dt"])
+                df_saved["Data_dt"] = parse_flexible_date(df_saved[date_col_name])
+                df_saved = df_saved.dropna(subset=["Data_dt"])
                 
                 for _, row in df_saved.iterrows():
-                    d_dt = row["Dată_dt"]
+                    d_dt = row["Data_dt"]
                     m_val = str(row.get("Moment Zi", ""))
-                    mask = (df_template["Dată_dt"] == d_dt) & (df_template["Moment Zi"] == m_val)
+                    mask = (df_template["Data_dt"] == d_dt) & (df_template["Moment Zi"] == m_val)
                     if mask.any():
-                        for col in ["Glicemie", "Sistolică", "Diastolică", "Puls"]:
+                        for col in ["Glicemie", "Sistolica", "Diastolica", "Puls"]:
                             if col in row and pd.notna(row[col]):
                                 try:
                                     val_num = float(row[col])
@@ -782,19 +727,19 @@ def get_initial_data():
                                         df_template.loc[mask, col] = val_num
                                 except:
                                     pass
-                        obs_val = clean_obs(row.get("Observații", ""))
+                        obs_val = clean_obs(row.get("Observatii", ""))
                         if obs_val:
-                            existing_obs = clean_obs(str(df_template.loc[mask, "Observații"].values[0]))
+                            existing_obs = clean_obs(str(df_template.loc[mask, "Observatii"].values[0]))
                             if existing_obs:
                                 if obs_val not in existing_obs:
-                                    df_template.loc[mask, "Observații"] = f"{existing_obs}, {obs_val}"
+                                    df_template.loc[mask, "Observatii"] = f"{existing_obs}, {obs_val}"
                             else:
-                                df_template.loc[mask, "Observații"] = obs_val
+                                df_template.loc[mask, "Observatii"] = obs_val
         except Exception as e:
-            print(f"Erore citire CSV: {e}")
+            print(f"Erore: {e}")
 
     df_template["Moment_Cat"] = pd.Categorical(df_template["Moment Zi"], categories=moment_order, ordered=True)
-    df_template = df_template.sort_values(by=["Dată_dt", "Moment_Cat"]).drop(columns=["Dată_dt", "Moment_Cat"]).reset_index(drop=True)
+    df_template = df_template.sort_values(by=["Data_dt", "Moment_Cat"]).drop(columns=["Data_dt", "Moment_Cat"]).reset_index(drop=True)
     df_template.to_csv(DATA_FILE, index=False)
     return df_template
 
@@ -803,13 +748,13 @@ if "local_df_v2" not in st.session_state:
 
 df = st.session_state.local_df_v2.copy()
 
-date_col = "Dată"
+date_col = "Data"
 moment_col = "Moment Zi"
 col_glic = "Glicemie"
-col_sis = "Sistolică"
-col_dia = "Diastolică"
+col_sis = "Sistolica"
+col_dia = "Diastolica"
 col_puls = "Puls"
-col_obs = "Observații"
+col_obs = "Observatii"
 
 if date_col in df.columns and not df.empty:
     df[date_col] = parse_flexible_date(df[date_col])
@@ -825,9 +770,9 @@ def save_local_record(date_str, moment_str, glic_v, sis_v, dia_v, puls_v, obs_v)
         current_df[col_obs] = ""
 
     if not current_df.empty and date_col in current_df.columns:
-        current_df["Dată_str"] = parse_flexible_date(current_df[date_col]).dt.strftime("%d.%m.%Y")
-        mask = (current_df["Dată_str"] == date_str) & (current_df[moment_col].astype(str) == moment_str)
-        current_df = current_df.drop(columns=["Dată_str"])
+        current_df["Data_str"] = parse_flexible_date(current_df[date_col]).dt.strftime("%d.%m.%Y")
+        mask = (current_df["Data_str"] == date_str) & (current_df[moment_col].astype(str) == moment_str)
+        current_df = current_df.drop(columns=["Data_str"])
     else:
         mask = pd.Series([False] * len(current_df))
 
@@ -835,7 +780,7 @@ def save_local_record(date_str, moment_str, glic_v, sis_v, dia_v, puls_v, obs_v)
     
     st.session_state.action_history_stack.append({
         "old_df": st.session_state.local_df_v2.copy(),
-        "desc": f"Salvare înregistrare {date_str} - {moment_str}"
+        "desc": f"Salvare inregistrare {date_str} - {moment_str}"
     })
 
     if mask.any():
@@ -899,8 +844,8 @@ def evaluate_glic(val, moment_zi=""):
         else:
             t_min, t_max = st.session_state.settings.get("target_glic_min", 70), st.session_state.settings.get("target_glic_max", 120)
 
-        if t_min <= v <= t_max: return "🟢 Normală"
-        elif v < t_min: return "🔴 Mică"
+        if t_min <= v <= t_max: return "🟢 Normala"
+        elif v < t_min: return "🔴 Mica"
         else: return "🔴 Mare"
     except:
         return ""
@@ -910,8 +855,8 @@ def evaluate_ta(sis_val, dia_val):
         s, d = float(sis_val), float(dia_val)
         if s == 0 or d == 0 or pd.isna(s) or pd.isna(d): return ""
         max_s, max_d = st.session_state.settings["target_ta_sis"], st.session_state.settings["target_ta_dia"]
-        if s <= max_s and d <= max_d: return "🟢 Normală"
-        else: return "🔴 Crescută"
+        if s <= max_s and d <= max_d: return "🟢 Normala"
+        else: return "🔴 Crescuta"
     except:
         return ""
 
@@ -920,7 +865,7 @@ def evaluate_puls(val):
         v = float(val)
         if v == 0 or pd.isna(v): return ""
         if 60 <= v <= 100: return "🟢 Normal"
-        elif v < 60: return "🔴 Scăzut"
+        elif v < 60: return "🔴 Scazut"
         else: return "🔴 Ridicat"
     except:
         return ""
@@ -981,7 +926,7 @@ if not df.empty:
     df['Luna_An'] = df[date_col].dt.strftime('%m-%Y')
     luni_disponibile = df['Luna_An'].unique().tolist()
     
-    toate_lunile = st.sidebar.checkbox("Afișează toate lunile", value=True)
+    toate_lunile = st.sidebar.checkbox("Afiseaza toate lunile", value=True)
     if not toate_lunile:
         filtru_luni = st.sidebar.multiselect("📅 Selectează luna/lunile", options=luni_disponibile, default=luni_disponibile)
         if len(filtru_luni) > 0:
@@ -996,7 +941,7 @@ if not df.empty:
     filtru_luni_str = ", ".join(filtru_luni) if not toate_lunile else "Istoric Complet"
 else:
     view_df = df.copy()
-    filtru_luni_str = "Fără date"
+    filtru_luni_str = "Fara date"
 
 st.sidebar.markdown("<br>", unsafe_allow_html=True)
 if st.sidebar.button("🚪 Deconectare", use_container_width=True):
@@ -1023,7 +968,7 @@ with tab_dict["📊 Jurnal & Grafice"]:
     st.caption(f"Filtru curent: **{filtru_luni_str}**")
 
     if view_df.empty:
-        st.info("📭 Nu există nicio înregistrare pentru selecția curentă.")
+        st.info("📭 Nu exista nicio inregistrare pentru selectia curenta.")
     else:
         avg_glic_str = ""
         if col_glic in view_df.columns:
@@ -1074,7 +1019,7 @@ with tab_dict["📊 Jurnal & Grafice"]:
         ].copy()
 
         with sub_tab_glic:
-            st.markdown("ℹ️ **Legendă Glicemie:** 🔵 Albastru = Valoare în intervalul optim | 🔴 Roșu = Valoare crescută / Spike peste prag.")
+            st.markdown("ℹ️ **Legenda Glicemie:** 🔵 Albastru = Valoare in intervalul optim | 🔴 Rosu = Valoare crescuta / Spike peste prag.")
             if not df_glic_view.empty and col_glic in df_glic_view.columns:
                 x_labels_g = [f"{d.strftime('%d.%m')} ({m[:3]})" for d, m in zip(df_glic_view[date_col], df_glic_view[moment_col])]
                 glic_vals = pd.to_numeric(df_glic_view[col_glic], errors="coerce").replace(0, None)
@@ -1102,8 +1047,8 @@ with tab_dict["📊 Jurnal & Grafice"]:
                 
                 max_post = st.session_state.settings.get("target_glic_post_max", 160)
                 max_pre = st.session_state.settings.get("target_glic_max", 120)
-                fig_g.add_hline(y=max_post, line_dash="dash", line_color="#dc2626", annotation_text=f"Prag Max După Masă ({max_post})")
-                fig_g.add_hline(y=max_pre, line_dash="dot", line_color="#f59e0b", annotation_text=f"Prag Max Înainte Masă ({max_pre})")
+                fig_g.add_hline(y=max_post, line_dash="dash", line_color="#dc2626", annotation_text=f"Prag Max Dupa Masa ({max_post})")
+                fig_g.add_hline(y=max_pre, line_dash="dot", line_color="#f59e0b", annotation_text=f"Prag Max Inainte Masa ({max_pre})")
                 
                 max_glic_data = glic_vals.max() if not glic_vals.dropna().empty else 200
                 upper_limit_g = max(250, int(max_glic_data) + 50)
@@ -1120,10 +1065,10 @@ with tab_dict["📊 Jurnal & Grafice"]:
                 df_g_tab = df_g_tab[[date_col, moment_col, col_glic, "Status Glicemie", col_obs]]
                 st.dataframe(apply_color_styling(df_g_tab, ["Status Glicemie"]), use_container_width=True, hide_index=True)
             else:
-                st.info("Nicio înregistrare de glicemie pentru selecția curentă.")
+                st.info("Nicio inregistrare de glicemie pentru selectia curenta.")
 
         with sub_tab_ta:
-            st.markdown("ℹ️ **Legendă Tensiune:** 🔵 Albastru/Indigo = Tensiune Sistolică normală | 🟠 Portocaliu = Diastolică | 🔴 Roșu = Valori de Tensiune Crescută.")
+            st.markdown("ℹ️ **Legenda Tensiune:** 🔵 Albastru/Indigo = Tensiune Sistolica normala | 🟠 Portocaliu = Diastolica | 🔴 Rosu = Valori de Tensiune Crescuta.")
             if not df_ta_view.empty and col_sis in df_ta_view.columns and col_dia in df_ta_view.columns:
                 x_labels_ta = [f"{d.strftime('%d.%m')} ({m[:3]})" for d, m in zip(df_ta_view[date_col], df_ta_view[moment_col])]
                 sis_vals = pd.to_numeric(df_ta_view[col_sis], errors="coerce").replace(0, None)
@@ -1134,20 +1079,20 @@ with tab_dict["📊 Jurnal & Grafice"]:
 
                 fig_ta = go.Figure()
                 fig_ta.add_trace(go.Scatter(
-                    x=x_labels_ta, y=sis_vals, mode="lines+markers+text", name="Sistolică", 
+                    x=x_labels_ta, y=sis_vals, mode="lines+markers+text", name="Sistolica", 
                     line=dict(color="#2563eb", width=2.5), marker=dict(size=10, color=sis_colors), 
                     text=sis_vals, textposition="top center", textfont=dict(size=10, color="#ffffff"), 
                     texttemplate="<b>%{text}</b>", connectgaps=True
                 ))
                 fig_ta.add_trace(go.Scatter(
-                    x=x_labels_ta, y=dia_vals, mode="lines+markers+text", name="Diastolică", 
+                    x=x_labels_ta, y=dia_vals, mode="lines+markers+text", name="Diastolica", 
                     line=dict(color="#f59e0b", width=2.5), marker=dict(size=10, color=dia_colors), 
                     text=dia_vals, textposition="bottom center", textfont=dict(size=10, color="#ffffff"), 
                     texttemplate="<b>%{text}</b>", connectgaps=True
                 ))
                 
                 max_s_target = st.session_state.settings.get("target_ta_sis", 120)
-                fig_ta.add_hline(y=max_s_target, line_dash="dash", line_color="#dc2626", annotation_text=f"Prag Max Sistolică ({max_s_target})")
+                fig_ta.add_hline(y=max_s_target, line_dash="dash", line_color="#dc2626", annotation_text=f"Prag Max Sistolica ({max_s_target})")
                 
                 fig_ta.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=40, r=40, t=50, b=120), xaxis=dict(tickangle=-45, dtick=1))
                 st.plotly_chart(fig_ta, use_container_width=True)
@@ -1162,10 +1107,10 @@ with tab_dict["📊 Jurnal & Grafice"]:
                 df_t_tab = df_t_tab[[date_col, moment_col, col_sis, col_dia, "Status Tensiune", col_obs]]
                 st.dataframe(apply_color_styling(df_t_tab, ["Status Tensiune"]), use_container_width=True, hide_index=True)
             else:
-                st.info("Nicio înregistrare de tensiune arterială pentru selecția curentă.")
+                st.info("Nicio inregistrare de tensiune arteriala pentru selectia curenta.")
 
         with sub_tab_puls:
-            st.markdown("ℹ️ **Legendă Puls:** 🟢 Verde = Interval normal (60-100 bpm) | 🔴 Roșu = Puls în afara limitelor.")
+            st.markdown("ℹ️ **Legenda Puls:** 🟢 Verde = Interval normal (60-100 bpm) | 🔴 Rosu = Puls in afara limitelor.")
             if not df_puls_view.empty and col_puls in df_puls_view.columns:
                 x_labels_p = [f"{d.strftime('%d.%m')} ({m[:3]})" for d, m in zip(df_puls_view[date_col], df_puls_view[moment_col])]
                 puls_vals = pd.to_numeric(df_puls_view[col_puls], errors="coerce").replace(0, None)
@@ -1178,8 +1123,8 @@ with tab_dict["📊 Jurnal & Grafice"]:
                     text=puls_vals, textposition="top center", textfont=dict(size=10, color="#ffffff"), 
                     texttemplate="<b>%{text}</b>", connectgaps=True
                 ))
-                fig_p.add_hline(y=100, line_dash="dash", line_color="#dc2626", annotation_text="Limită Maximă Puls (100)")
-                fig_p.add_hline(y=60, line_dash="dash", line_color="#dc2626", annotation_text="Limită Minimă Puls (60)")
+                fig_p.add_hline(y=100, line_dash="dash", line_color="#dc2626", annotation_text="Limita Maxima Puls (100)")
+                fig_p.add_hline(y=60, line_dash="dash", line_color="#dc2626", annotation_text="Limita Minima Puls (60)")
                 
                 fig_p.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=40, r=40, t=50, b=120), xaxis=dict(tickangle=-45, dtick=1))
                 st.plotly_chart(fig_p, use_container_width=True)
@@ -1193,7 +1138,7 @@ with tab_dict["📊 Jurnal & Grafice"]:
                 df_p_tab = df_p_tab[[date_col, moment_col, col_puls, "Status Puls", col_obs]]
                 st.dataframe(apply_color_styling(df_p_tab, ["Status Puls"]), use_container_width=True, hide_index=True)
             else:
-                st.info("Nicio înregistrare de puls pentru selecția curentă.")
+                st.info("Nicio inregistrare de puls pentru selectia curenta.")
 
         with sub_tab_all:
             if not df_all_view.empty:
@@ -1218,12 +1163,12 @@ with tab_dict["📊 Jurnal & Grafice"]:
                 
                 st.dataframe(df_all, use_container_width=True, height=800, hide_index=True)
             else:
-                st.info("Nicio înregistrare disponibilă.")
+                st.info("Nicio inregistrare disponibila.")
 
-# ----------------- TAB: ADAUGĂ / SUPRASCRIE (ADMIN) -----------------
+# ----------------- TAB: ADAUGA / SUPRASCRIE (ADMIN) -----------------
 if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
     with tab_dict["➕ Adaugă / Suprascrie"]:
-        st.markdown("### 📝 Formular Introducere / Suprascrie Măsurători")
+        st.markdown("### 📝 Formular Introducere / Suprascrie Masuratori")
         
         c_undo1, c_undo2 = st.columns([2, 5])
         with c_undo1:
@@ -1232,7 +1177,7 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
                     last_action = st.session_state.action_history_stack.pop()
                     st.session_state.local_df_v2 = last_action["old_df"]
                     st.session_state.local_df_v2.to_csv(DATA_FILE, index=False)
-                    st.success(f"S-a revenit cu succes la starea anterioară! ({last_action['desc']})")
+                    st.success(f"S-a revenit cu succes la starea anterioara! ({last_action['desc']})")
                     trigger_rerun()
         
         if "success_message" in st.session_state:
@@ -1261,9 +1206,9 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
                         has_real_record = True
 
             if has_real_record:
-                st.warning(f"⚠️ Există deja o înregistrare cu valori pentru {date_str} - {selected_moment}. Valorile existente au fost încărcate pentru editare/suprascriere.")
+                st.warning(f"⚠️ Exista deja o inregistrare cu valori pentru {date_str} - {selected_moment}. Valorile existente au fost incarcate pentru editare/suprascriere.")
             else:
-                st.info(f"ℹ️ Nu există o înregistrare anterioară cu valori pentru {date_str} - {selected_moment}. Câmpurile pornesc de la 0.")
+                st.info(f"ℹ️ Nu exista o inregistrare anterioara cu valori pentru {date_str} - {selected_moment}. Campurile pornesc de la 0.")
 
             def get_val(col_name):
                 if has_real_record and not existing_row.empty and col_name in existing_row:
@@ -1295,11 +1240,11 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
 
             c1, c2 = st.columns(2)
             with c1: 
-                st.number_input("🩸 Glicemie (mg/dL) [0 = nemăsurat]", min_value=0, key="inp_glic")
+                st.number_input("🩸 Glicemie (mg/dL) [0 = nemasurat]", min_value=0, key="inp_glic")
             with c2:
-                st.number_input("🫀 Tensiune Sistolică [0 = nemăsurat]", min_value=0, key="inp_sis")
-                st.number_input("🫀 Tensiune Diastolică [0 = nemăsurat]", min_value=0, key="inp_dia")
-                st.number_input("💓 Puls [0 = nemăsurat]", min_value=0, key="inp_puls")
+                st.number_input("🫀 Tensiune Sistolica [0 = nemasurat]", min_value=0, key="inp_sis")
+                st.number_input("🫀 Tensiune Diastolica [0 = nemasurat]", min_value=0, key="inp_dia")
+                st.number_input("💓 Puls [0 = nemasurat]", min_value=0, key="inp_puls")
 
             st.markdown("---")
             st.markdown("##### ⚡ Asistent Inteligent Mese & Indice Glicemic (Actualizare Instantanee)")
@@ -1342,7 +1287,7 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
             
             st.session_state["inp_obs"] = new_computed_obs
 
-            st.text_area("✍️ Notițe / Observații (Se actualizează instant la bifare/debifare)", key="inp_obs")
+            st.text_area("✍️ Notite / Observatii", key="inp_obs")
 
             def handle_save_action():
                 g_val = st.session_state.get("inp_glic", 0)
@@ -1352,15 +1297,15 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
                 o_val = st.session_state.get("inp_obs", "")
 
                 save_local_record(date_str, selected_moment, g_val, s_val, d_val, p_val, o_val)
-                st.session_state["success_message"] = "✅ Salvare / Suprascrie efectuată cu succes!"
+                st.session_state["success_message"] = "✅ Salvare / Suprascriere efectuata cu succes!"
                 trigger_rerun()
 
             st.markdown("---")
-            st.button("💾 Salvează / Suprascrie Înregistrarea", type="primary", use_container_width=True, on_click=handle_save_action, key="bottom_save_btn")
+            st.button("💾 Salveaza / Suprascrie Inregistrarea", type="primary", use_container_width=True, on_click=handle_save_action, key="bottom_save_btn")
 
 # ----------------- TAB: TRATAMENT -----------------
 with tab_dict["💊 Tratament"]:
-    st.markdown("### 💊 Schemă Tratament Medical")
+    st.markdown("### 💊 Schema Tratament Medical")
     
     if "success_message" in st.session_state:
         st.success(st.session_state["success_message"])
@@ -1370,64 +1315,64 @@ with tab_dict["💊 Tratament"]:
 
     if is_admin:
         st.markdown("---")
-        st.markdown("#### ⚙️ Gestiune Listă Tratament & Ștergere (Administrator)")
+        st.markdown("#### ⚙️ Gestiune Lista Tratament & Stergere (Administrator)")
         col_m1, col_m2, col_m3 = st.columns(3)
         
         with col_m1:
             with st.container(border=True):
-                st.markdown("##### ➕ Adaugă Nou")
+                st.markdown("##### ➕ Adauga Nou")
                 with st.form("add_med_form"):
                     m_nume = st.text_input("Nume")
-                    m_doza = st.text_input("Doză")
-                    m_orar = st.text_input("Orar / Frecvență")
-                    m_obs_med = st.text_input("Observații")
-                    if st.form_submit_button("Adaugă", type="primary"):
+                    m_doza = st.text_input("Doza")
+                    m_orar = st.text_input("Orar / Frecventa")
+                    m_obs_med = st.text_input("Observatii")
+                    if st.form_submit_button("Adauga", type="primary"):
                         if m_nume:
-                            new_row = pd.DataFrame([{"Medicament": m_nume, "Doză": m_doza, "Orar / Frecvență": m_orar, "Observații": m_obs_med}])
+                            new_row = pd.DataFrame([{"Medicament": m_nume, "Doza": m_doza, "Orar / Frecventa": m_orar, "Observatii": m_obs_med}])
                             st.session_state.meds_df = pd.concat([st.session_state.meds_df, new_row], ignore_index=True)
-                            add_history_entry("Adăugare", m_nume, f"Doză: {m_doza}, Orar: {m_orar}")
+                            add_history_entry("Adaugare", m_nume, f"Doza: {m_doza}, Orar: {m_orar}")
                             save_all_files()
-                            st.session_state["success_message"] = f"Medicamentul {m_nume} a fost adăugat cu succes!"
+                            st.session_state["success_message"] = f"Medicamentul {m_nume} a fost adaugat cu succes!"
                             trigger_rerun()
 
         with col_m2:
             with st.container(border=True):
-                st.markdown("##### ✏️ Editează Existent")
+                st.markdown("##### ✏️ Editeaza Existent")
                 if not st.session_state.meds_df.empty:
-                    med_to_edit = st.selectbox("Selectează", st.session_state.meds_df["Medicament"].tolist(), key="edit_med_select")
+                    med_to_edit = st.selectbox("Selecteaza", st.session_state.meds_df["Medicament"].tolist(), key="edit_med_select")
                     med_data = st.session_state.meds_df[st.session_state.meds_df["Medicament"] == med_to_edit].iloc[0]
                     with st.form("edit_med_form"):
-                        e_doza = st.text_input("Doză", value=med_data["Doză"])
-                        e_orar = st.text_input("Orar / Frecvență", value=med_data["Orar / Frecvență"])
-                        e_obs_med = st.text_input("Observații", value=med_data.get("Observații", ""))
-                        if st.form_submit_button("Salvează Modificarea", type="primary"):
+                        e_doza = st.text_input("Doza", value=med_data["Doza"])
+                        e_orar = st.text_input("Orar / Frecventa", value=med_data["Orar / Frecventa"])
+                        e_obs_med = st.text_input("Observatii", value=med_data.get("Observatii", ""))
+                        if st.form_submit_button("Salveaza Modificarea", type="primary"):
                             idx = st.session_state.meds_df.index[st.session_state.meds_df["Medicament"] == med_to_edit][0]
-                            st.session_state.meds_df.loc[idx, "Doză"] = e_doza
-                            st.session_state.meds_df.loc[idx, "Orar / Frecvență"] = e_orar
-                            st.session_state.meds_df.loc[idx, "Observații"] = e_obs_med
-                            add_history_entry("Modificare", med_to_edit, f"Doză: -> {e_doza}")
+                            st.session_state.meds_df.loc[idx, "Doza"] = e_doza
+                            st.session_state.meds_df.loc[idx, "Orar / Frecventa"] = e_orar
+                            st.session_state.meds_df.loc[idx, "Observatii"] = e_obs_med
+                            add_history_entry("Modificare", med_to_edit, f"Doza: -> {e_doza}")
                             save_all_files()
-                            st.session_state["success_message"] = "Modificările au fost salvate cu succes!"
+                            st.session_state["success_message"] = "Modificarile au fost salvate cu succes!"
                             trigger_rerun()
 
         with col_m3:
             with st.container(border=True):
-                st.markdown("##### 🗑️ Șterge Medicament")
+                st.markdown("##### 🗑️ Sterge Medicament")
                 if not st.session_state.meds_df.empty:
                     with st.form("delete_med_form"):
-                        to_delete = st.selectbox("Selectează de șters", st.session_state.meds_df["Medicament"].tolist())
-                        btn_del_med = st.form_submit_button("Șterge Definitiv", type="secondary")
+                        to_delete = st.selectbox("Selecteaza de sters", st.session_state.meds_df["Medicament"].tolist())
+                        btn_del_med = st.form_submit_button("Sterge Definitiv", type="secondary")
                         if btn_del_med:
                             st.session_state.meds_df = st.session_state.meds_df[st.session_state.meds_df["Medicament"] != to_delete].reset_index(drop=True)
-                            add_history_entry("Ștergere", to_delete, "Eliminat din schemă.")
+                            add_history_entry("Stergere", to_delete, "Eliminat din schema.")
                             save_all_files()
-                            st.session_state["success_message"] = f"Medicamentul {to_delete} a fost șters!"
+                            st.session_state["success_message"] = f"Medicamentul {to_delete} a fost sters!"
                             trigger_rerun()
 
-# ----------------- TAB: PROGRAMĂRI -----------------
+# ----------------- TAB: PROGRAMARI -----------------
 if is_admin and "📅 Programări" in tab_dict:
     with tab_dict["📅 Programări"]:
-        st.markdown("### 📅 Programări Medicale, Editare, Ștergere & Alerte")
+        st.markdown("### 📅 Programari Medicale, Editare, Stergere & Alerte")
         st.dataframe(st.session_state.prog_df, use_container_width=True, hide_index=True)
 
         st.markdown("---")
@@ -1435,81 +1380,81 @@ if is_admin and "📅 Programări" in tab_dict:
 
         with col_p1:
             with st.container(border=True):
-                st.markdown("#### ➕ Adaugă Programare")
+                st.markdown("#### ➕ Adauga Programare")
                 with st.form("form_add_prog"):
-                    p_data = st.date_input("Dată", value=date.today())
+                    p_data = st.date_input("Data", value=date.today())
                     p_ora = st.text_input("Ora (ex: 10:30)", value="10:00")
                     p_tip = st.text_input("Tip (ex: Analize, Consult)")
-                    p_clinica = st.text_input("Clinică / Doctor")
-                    p_alerta = st.text_input("Zile Alertă", value="1, 3")
-                    p_obs = st.text_area("Observații")
+                    p_clinica = st.text_input("Clinica / Doctor")
+                    p_alerta = st.text_input("Zile Alerta", value="1, 3")
+                    p_obs = st.text_area("Observatii")
 
-                    if st.form_submit_button("Salvează", type="primary"):
+                    if st.form_submit_button("Salveaza", type="primary"):
                         if p_tip:
                             new_p = pd.DataFrame([{
-                                "Dată": p_data.strftime("%Y-%m-%d"),
+                                "Data": p_data.strftime("%Y-%m-%d"),
                                 "Ora": p_ora,
                                 "Tip": p_tip,
-                                "Clinică": p_clinica,
+                                "Clinica": p_clinica,
                                 "Zile_Alerta": p_alerta,
                                 "Efectuat": "Nu",
-                                "Observații": clean_obs(p_obs)
+                                "Observatii": clean_obs(p_obs)
                             }])
                             st.session_state.prog_df = pd.concat([st.session_state.prog_df, new_p], ignore_index=True)
                             save_all_files()
-                            st.success("Programare salvată!")
+                            st.success("Programare salvata!")
                             trigger_rerun()
 
         with col_p2:
             with st.container(border=True):
-                st.markdown("#### ✏️ Editează / Șterge / Status")
+                st.markdown("#### ✏️ Editeaza / Sterge / Status")
                 if not st.session_state.prog_df.empty:
                     prog_indices = list(st.session_state.prog_df.index)
-                    prog_labels = [f"{row.get('Dată', '')} {row.get('Ora', '10:00')} - {row.get('Tip', '')} ({row.get('Clinică', '')})" for _, row in st.session_state.prog_df.iterrows()]
+                    prog_labels = [f"{row.get('Data', '')} {row.get('Ora', '10:00')} - {row.get('Tip', '')} ({row.get('Clinica', '')})" for _, row in st.session_state.prog_df.iterrows()]
                     selected_prog_idx = st.selectbox("Alege programare", prog_indices, format_func=lambda i: prog_labels[i])
                     
                     row_data = st.session_state.prog_df.loc[selected_prog_idx]
                     
                     with st.form("form_edit_prog"):
                         try:
-                            default_dt = datetime.strptime(str(row_data.get("Dată", date.today().strftime("%Y-%m-%d"))), "%Y-%m-%d").date()
+                            default_dt = datetime.strptime(str(row_data.get("Data", date.today().strftime("%Y-%m-%d"))), "%Y-%m-%d").date()
                         except:
                             default_dt = date.today()
                             
-                        e_p_data = st.date_input("Dată Nouă", value=default_dt)
-                        e_p_ora = st.text_input("Ora Nouă", value=str(row_data.get("Ora", "10:00")))
+                        e_p_data = st.date_input("Data Noua", value=default_dt)
+                        e_p_ora = st.text_input("Ora Noua", value=str(row_data.get("Ora", "10:00")))
                         e_p_tip = st.text_input("Tip Nou", value=str(row_data.get("Tip", "")))
-                        e_p_clinica = st.text_input("Clinică Nouă", value=str(row_data.get("Clinică", "")))
-                        e_p_alerta = st.text_input("Zile Alertă Noi", value=str(row_data.get("Zile_Alerta", "1, 3")))
+                        e_p_clinica = st.text_input("Clinica Noua", value=str(row_data.get("Clinica", "")))
+                        e_p_alerta = st.text_input("Zile Alerta Noi", value=str(row_data.get("Zile_Alerta", "1, 3")))
                         
                         stat_opts = ["Nu", "Da (Done)"]
                         curr_stat = str(row_data.get("Efectuat", "Nu"))
                         e_p_efectuat = st.selectbox("Status", stat_opts, index=1 if "Da" in curr_stat else 0)
                         
-                        e_p_obs = st.text_area("Observații Noi", value=str(row_data.get("Observații", "")))
+                        e_p_obs = st.text_area("Observatii Noi", value=str(row_data.get("Observatii", "")))
                         
                         col_sub1, col_sub2 = st.columns(2)
                         with col_sub1:
-                            btn_mod = st.form_submit_button("💾 Salvează Modificări", type="primary")
+                            btn_mod = st.form_submit_button("💾 Salveaza Modificari", type="primary")
                         with col_sub2:
-                            btn_del = st.form_submit_button("🗑️ Șterge Programarea", type="secondary")
+                            btn_del = st.form_submit_button("🗑️ Sterge Programarea", type="secondary")
                             
                         if btn_mod:
-                            st.session_state.prog_df.loc[selected_prog_idx, "Dată"] = e_p_data.strftime("%Y-%m-%d")
+                            st.session_state.prog_df.loc[selected_prog_idx, "Data"] = e_p_data.strftime("%Y-%m-%d")
                             st.session_state.prog_df.loc[selected_prog_idx, "Ora"] = e_p_ora
                             st.session_state.prog_df.loc[selected_prog_idx, "Tip"] = e_p_tip
-                            st.session_state.prog_df.loc[selected_prog_idx, "Clinică"] = e_p_clinica
+                            st.session_state.prog_df.loc[selected_prog_idx, "Clinica"] = e_p_clinica
                             st.session_state.prog_df.loc[selected_prog_idx, "Zile_Alerta"] = e_p_alerta
                             st.session_state.prog_df.loc[selected_prog_idx, "Efectuat"] = "Da" if "Da" in e_p_efectuat else "Nu"
-                            st.session_state.prog_df.loc[selected_prog_idx, "Observații"] = clean_obs(e_p_obs)
+                            st.session_state.prog_df.loc[selected_prog_idx, "Observatii"] = clean_obs(e_p_obs)
                             save_all_files()
-                            st.success("Programare actualizată cu succes!")
+                            st.success("Programare actualizata cu succes!")
                             trigger_rerun()
                             
                         if btn_del:
                             st.session_state.prog_df = st.session_state.prog_df.drop(selected_prog_idx).reset_index(drop=True)
                             save_all_files()
-                            st.success("Programare ștersă!")
+                            st.success("Programare stersa!")
                             trigger_rerun()
 
         with col_p3:
@@ -1519,81 +1464,140 @@ if is_admin and "📅 Programări" in tab_dict:
                 
                 if st.button("🚀 Trimite Alerte Automat Acum", type="primary"):
                     if not destinatar_auto:
-                        st.error("Completează adresa de email.")
+                        st.error("Completeaza adresa de email.")
                     else:
                         save_all_files()
                         trimis_ok = 0
                         azi = datetime.now().date()
-                        mesaj_final = "🔔 ALERTE AUTOMATE PROGRAMĂRI MEDICALE - HEALTHTRACK PRO\n\n"
+                        mesaj_final = "🔔 ALERTE AUTOMATE PROGRAMARI MEDICALE - HEALTHTRACK PRO\n\n"
                         
                         for _, row in st.session_state.prog_df.iterrows():
                             if str(row.get("Efectuat", "Nu")) == "Da":
                                 continue
                             try:
-                                p_date = datetime.strptime(str(row["Dată"]), "%Y-%m-%d").date()
+                                p_date = datetime.strptime(str(row["Data"]), "%Y-%m-%d").date()
                                 zile_ramase = (p_date - azi).days
                                 zile_alerta_list = [int(x.strip()) for x in str(row["Zile_Alerta"]).split(",") if x.strip().isdigit()]
                                 
                                 if zile_ramase in zile_alerta_list or zile_ramase == 0:
-                                    mesaj_final += f"• {row['Tip']} la {row['Clinică']} pe data de {row['Dată']} ora {row.get('Ora', '')} (Au rămas {zile_ramase} zile!)\n"
+                                    mesaj_final += f"- {row['Tip']} la {row['Clinica']} pe data de {row['Data']} ora {row.get('Ora', '')} (Au ramas {zile_ramase} zile!)\n"
                                     trimis_ok += 1
                             except:
                                 pass
                         
                         if trimis_ok > 0:
-                            succes, rez = trimite_email_cu_multiple_atasamente(destinatar_auto, "🔔 Notificare Programare Medicală", mesaj_final, {
+                            succes, rez = trimite_email_cu_multiple_atasamente(destinatar_auto, "🔔 Notificare Programare Medicala", mesaj_final, {
                                 "date_medicale.csv": DATA_FILE,
                                 "medicamente.csv": MEDS_FILE,
                                 "programari_medicale.csv": PROG_FILE
                             })
                             if succes:
-                                st.success("Notificările automate au fost trimise prin iCloud împreună cu fișierele!")
+                                st.success("Notificarile automate au fost trimise prin iCloud impreuna cu fisierele!")
                             else:
                                 st.error(rez)
                         else:
-                            st.info("Nicio programare activă nu necesită alertă astăzi.")
+                            st.info("Nicio programare activa nu necesita alerta astazi.")
 
-# ----------------- TAB: SETĂRI & ADMIN -----------------
+# ----------------- TAB: RAPORT PDF -----------------
+with tab_dict["📄 Raport PDF"]:
+    st.markdown("### 📄 Generare Raport Medical PDF")
+    st.write("Poti genera si descarca un raport PDF complet cu istoricul medical curent.")
+    
+    if st.button("📥 Genereaza Raport PDF", type="primary"):
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
+        styles = getSampleStyleSheet()
+        story = []
+        
+        title_style = ParagraphStyle('ReportTitle', parent=styles['Heading1'], fontSize=18, textColor=colors.HexColor('#38bdf8'), alignment=1, spaceAfter=15)
+        normal_style = ParagraphStyle('ReportNormal', parent=styles['Normal'], fontSize=10, textColor=colors.HexColor('#333333'))
+        
+        story.append(Paragraph("Raport Medical - HealthTrack Pro", title_style))
+        story.append(Paragraph(f"Generat la: {datetime.now().strftime('%d.%m.%Y %H:%M')} | Utilizator: {st.session_state.user}", normal_style))
+        story.append(Spacer(1, 15))
+        
+        if not view_df.empty:
+            story.append(Paragraph("<b>Ultimele inregistrari din jurnal:</b>", normal_style))
+            story.append(Spacer(1, 8))
+            
+            table_data = [["Data", "Moment", "Glicemie", "Sistolica", "Diastolica", "Puls", "Observatii"]]
+            for _, r in view_df.tail(20).iterrows():
+                d_fmt = parse_flexible_date(r[date_col]).strftime('%d.%m.%Y') if pd.notna(r[date_col]) else ""
+                table_data.append([
+                    d_fmt,
+                    str(r.get(moment_col, "")),
+                    str(r.get(col_glic, "")) if float(r.get(col_glic, 0) or 0) > 0 else "-",
+                    str(r.get(col_sis, "")) if float(r.get(col_sis, 0) or 0) > 0 else "-",
+                    str(r.get(col_dia, "")) if float(r.get(col_dia, 0) or 0) > 0 else "-",
+                    str(r.get(col_puls, "")) if float(r.get(col_puls, 0) or 0) > 0 else "-",
+                    str(r.get(col_obs, ""))
+                ])
+            
+            t = Table(table_data, colWidths=[65, 95, 55, 50, 50, 40, 180])
+            t.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1e222d')),
+                ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
+                ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+                ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0,0), (-1,-1), 8),
+                ('BOTTOMPADDING', (0,0), (-1,0), 6),
+                ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#dddddd')),
+            ]))
+            story.append(t)
+        else:
+            story.append(Paragraph("Nu exista date pentru perioada selectata.", normal_style))
+            
+        doc.build(story)
+        pdf_data = buffer.getvalue()
+        
+        st.download_button(
+            label="💾 Descarca Fisierul PDF",
+            data=pdf_data,
+            file_name=f"Raport_Medical_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
+            mime="application/pdf"
+        )
+
+# ----------------- TAB: SETARI & ADMIN -----------------
 with tab_dict["⚙️ Setări"]:
-    st.markdown("### ⚙️ Setări Generale, Test Conexiune iCloud & Gestiune Utilizatori")
+    st.markdown("### ⚙️ Setari Generale, Test Conexiune iCloud & Gestiune Utilizatori")
     
     if is_admin:
         col_u1, col_u2 = st.columns(2)
         with col_u1:
             with st.container(border=True):
-                st.markdown("#### ➕ Adaugă Utilizator Nou")
+                st.markdown("#### ➕ Adauga Utilizator Nou")
                 with st.form("form_new_user"):
                     new_u_name = st.text_input("Nume Utilizator Nou")
-                    new_u_pass = st.text_input("Parolă", type="password")
+                    new_u_pass = st.text_input("Parola", type="password")
                     new_u_role = st.selectbox("Rol", ["Membru", "Doctor", "Administrator"])
-                    if st.form_submit_button("Creează Cont", type="primary"):
+                    if st.form_submit_button("Creeaza Cont", type="primary"):
                         if new_u_name and new_u_pass:
                             if new_u_name in st.session_state.users:
-                                st.error("Utilizatorul există deja!")
+                                st.error("Utilizatorul exista deja!")
                             else:
                                 st.session_state.users[new_u_name] = {"pass": new_u_pass, "role": new_u_role}
                                 st.success(f"Utilizatorul {new_u_name} a fost creat!")
                                 trigger_rerun()
                         else:
-                            st.warning("Completează numele și parola.")
+                            st.warning("Completeaza numele si parola.")
 
         with col_u2:
             with st.container(border=True):
-                st.markdown("#### 👥 Editează / Șterge Utilizator")
+                st.markdown("#### 👥 Editeaza / Sterge Utilizator")
                 user_list = list(st.session_state.users.keys())
-                target_user = st.selectbox("Selectează utilizator", user_list, key="sel_user_manage")
+                target_user = st.selectbox("Selecteaza utilizator", user_list, key="sel_user_manage")
                 
                 with st.form("form_manage_user"):
                     current_target_role = st.session_state.users[target_user].get("role", "Membru")
                     role_options = ["Membru", "Doctor", "Administrator"]
-                    updated_role = st.selectbox("Schimbă Rol", role_options, index=role_options.index(current_target_role))
-                    updated_pass = st.text_input("Parolă Nouă (opțional)", type="password", key="pass_edit_user")
+                    updated_role = st.selectbox("Schimba Rol", role_options, index=role_options.index(current_target_role))
+                    updated_pass = st.text_input("Parola Noua (optional)", type="password", key="pass_edit_user")
                     
                     c_ub1, c_ub2 = st.columns(2)
                     with c_ub1:
-                        btn_save_u = st.form_submit_button("💾 Salvează Modificări", type="primary")
+                        btn_save_u = st.form_submit_button("💾 Salveaza Modificari", type="primary")
                     with c_ub2:
-                        btn_del_u = st.form_submit_button("🗑️ Șterge Utilizator", type="secondary")
+                        btn_del_u = st.form_submit_button("🗑️ Sterge Utilizator", type="secondary")
                         
                     if btn_save_u:
                         st.session_state.users[target_user]["role"] = updated_role
@@ -1604,117 +1608,114 @@ with tab_dict["⚙️ Setări"]:
                         
                     if btn_del_u:
                         if target_user == "Alex" and len(st.session_state.users) <= 1:
-                            st.error("Nu poți șterge administratorul principal dacă este singurul cont!")
+                            st.error("Nu poti sterge administratorul principal daca este singurul cont!")
                         else:
                             del st.session_state.users[target_user]
-                            st.success(f"Utilizatorul {target_user} a fost șters cu succes!")
+                            st.success(f"Utilizatorul {target_user} a fost sters cu succes!")
                             trigger_rerun()
 
         st.markdown("<br>", unsafe_allow_html=True)
 
         with st.container(border=True):
             st.markdown("#### 🍎 Gestiune Elemente Mese & Indice Glicemic")
-            fc_cat = st.selectbox("Selectează Categoria", list(st.session_state.food_categories.keys()))
+            fc_cat = st.selectbox("Selecteaza Categoria", list(st.session_state.food_categories.keys()))
             
             c_f1, c_f2 = st.columns(2)
             with c_f1:
-                new_food_item = st.text_input("Adaugă ingredient nou")
-                if st.button("➕ Adaugă în Categorie"):
+                new_food_item = st.text_input("Adauga ingredient nou")
+                if st.button("➕ Adauga in Categorie"):
                     if new_food_item and new_food_item.strip():
                         item_clean = remove_diacritics(new_food_item).strip().lower()
                         existing_all = [remove_diacritics(str(x)).lower() for x in st.session_state.food_categories[fc_cat] if pd.notna(x)]
                         if item_clean in existing_all:
-                            st.warning(f"⚠️ Ingredientul '{item_clean}' există deja în această categorie!")
+                            st.warning(f"⚠️ Ingredientul '{item_clean}' exista deja in aceasta categorie!")
                         else:
                             st.session_state.food_categories[fc_cat].append(item_clean)
                             save_custom_foods()
-                            st.success(f"Ingredientul '{item_clean}' a fost adăugat cu succes!")
+                            st.success(f"Ingredientul '{item_clean}' a fost adaugat cu succes!")
                             trigger_rerun()
             with c_f2:
                 all_items_flat = sorted(list(set([str(x) for x in st.session_state.food_categories[fc_cat] if pd.notna(x)])))
                 if all_items_flat:
-                    del_food_item = st.selectbox("Selectează ingredient existent de șters", all_items_flat, key="del_food_select")
-                    if st.button("🗑️ Șterge Ingredientul Selectat"):
+                    del_food_item = st.selectbox("Selecteaza ingredient existent de sters", all_items_flat, key="del_food_select")
+                    if st.button("🗑️ Sterge Ingredientul Selectat"):
                         st.session_state.food_categories[fc_cat].remove(del_food_item)
                         save_custom_foods()
-                        st.success(f"Ingredientul '{del_food_item}' a fost șters!")
+                        st.success(f"Ingredientul '{del_food_item}' a fost sters!")
                         trigger_rerun()
                 else:
-                    st.info("Niciun element în categorie.")
+                    st.info("Niciun element in categorie.")
 
     st.markdown("---")
     col_set1, col_set2 = st.columns(2)
     with col_set1:
-        st.markdown("#### ✉️ Configurare Server iCloud Mail & Test Alerte (Salvare Permanentă)")
+        st.markdown("#### ✉️ Configurare Server iCloud Mail & Test Alerte (Salvare Permanenta)")
         
         entered_sender = st.text_input("Adresa ta de iCloud (expeditor)", value=st.session_state.settings.get("email_sender", ""))
-        entered_password = st.text_input("Parolă specifică de aplicație iCloud (App-Specific Password)", type="password", value=st.session_state.settings.get("email_password", ""))
+        entered_password = st.text_input("Parola specifica de aplicatie iCloud (App-Specific Password)", type="password", value=st.session_state.settings.get("email_password", ""))
         
-        if st.button("💾 Salvează Datele Email Permanent", type="primary"):
+        if st.button("💾 Salveaza Datele Email Permanent", type="primary"):
             st.session_state.settings["email_sender"] = entered_sender
             st.session_state.settings["email_password"] = entered_password
             save_persisted_settings(st.session_state.settings)
             st.success("✅ Datele de email au fost salvate permanent pe disc!")
 
-        st.markdown("<small>💡 *Notă: Nu folosi parola ta principală Apple ID. Generează o App-Specific Password din portalul tău Apple ID.*</small>", unsafe_allow_html=True)
+        st.markdown("<small>💡 *Nota: Nu folosi parola ta principala Apple ID. Genereaza o App-Specific Password din portalul tau Apple ID.*</small>", unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
 
-        st.markdown("#### 🔍 Verificare Integritate Jurnal (Zile Lipsă)")
-        check_start_mode = st.radio("Perioada de verificare:", ["De la prima înregistrare (12.09)", "De la 1 ale lunii curente"], horizontal=True, key="chk_mode_radio")
+        st.markdown("#### 🔍 Verificare Integritate Jurnal (Zile Lipsa)")
+        check_start_mode = st.radio("Perioada de verificare:", ["De la prima inregistrare (12.09)", "De la 1 ale lunii curente"], horizontal=True, key="chk_mode_radio")
         
-        if st.button("🔍 Verifică dacă există zile fără valori", type="secondary", use_container_width=True):
+        if st.button("🚀 Verifica Jurnalul Acum", type="primary"):
             if os.path.exists(DATA_FILE):
-                df_gap_chk = pd.read_csv(DATA_FILE)
-                df_gap_chk["Dată_dt"] = parse_flexible_date(df_gap_chk["Dată" if "Dată" in df_gap_chk.columns else "Data"])
-                df_gap_chk = df_gap_chk.dropna(subset=["Dată_dt"])
-                
-                if not df_gap_chk.empty:
-                    abs_min = df_gap_chk["Dată_dt"].dt.date.min()
-                    azi_dt = datetime.now().date()
-                    
-                    if "1 ale lunii" in check_start_mode:
-                        start_d = date(azi_dt.year, azi_dt.month, 1)
-                    else:
-                        start_d = abs_min
-                        
+                df_chk = pd.read_csv(DATA_FILE)
+                df_chk["Data_dt"] = parse_flexible_date(df_chk["Data" if "Data" in df_chk.columns else "Data"])
+                df_chk = df_chk.dropna(subset=["Data_dt"])
+                if not df_chk.empty:
+                    min_d = df_chk["Data_dt"].dt.date.min() if "12.09" in check_start_mode else date(date.today().year, date.today().month, 1)
+                    azi = datetime.now().date()
                     zile_goale = []
-                    curr_d = start_d
-                    while curr_d < azi_dt:
-                        df_zi = df_gap_chk[df_gap_chk["Dată_dt"].dt.date == curr_d]
-                         zi_valida = False
+                    curr = min_d
+                    while curr < azi:
+                        df_zi = df_chk[df_chk["Data_dt"].dt.date == curr]
+                        zi_ok = False
                         for _, r in df_zi.iterrows():
                             g = float(r.get("Glicemie", 0) or 0)
-                            s = float(r.get("Sistolică" if "Sistolică" in df_zi.columns else "Sistolica", 0) or 0)
-                            d = float(r.get("Diastolică" if "Diastolică" in df_zi.columns else "Diastolica", 0) or 0)
+                            s = float(r.get("Sistolica" if "Sistolica" in df_chk.columns else "Sistolica", 0) or 0)
+                            d = float(r.get("Diastolica" if "Diastolica" in df_chk.columns else "Diastolica", 0) or 0)
                             p = float(r.get("Puls", 0) or 0)
-                            o = clean_obs(r.get("Observații" if "Observații" in df_zi.columns else "Observatii", ""))
+                            o = clean_obs(r.get("Observatii" if "Observatii" in df_chk.columns else "Observatii", ""))
                             if g > 0 or s > 0 or d > 0 or p > 0 or o:
-                                zi_valida = True
+                                zi_ok = True
                                 break
-                        if not zi_valida:
-                            zile_goale.append(curr_d.strftime("%d.%m.%Y"))
-                        curr_d += timedelta(days=1)
-                        
+                        if not zi_ok:
+                            zile_goale.append(curr.strftime("%d.%m.%Y"))
+                        curr += timedelta(days=1)
+                    
                     if zile_goale:
-                        st.warning(f"⚠️ S-au găsit {len(zile_goale)} zile fără înregistrări în intervalul selectat:")
-                        for z in zile_goale:
-                            st.write(f"• {z}")
+                        st.warning(f"S-au gasit {len(zile_goale} zile fara date:")
+                        for z in zile_goale[-10:]:
+                            st.write(f"- {z}")
                     else:
-                        st.success("✅ Toate zilele din interval au cel puțin o valoare sau notiță înregistrată!")
+                        st.success("Jurnalul este complet! Nu s-au gasit zile goale in perioada selectata.")
             else:
-                st.info("Nu există fișier de date.")
+                st.info("Fisierul de date nu exista inca.")
 
     with col_set2:
-        st.markdown("#### 🧪 Testare Manuală Backup & Raport Email")
-        test_email_dest = st.text_input("Email test destinatar", value=st.session_state.settings.get("email_sender", ""))
+        st.markdown("#### 🎯 Setari Tinte Medicale")
+        t_g_min = st.number_input("Tinta Glicemie Minima (Inainte masa)", value=st.session_state.settings.get("target_glic_min", 70))
+        t_g_max = st.number_input("Tinta Glicemie Maxima (Inainte masa)", value=st.session_state.settings.get("target_glic_max", 120))
+        t_gp_min = st.number_input("Tinta Glicemie Minima (Dupa masa)", value=st.session_state.settings.get("target_glic_post_min", 70))
+        t_gp_max = st.number_input("Tinta Glicemie Maxima (Dupa masa)", value=st.session_state.settings.get("target_glic_post_max", 160))
+        t_sis = st.number_input("Tinta Tensiune Sistolica Maxima", value=st.session_state.settings.get("target_ta_sis", 120))
+        t_dia = st.number_input("Tinta Tensiune Diastolica Maxima", value=st.session_state.settings.get("target_ta_dia", 80))
         
-        if st.button("🚀 Execută și Trimite Backup Acum", type="primary", use_container_width=True):
-            if not test_email_dest:
-                st.error("Introduceți adresa de email destinatar.")
-            else:
-                save_all_files()
-                # Forțare resetare log temporar pentru a rula testul acum
-                if os.path.exists(BACKUP_LOG_FILE):
-                    os.remove(BACKUP_LOG_FILE)
-                verifica_si_fa_backup_automat()
-                st.success("✅ Procedura de backup și sinteză a fost executată! Verificați căsuța de email.")
+        if st.button("💾 Salveaza Tintele Medicale", type="primary"):
+            st.session_state.settings["target_glic_min"] = t_g_min
+            st.session_state.settings["target_glic_max"] = t_g_max
+            st.session_state.settings["target_glic_post_min"] = t_gp_min
+            st.session_state.settings["target_glic_post_max"] = t_gp_max
+            st.session_state.settings["target_ta_sis"] = t_sis
+            st.session_state.settings["target_ta_dia"] = t_dia
+            save_persisted_settings(st.session_state.settings)
+            st.success("Tintele medicale au fost actualizate cu succes!")

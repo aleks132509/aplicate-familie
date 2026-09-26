@@ -490,26 +490,35 @@ def verifica_si_fa_backup_automat():
                 pass
 
         if ultima_data is None or ultima_data < azi:
-            df_cron = get_chronological_backup_df()
             temp_backup_file = "temp_backup_cron.csv"
+            temp_raw_data_file = "temp_raw_data.csv"
             attachments = {}
             fisiere_incluse = []
 
+            # 1. CSV-ul cronologic formatat
+            df_cron = get_chronological_backup_df()
             if not df_cron.empty:
                 df_cron.to_csv(temp_backup_file, index=False)
                 attachments["backup_date_medicale.csv"] = temp_backup_file
                 fisiere_incluse.append("backup_date_medicale.csv")
 
+            # 2. CSV-ul brut complet actualizat cu datele medicale
+            if os.path.exists(DATA_FILE):
+                attachments["date_medicale_utilizator.csv"] = DATA_FILE
+                fisiere_incluse.append("date_medicale_utilizator.csv")
+
+            # 3. CSV-ul cu medicamente
             if os.path.exists(MEDS_FILE):
                 attachments["medicamente.csv"] = MEDS_FILE
                 fisiere_incluse.append("medicamente.csv")
 
+            # 4. CSV-ul cu programări
             if os.path.exists(PROG_FILE):
                 attachments["programari_medicale.csv"] = PROG_FILE
                 fisiere_incluse.append("programari_medicale.csv")
 
             if attachments:
-                mesaj_backup = f"Salut!\n\nAcesta este backup-ul tău zilnic automat generat la data de {azi.strftime('%d.%m.%Y')}.\n\nHealthTrack Pro System"
+                mesaj_backup = f"Salut!\n\nAcesta este backup-ul tău zilnic automat generat la data de {azi.strftime('%d.%m.%Y')}.\nConține toate fișierele up-to-date (inclusiv baza de date completă cu datele medicale).\n\nHealthTrack Pro System"
                 succes, _ = trimite_email_cu_multiple_atasamente(
                     destinatar=email_dest,
                     subiect=f"💾 [Backup Zilnic Automat] HealthTrack Pro - {azi.strftime('%d.%m.%Y')}",
@@ -1684,6 +1693,10 @@ with tab_dict["⚙️ Setări"]:
                     attachments["backup_date_medicale.csv"] = temp_test_file
                     fisiere_incluse.append("backup_date_medicale.csv")
 
+                if os.path.exists(DATA_FILE):
+                    attachments["date_medicale_utilizator.csv"] = DATA_FILE
+                    fisiere_incluse.append("date_medicale_utilizator.csv")
+
                 if os.path.exists(MEDS_FILE):
                     attachments["medicamente.csv"] = MEDS_FILE
                     fisiere_incluse.append("medicamente.csv")
@@ -1694,8 +1707,8 @@ with tab_dict["⚙️ Setări"]:
 
                 success_t, msg_t = trimite_email_cu_multiple_atasamente(
                     test_dest,
-                    f"🧪 Test Forțat / Backup HealthTrack Pro ({len(fisiere_incluse)}/3 fișiere)",
-                    f"Salut! Acesta este un email de test forțat.\n\nFișiere incluse ({len(fisiere_incluse)}/3): {', '.join(fisiere_incluse)}",
+                    f"🧪 Test Forțat / Backup HealthTrack Pro ({len(fisiere_incluse)}/4 fișiere)",
+                    f"Salut! Acesta este un email de test forțat.\n\nFișiere incluse ({len(fisiere_incluse)}/4): {', '.join(fisiere_incluse)}",
                     attachments
                 )
                 

@@ -491,24 +491,34 @@ def verifica_si_fa_backup_automat():
 
         if ultima_data is None or ultima_data < azi:
             temp_backup_file = "temp_backup_cron.csv"
+            temp_raw_data_file = "temp_raw_data.csv"
             attachments = {}
+            fisiere_incluse = []
 
+            # 1. CSV-ul cronologic formatat
             df_cron = get_chronological_backup_df()
             if not df_cron.empty:
                 df_cron.to_csv(temp_backup_file, index=False)
                 attachments["backup_date_medicale.csv"] = temp_backup_file
+                fisiere_incluse.append("backup_date_medicale.csv")
 
+            # 2. CSV-ul brut complet actualizat cu datele medicale
             if os.path.exists(DATA_FILE):
                 attachments["date_medicale_utilizator.csv"] = DATA_FILE
+                fisiere_incluse.append("date_medicale_utilizator.csv")
 
+            # 3. CSV-ul cu medicamente
             if os.path.exists(MEDS_FILE):
                 attachments["medicamente.csv"] = MEDS_FILE
+                fisiere_incluse.append("medicamente.csv")
 
+            # 4. CSV-ul cu programări
             if os.path.exists(PROG_FILE):
                 attachments["programari_medicale.csv"] = PROG_FILE
+                fisiere_incluse.append("programari_medicale.csv")
 
             if attachments:
-                mesaj_backup = f"Salut!\n\nAcesta este backup-ul tău zilnic automat generat la data de {azi.strftime('%d.%m.%Y')}.\nConține toate fișierele up-to-date.\n\nHealthTrack Pro System"
+                mesaj_backup = f"Salut!\n\nAcesta este backup-ul tău zilnic automat generat la data de {azi.strftime('%d.%m.%Y')}.\nConține toate fișierele up-to-date (inclusiv baza de date completă cu datele medicale).\n\nHealthTrack Pro System"
                 succes, _ = trimite_email_cu_multiple_atasamente(
                     destinatar=email_dest,
                     subiect=f"💾 [Backup Zilnic Automat] HealthTrack Pro - {azi.strftime('%d.%m.%Y')}",
@@ -1493,87 +1503,6 @@ if is_admin and "📅 Programări" in tab_dict:
                         else:
                             st.info("Nicio programare activă nu necesită alertă astăzi.")
 
-# ----------------- TAB: RAPORT PDF -----------------
-with tab_dict["📄 Raport PDF"]:
-    st.markdown("### 📄 Generare Raport Medical PDF")
-    st.markdown("Generează și descarcă un raport PDF complet cu istoricul măsurătorilor și starea de sănătate pe o anumită perioadă.")
-
-    col_pdf1, col_pdf2 = st.columns(2)
-    with col_pdf1:
-        pdf_start_date = st.date_input("Data început raport", value=date.today() - timedelta(days=30), key="pdf_start")
-    with col_pdf2:
-        pdf_end_date = st.date_input("Data sfârșit raport", value=date.today(), key="pdf_end")
-
-    if st.button("📄 Generează Raport PDF", type="primary"):
-        try:
-            pdf_filename = "raport_medical_healthtrack.pdf"
-            doc = SimpleDocTemplate(pdf_filename, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
-            styles = getSampleStyleSheet()
-            
-            title_style = ParagraphStyle(
-                'ReportTitle', parent=styles['Heading1'], fontSize=18, textColor=colors.HexColor('#0284c7'), spaceAfter=12, alignment=1
-            )
-            subtitle_style = ParagraphStyle(
-                'ReportSubtitle', parent=styles['Normal'], fontSize=10, textColor=colors.HexColor('#64748b'), spaceAfter=20, alignment=1
-            )
-            normal_style = ParagraphStyle(
-                'ReportNormal', parent=styles['Normal'], fontSize=10, textColor=colors.HexColor('#1e293b'), spaceAfter=8
-            )
-            
-            story = []
-            story.append(Paragraph("HealthTrack Pro - Raport Medical", title_style))
-            story.append(Paragraph(f"Perioada: {pdf_start_date.strftime('%d.%m.%Y')} - {pdf_end_date.strftime('%d.%m.%Y')}", subtitle_style))
-            story.append(Spacer(1, 10))
-
-            df_pdf_data = df.copy()
-            if not df_pdf_data.empty:
-                df_pdf_data["Dată_dt"] = parse_flexible_date(df_pdf_data[date_col]).dt.date
-                mask_p = (df_pdf_data["Dată_dt"] >= pdf_start_date) & (df_pdf_data["Dată_dt"] <= pdf_end_date)
-                df_pdf_filtered = df_pdf_data[mask_p]
-            else:
-                df_pdf_filtered = pd.DataFrame()
-
-            if df_pdf_filtered.empty:
-                story.append(Paragraph("Nu există înregistrări în perioada selectată.", normal_style))
-            else:
-                table_data = [["Data", "Moment", "Glicemie", "Sistol.", "Diastol.", "Puls", "Observații"]]
-                for _, r in df_pdf_filtered.iterrows():
-                    d_s = parse_flexible_date(r[date_col]).strftime("%d.%m.%Y") if pd.notna(r[date_col]) else ""
-                    m_s = str(r.get(moment_col, ""))
-                    g_s = str(int(r.get(col_glic, 0))) if float(r.get(col_glic, 0) or 0) > 0 else "-"
-                    s_s = str(int(r.get(col_sis, 0))) if float(r.get(col_sis, 0) or 0) > 0 else "-"
-                    di_s = str(int(r.get(col_dia, 0))) if float(r.get(col_dia, 0) or 0) > 0 else "-"
-                    p_s = str(int(r.get(col_puls, 0))) if float(r.get(col_puls, 0) or 0) > 0 else "-"
-                    o_s = clean_obs(r.get(col_obs, ""))
-                    table_data.append([d_s, m_s, g_s, s_s, di_s, p_s, o_s])
-
-                t = Table(table_data, colWidths=[65, 110, 50, 45, 45, 40, 185])
-                t.setStyle(TableStyle([
-                    ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#0284c7')),
-                    ('TEXTCOLOR', (0,0), (-1,0), colors.white),
-                    ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-                    ('FONTSIZE', (0,0), (-1,0), 9),
-                    ('BOTTOMPADDING', (0,0), (-1,0), 6),
-                    ('BACKGROUND', (0,1), (-1,-1), colors.HexColor('#f8fafc')),
-                    ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#cbd5e1')),
-                    ('FONTSIZE', (0,1), (-1,-1), 8),
-                    ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-                ]))
-                story.append(t)
-
-            doc.build(story)
-            st.success("Raportul PDF a fost generat cu succes!")
-            with open(pdf_filename, "rb") as f:
-                st.download_button(
-                    label="📥 Descarcă Raport PDF",
-                    data=f,
-                    file_name=f"raport_medical_{pdf_start_date.strftime('%Y%m%d')}_{pdf_end_date.strftime('%Y%m%d')}.pdf",
-                    mime="application/pdf",
-                    use_container_width=True
-                )
-        except Exception as e:
-            st.error(f"Erore la generarea PDF: {e}")
-
 # ----------------- TAB: SETĂRI & ADMIN -----------------
 with tab_dict["⚙️ Setări"]:
     st.markdown("### ⚙️ Setări Generale, Test Conexiune iCloud & Gestiune Utilizatori")
@@ -1680,88 +1609,40 @@ with tab_dict["⚙️ Setări"]:
         st.markdown("<small>💡 *Notă: Nu folosi parola ta principală Apple ID. Generează o App-Specific Password din portalul tău Apple ID.*</small>", unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
 
-        st.markdown("#### 🔍 Verificare Integritate Jurnal (Zile Lipsă)")
-        check_start_mode = st.radio("Perioada de verificare:", ["De la prima înregistrare (12.09.2026)", "Ultimele 30 zile"], key="chk_mode_radio")
-        if st.button("🔍 Verifică Zilele Lipsă Acum", type="secondary"):
-            dest_email = st.session_state.settings.get("email_sender", "").strip()
-            if not dest_email:
-                st.error("Completează adresa de email în setările de sus.")
+        st.markdown("#### 🔍 Verificare Conexiune")
+        if st.button("🔌 Testează Conexiunea & Trimite Email de Test"):
+            dest_test = st.session_state.settings.get("email_sender", "")
+            if not dest_test:
+                st.error("Introdu mai întâi adresa de email în setări.")
             else:
-                azi = datetime.now().date()
-                if os.path.exists(DATA_FILE):
-                    df_gaps = pd.read_csv(DATA_FILE)
-                    df_gaps["Dată_dt"] = parse_flexible_date(df_gaps["Dată" if "Dată" in df_gaps.columns else "Data"])
-                    df_gaps = df_gaps.dropna(subset=["Dată_dt"])
-                    if not df_gaps.empty:
-                        min_d = df_gaps["Dată_dt"].dt.date.min() if "prima" in check_start_mode else max(df_gaps["Dată_dt"].dt.date.min(), azi - timedelta(days=30))
-                        zile_lipsa = []
-                        curr_d = min_d
-                        while curr_d < azi:
-                            df_zi = df_gaps[df_gaps["Dată_dt"].dt.date == curr_d]
-                            zi_valida = False
-                            for _, r in df_zi.iterrows():
-                                g = float(r.get("Glicemie", 0) or 0)
-                                s = float(r.get("Sistolică" if "Sistolică" in df_gaps.columns else "Sistolica", 0) or 0)
-                                d = float(r.get("Diastolică" if "Diastolică" in df_gaps.columns else "Diastolica", 0) or 0)
-                                p = float(r.get("Puls", 0) or 0)
-                                o = clean_obs(r.get("Observații" if "Observații" in df_gaps.columns else "Observatii", ""))
-                                if g > 0 or s > 0 or d > 0 or p > 0 or o:
-                                    zi_valida = True
-                                    break
-                            if not zi_valida:
-                                zile_lipsa.append(curr_d.strftime("%d.%m.%Y"))
-                            curr_d += timedelta(days=1)
-                        if zile_lipsa:
-                            st.warning(f"S-au găsit {len(zile_lipsa)} zile fără înregistrări:")
-                            for z in zile_lipsa[-10:]:
-                                st.write(f"- {z}")
-                        else:
-                            st.success("Felicitări! Nu există nicio zi lipsă în perioada selectată.")
+                ok, mesaj_rez = trimite_email_cu_multiple_atasamente(
+                    dest_test,
+                    "🧪 Test Conexiune HealthTrack Pro",
+                    "Salut!\n\nAceasta este o verificare a conexiunii SMTP iCloud din aplicația HealthTrack Pro.\nTotul funcționează perfect!",
+                    {}
+                )
+                if ok:
+                    st.success(mesaj_rez)
+                else:
+                    st.error(mesaj_rez)
 
     with col_set2:
-        st.markdown("#### 💾 Backup Manual & Descărcare Date")
-        st.markdown("Poți declanșa manual un backup trimis pe email sau descărca baza de date local.")
-        
-        if st.button("🚀 Trimite Backup Instant pe Email", type="primary"):
-            dest_email = st.session_state.settings.get("email_sender", "").strip()
-            if not dest_email:
-                st.error("Configurează adresa de email mai întâi.")
-            else:
-                azi = datetime.now().date()
-                temp_backup_file = "temp_backup_manual.csv"
-                df_cron = get_chronological_backup_df()
-                attachments = {}
-                if not df_cron.empty:
-                    df_cron.to_csv(temp_backup_file, index=False)
-                    attachments["backup_date_medicale.csv"] = temp_backup_file
-                if os.path.exists(DATA_FILE):
-                    attachments["date_medicale_utilizator.csv"] = DATA_FILE
-                if os.path.exists(MEDS_FILE):
-                    attachments["medicamente.csv"] = MEDS_FILE
-                if os.path.exists(PROG_FILE):
-                    attachments["programari_medicale.csv"] = PROG_FILE
-                
-                succes, rez = trimite_email_cu_multiple_atasamente(
-                    destinatar=dest_email,
-                    subiect=f"💾 [Backup Manual] HealthTrack Pro - {azi.strftime('%d.%m.%Y')}",
-                    mesaj=f"Salut!\n\nAcesta este un backup manual solicitat la data de {azi.strftime('%d.%m.%Y')}.\n\nHealthTrack Pro System",
-                    file_paths_dict=attachments
-                )
-                if os.path.exists(temp_backup_file):
-                    os.remove(temp_backup_file)
-                if succes:
-                    st.success("Backup-ul manual a fost trimis cu succes pe email!")
-                else:
-                    st.error(rez)
-
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.markdown("#### 📥 Descarcă Baza de Date CSV")
-        if os.path.exists(DATA_FILE):
-            with open(DATA_FILE, "rb") as f:
-                st.download_button(
-                    label="📥 Descarcă `date_medicale_utilizator.csv`",
-                    data=f,
-                    file_name="date_medicale_utilizator.csv",
-                    mime="text/csv",
-                    use_container_width=True
-                )
+        st.markdown("#### 🎯 Setări Praguri & Ținte Medicale")
+        with st.form("settings_targets_form"):
+            t_g_min = st.number_input("Glicemie Minimă Înainte de Masă", value=int(st.session_state.settings.get("target_glic_min", 70)))
+            t_g_max = st.number_input("Glicemie Maximă Înainte de Masă", value=int(st.session_state.settings.get("target_glic_max", 120)))
+            t_gp_min = st.number_input("Glicemie Minimă După Masă", value=int(st.session_state.settings.get("target_glic_post_min", 70)))
+            t_gp_max = st.number_input("Glicemie Maximă După Masă", value=int(st.session_state.settings.get("target_glic_post_max", 160)))
+            t_ta_s = st.number_input("Tensiune Sistolică Maximă", value=int(st.session_state.settings.get("target_ta_sis", 120)))
+            t_ta_d = st.number_input("Tensiune Diastolică Maximă", value=int(st.session_state.settings.get("target_ta_dia", 80)))
+            
+            if st.form_submit_button("💾 Salvează Praguri Medicale", type="primary"):
+                st.session_state.settings["target_glic_min"] = t_g_min
+                st.session_state.settings["target_glic_max"] = t_g_max
+                st.session_state.settings["target_glic_post_min"] = t_gp_min
+                st.session_state.settings["target_glic_post_max"] = t_gp_max
+                st.session_state.settings["target_ta_sis"] = t_ta_s
+                st.session_state.settings["target_ta_dia"] = t_ta_d
+                save_persisted_settings(st.session_state.settings)
+                st.success("Pragurile medicale au fost actualizate cu succes!")
+                trigger_rerun()

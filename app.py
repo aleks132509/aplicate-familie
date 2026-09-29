@@ -206,12 +206,15 @@ SETTINGS_FILE = "setari_email.json"
 # Adresă de e-mail permanentă: dacă fișierul de setări se pierde (ex. la redeploy/restart
 # al aplicației), câmpul de email nu mai rămâne gol — revine automat la adresa de mai jos.
 # Completeaz-o o singură dată aici, cu adresa ta reală de iCloud.
+_SECRETS_STATE = {"err": ""}
+
 def _secret(name, default=""):
     """Citește o valoare permanentă din Streamlit Secrets / variabile de mediu (nu se pierde la restart)."""
+    v = None
     try:
-        v = st.secrets.get(name)
-    except Exception:
-        v = None
+        v = st.secrets[name] if name in st.secrets else None
+    except Exception as e:
+        _SECRETS_STATE["err"] = str(e).strip()[:180] or type(e).__name__
     return str(v or os.environ.get(name, "") or default)
 
 # ⚠️ COMPLETEAZĂ O SINGURĂ DATĂ (sau pune-le în Streamlit Secrets: EMAIL_SENDER / EMAIL_PASSWORD).
@@ -865,7 +868,11 @@ def remote_push_now(paths):
 
 def remote_status():
     if not remote_enabled():
-        return "off", "⚠️ Stocare permanentă NECONFIGURATĂ – datele se pot pierde la restart (vezi Setări)."
+        lipsa = [k for k, v in (("GITHUB_TOKEN", GITHUB_TOKEN), ("GITHUB_REPO", GITHUB_REPO)) if not v]
+        motiv = f" Lipsesc din Secrets: {', '.join(lipsa)}."
+        if _SECRETS_STATE["err"]:
+            motiv += f" Secrets nu pot fi citite ({_SECRETS_STATE['err']})."
+        return "off", "⚠️ Stocare permanentă NECONFIGURATĂ – datele se pot pierde la restart." + motiv
     ps = _proc_state()
     if ps["last_err"]:
         return "err", f"❌ Sincronizare eșuată: {ps['last_err'][:140]}"

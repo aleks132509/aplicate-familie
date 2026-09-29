@@ -869,7 +869,11 @@ def remote_push_now(paths):
 def remote_status():
     if not remote_enabled():
         lipsa = [k for k, v in (("GITHUB_TOKEN", GITHUB_TOKEN), ("GITHUB_REPO", GITHUB_REPO)) if not v]
-        motiv = f" Lipsesc din Secrets: {', '.join(lipsa)}."
+        try:
+            vazute = sorted(str(k) for k in st.secrets.keys())
+        except Exception:
+            vazute = []
+        motiv = f" Lipsesc din Secrets: {', '.join(lipsa)}. Aplicația vede în Secrets: " + (", ".join(vazute) if vazute else "NIMIC (Secrets nu sunt încărcate în această aplicație)") + "."
         if _SECRETS_STATE["err"]:
             motiv += f" Secrets nu pot fi citite ({_SECRETS_STATE['err']})."
         return "off", "⚠️ Stocare permanentă NECONFIGURATĂ – datele se pot pierde la restart." + motiv

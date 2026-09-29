@@ -250,15 +250,21 @@ def load_persisted_settings():
         "notif_enabled": True, 
         "email_sender": EMAIL_PERMANENT_DEFAULT,
         "email_password": "",
-        "target_glic_min": 70, "target_glic_max": 120,
+        "target_glic_min": 80, "target_glic_max": 130,
         "target_glic_post_min": 70, "target_glic_post_max": 160,
-        "target_ta_sis": 120, "target_ta_dia": 80,
+        "target_ta_sis": 130, "target_ta_dia": 85,
+        "targets_version": 2,
     }
     if os.path.exists(SETTINGS_FILE):
         try:
             with open(SETTINGS_FILE, "r") as f:
                 saved = json.load(f)
-                default_settings.update(saved)
+            if saved.get("targets_version") != 2:
+                # setări vechi (ținte 70/120/120/80): se aplică o singură dată noile ținte
+                for _k in ("target_glic_min", "target_glic_max", "target_glic_post_min",
+                           "target_glic_post_max", "target_ta_sis", "target_ta_dia"):
+                    saved.pop(_k, None)
+            default_settings.update(saved)
         except:
             pass
     # Adresa de email nu rămâne niciodată goală: dacă setarea salvată s-a pierdut
@@ -1061,6 +1067,9 @@ if "settings" not in st.session_state:
     st.session_state.settings = load_persisted_settings()
 
 startup_restore()  # refacere automată din backup-urile de pe email dacă serverul a fost resetat
+if remote_enabled() and _proc_state()["synced"] and not st.session_state.get("_settings_reloaded"):
+    st.session_state.settings = load_persisted_settings()   # setările aduse din GitHub (ținte etc.)
+    st.session_state["_settings_reloaded"] = True
 
 BACKUP_TRIGGER_SECRET = _secret("BACKUP_TRIGGER_SECRET", "schimba-acest-cod-secret-1234")
 
@@ -2238,11 +2247,35 @@ with tab_dict["⚙️ Setări"]:
 
     with col_set2:
         st.markdown("#### 🎯 Valori Țintă Medicale")
-        st.session_state.settings["target_glic_min"] = st.number_input("Glicemie Min Înainte Masă", value=st.session_state.settings["target_glic_min"], disabled=not is_admin)
-        st.session_state.settings["target_glic_max"] = st.number_input("Glicemie Max Înainte Masă", value=st.session_state.settings["target_glic_max"], disabled=not is_admin)
-        st.session_state.settings["target_glic_post_max"] = st.number_input("Glicemie Max După Masă", value=st.session_state.settings["target_glic_post_max"], disabled=not is_admin)
-        st.session_state.settings["target_ta_sis"] = st.number_input("TA Sistolică Max Țintă", value=st.session_state.settings["target_ta_sis"], disabled=not is_admin)
-        st.session_state.settings["target_ta_dia"] = st.number_input("TA Diastolică Max Țintă", value=st.session_state.settings["target_ta_dia"], disabled=not is_admin)
+        _tm = st.session_state.settings
+        _msg_t = st.session_state.pop("targets_saved_msg", None)
+        if _msg_t:
+            (st.warning if str(_msg_t).startswith("⚠️") else st.success)(_msg_t)
+        with st.form("targets_form"):
+            t_g_min = st.number_input("Glicemie Min Înainte Masă", min_value=0, max_value=600, step=1, value=int(_tm.get("target_glic_min", 70)), disabled=not is_admin)
+            t_g_max = st.number_input("Glicemie Max Înainte Masă", min_value=0, max_value=600, step=1, value=int(_tm.get("target_glic_max", 120)), disabled=not is_admin)
+            t_gp_min = st.number_input("Glicemie Min După Masă", min_value=0, max_value=600, step=1, value=int(_tm.get("target_glic_post_min", 70)), disabled=not is_admin)
+            t_gp_max = st.number_input("Glicemie Max După Masă", min_value=0, max_value=600, step=1, value=int(_tm.get("target_glic_post_max", 160)), disabled=not is_admin)
+            t_sis = st.number_input("TA Sistolică Max Țintă", min_value=0, max_value=300, step=1, value=int(_tm.get("target_ta_sis", 120)), disabled=not is_admin)
+            t_dia = st.number_input("TA Diastolică Max Țintă", min_value=0, max_value=200, step=1, value=int(_tm.get("target_ta_dia", 80)), disabled=not is_admin)
+            _sub_t = st.form_submit_button("💾 Salvează Țintele", type="primary", disabled=not is_admin)
+        if _sub_t:
+            if t_g_min >= t_g_max or t_gp_min >= t_gp_max:
+                st.error("❌ Valoarea minimă trebuie să fie mai mică decât cea maximă.")
+            else:
+                st.session_state.settings.update({
+                    "target_glic_min": int(t_g_min), "target_glic_max": int(t_g_max),
+                    "target_glic_post_min": int(t_gp_min), "target_glic_post_max": int(t_gp_max),
+                    "target_ta_sis": int(t_sis), "target_ta_dia": int(t_dia)})
+                if save_persisted_settings(st.session_state.settings):
+                    _ok_t, _info_t = remote_push_now([SETTINGS_FILE])
+                    if _ok_t is False:
+                        st.session_state["targets_saved_msg"] = f"⚠️ Ținte salvate local și aplicate, dar NEconfirmate în GitHub ({_info_t}). Se reîncearcă automat."
+                    else:
+                        st.session_state["targets_saved_msg"] = "✅ Țintele au fost salvate și aplicate în jurnal, grafice și rapoarte."
+                    trigger_rerun()
+                else:
+                    st.error("❌ Nu s-au putut salva țintele pe disc.")
 
 # ----------------- TAB: RAPORT PDF -----------------
 with tab_dict["📄 Raport PDF"]:

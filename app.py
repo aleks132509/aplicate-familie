@@ -97,6 +97,49 @@ st.markdown(
         background-color: #1e222d !important;
         border-color: #2e3545 !important;
     }
+
+    /* ===== TEMĂ ÎNTUNECATĂ FORȚATĂ (independentă de setarea telefonului / versiunea Streamlit) ===== */
+    :root, html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
+        color-scheme: dark !important;
+    }
+    [data-testid="stHeader"] { background-color: #0e1117 !important; }
+    [data-testid="stSidebar"], [data-testid="stSidebar"] > div { background-color: #161a23 !important; }
+    .stApp, .stApp p, .stApp label, .stApp li, .stApp span,
+    [data-testid="stWidgetLabel"] p, [data-testid="stMarkdownContainer"] p,
+    [data-testid="stCaptionContainer"] { color: #f1f5f9 !important; }
+    h1, h2, h3, h4, h5, h6 { color: #f8fafc !important; }
+
+    /* Tab-uri: îngroșate și clar vizibile */
+    .stTabs [data-baseweb="tab-list"] { border-bottom: 1px solid #2e3545 !important; }
+    .stTabs [data-baseweb="tab"] p, .stTabs [data-baseweb="tab"] span {
+        font-weight: 800 !important; color: #cbd5e1 !important; font-size: 15px !important;
+    }
+    .stTabs [aria-selected="true"] p, .stTabs [aria-selected="true"] span { color: #38bdf8 !important; }
+    .stTabs [data-baseweb="tab-highlight"] { background-color: #38bdf8 !important; }
+
+    /* Câmpuri de introducere: fundal închis, text alb */
+    input, textarea,
+    div[data-baseweb="input"], div[data-baseweb="base-input"], div[data-baseweb="textarea"],
+    div[data-baseweb="select"] > div, div[data-baseweb="input"] > div {
+        background-color: #1e222d !important; color: #ffffff !important;
+        -webkit-text-fill-color: #ffffff !important; border-color: #3b4458 !important;
+    }
+    div[data-baseweb="select"] span, div[data-baseweb="select"] div { color: #ffffff !important; }
+    div[data-baseweb="select"] svg, div[data-baseweb="input"] svg { fill: #cbd5e1 !important; }
+    .stNumberInput button { background-color: #2a3040 !important; color: #ffffff !important; border-color: #3b4458 !important; }
+    .stNumberInput button svg { fill: #ffffff !important; }
+    div[data-baseweb="popover"] ul, div[data-baseweb="popover"] li,
+    div[data-baseweb="menu"], ul[role="listbox"] { background-color: #1e222d !important; color: #ffffff !important; }
+    li[role="option"]:hover, li[aria-selected="true"] { background-color: #2f3a52 !important; }
+
+    /* Butoane, alerte, containere */
+    .stButton > button, .stDownloadButton > button {
+        background-color: #1e222d !important; color: #ffffff !important; border: 1px solid #3b4458 !important;
+    }
+    .stButton > button[kind="primary"] { background-color: #0284c7 !important; border-color: #0284c7 !important; }
+    [data-testid="stVerticalBlockBorderWrapper"] { border-color: #2e3545 !important; }
+    [data-testid="stExpander"] { background-color: #161a23 !important; border-color: #2e3545 !important; }
+    [data-testid="stDataFrame"] { color-scheme: dark !important; }
     </style>
 """,
     unsafe_allow_html=True,
@@ -376,7 +419,8 @@ def _write_text(path, txt):
 @st.cache_resource
 def _proc_state():
     return {"lock": threading.Lock(), "t": {}, "timer": None, "dirty": set(), "worker": None,
-            "synced": False, "last_err": "", "last_ok": "", "remote_has": set(), "seeded": False}
+            "synced": False, "last_err": "", "last_ok": "", "remote_has": set(), "seeded": False,
+            "push_lock": threading.RLock()}
 
 def _throttle(key, seconds):
     ps = _proc_state()
@@ -462,7 +506,7 @@ def safe_save_data(df_to_save):
     """Scriere atomică + snapshot rotativ + protecție anti-ștergere accidentală. Returnează True/False."""
     try:
         n = normalize_data_df(df_to_save)
-        out = n.copy()
+        out = n[has_values_mask(n)].copy() if not n.empty else n.copy()
         out["Moment_Cat"] = pd.Categorical(out["Moment Zi"], categories=moment_order, ordered=True)
         out = out.sort_values(["Dată_dt", "Moment_Cat"])
         out["Dată"] = out["Dată_dt"].dt.strftime("%d.%m.%Y")
@@ -687,6 +731,10 @@ def remote_pull_all():
                 f.write(b)
 
 def _remote_push_file(p):
+    with _proc_state()["push_lock"]:
+        return _remote_push_file_unlocked(p)
+
+def _remote_push_file_unlocked(p):
     if not os.path.exists(p):
         return
     with open(p, "rb") as f:
@@ -791,6 +839,30 @@ def remote_startup():
         ps["last_err"] = f"conectare: {e}"
         return False
 
+def remote_push_now(paths):
+    """Urcă IMEDIAT fișierele în GitHub (în timp ce utilizatorul așteaptă). Returnează (True/False/None, mesaj)."""
+    if not remote_enabled():
+        return None, "stocarea permanentă nu este configurată"
+    ps = _proc_state()
+    try:
+        if not ps["synced"]:
+            remote_pull_all()
+            ps["synced"] = True
+        for p in paths:
+            with ps["lock"]:
+                ps["dirty"].discard(p)
+            try:
+                _remote_push_file(p)
+            except Exception:
+                remote_mark_dirty(p)
+                raise
+        ps["last_err"] = ""
+        ps["last_ok"] = now_ro().strftime("%d.%m %H:%M")
+        return True, "ok"
+    except Exception as e:
+        ps["last_err"] = f"salvare: {e}"
+        return False, str(e)[:160]
+
 def remote_status():
     if not remote_enabled():
         return "off", "⚠️ Stocare permanentă NECONFIGURATĂ – datele se pot pierde la restart (vezi Setări)."
@@ -881,7 +953,6 @@ def verifica_si_fa_backup_automat(force=False):
             _log_backup_result(False, "Stocarea permanentă nu e conectată încă – backup-ul zilnic amânat (ca să nu trimită date vechi).")
             return
         if read_data_file().empty:
-            _log_backup_result(False, "Nu există date medicale încărcate – backup-ul zilnic amânat.")
             return
         if not email_dest or "adresa_ta@" in email_dest:
             _log_backup_result(False, "Adresa de email nu este configurată (EMAIL_SENDER în cod/Secrets sau în Setări).")
@@ -1600,7 +1671,7 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
                     trigger_rerun()
         
         if "success_message" in st.session_state:
-            st.success(st.session_state["success_message"])
+            (st.warning if str(st.session_state["success_message"]).startswith("⚠️") else st.success)(st.session_state["success_message"])
             del st.session_state["success_message"]
 
         with st.container(border=True):
@@ -1716,7 +1787,13 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
                 o_val = st.session_state.get("inp_obs", "")
 
                 save_local_record(date_str, selected_moment, g_val, s_val, d_val, p_val, o_val)
-                st.session_state["success_message"] = "✅ Salvare / Suprascrie efectuată cu succes!"
+                _ok, _info = remote_push_now([DATA_FILE])
+                if _ok is True:
+                    st.session_state["success_message"] = "✅ Salvat și confirmat în stocarea permanentă (GitHub)."
+                elif _ok is None:
+                    st.session_state["success_message"] = "⚠️ Salvat doar pe server. Stocarea permanentă NU este configurată – valorile se pot pierde la restart!"
+                else:
+                    st.session_state["success_message"] = f"⚠️ Salvat local, dar NEconfirmat în GitHub ({_info}). NU reporni aplicația! Se reîncearcă automat."
                 trigger_rerun()
 
             st.markdown("---")
@@ -1727,7 +1804,7 @@ with tab_dict["💊 Tratament"]:
     st.markdown("### 💊 Schemă Tratament Medical")
     
     if "success_message" in st.session_state:
-        st.success(st.session_state["success_message"])
+        (st.warning if str(st.session_state["success_message"]).startswith("⚠️") else st.success)(st.session_state["success_message"])
         del st.session_state["success_message"]
 
     st.dataframe(st.session_state.meds_df, use_container_width=True, hide_index=True)

@@ -13,6 +13,7 @@ import html as _html
 import shutil
 import tempfile
 import threading
+import requests
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 from email.message import EmailMessage
@@ -176,6 +177,19 @@ EMAIL_PERMANENT_DEFAULT = _secret("EMAIL_SENDER", "adresa_ta@icloud.com")
 EMAIL_PASSWORD_PERMANENT_DEFAULT = _secret("EMAIL_PASSWORD", "")   # parola de aplicație iCloud
 AUTH_SECRET = _secret("AUTH_SECRET", "healthtrack-schimba-ma-1234")
 
+# ==========================================
+# STOCARE PERMANENTĂ (GitHub – repo PRIVAT separat). Discul serverului se șterge la restart,
+# de aceea TOATE datele (măsurători, tratament, programări, setări) se sincronizează automat acolo.
+# Setări în Streamlit Secrets:  GITHUB_TOKEN, GITHUB_REPO ("utilizator/healthtrack-date"), GITHUB_BRANCH (opțional)
+# ==========================================
+GITHUB_TOKEN = _secret("GITHUB_TOKEN")
+GITHUB_REPO = _secret("GITHUB_REPO")
+GITHUB_BRANCH = _secret("GITHUB_BRANCH", "main")
+REMOTE_PREFIX = "healthtrack/"
+REMOTE_FILES = [DATA_FILE, MEDS_FILE, MEDS_HIST_FILE, PROG_FILE, FOODS_FILE, SETTINGS_FILE,
+                BACKUP_LOG_FILE, ALERT_23_LOG, ALERT_GAP_LOG]
+
+
 moment_order = [
     'Dimineața - Înainte de masă',
     'Dimineața - După masă',
@@ -218,6 +232,7 @@ def save_persisted_settings(settings_dict):
         with open(tmp, "w") as f:
             json.dump(settings_dict, f)
         os.replace(tmp, SETTINGS_FILE)
+        remote_mark_dirty(SETTINGS_FILE)
         return True
     except Exception:
         return False
@@ -316,6 +331,7 @@ def save_custom_foods():
             if item and str(item).strip().lower() != "nan":
                 rows.append({"Categorie": cat, "Element": remove_diacritics(str(item)).strip().lower()})
     pd.DataFrame(rows).to_csv(FOODS_FILE, index=False)
+    remote_mark_dirty(FOODS_FILE)
 
 def add_history_entry(actiune, medicament, detalii):
     new_entry = {
@@ -353,12 +369,14 @@ def _write_text(path, txt):
     try:
         with open(path, "w") as f:
             f.write(txt)
+        remote_mark_dirty(path)
     except Exception:
         pass
 
 @st.cache_resource
 def _proc_state():
-    return {"lock": threading.Lock(), "t": {}, "timer": None}
+    return {"lock": threading.Lock(), "t": {}, "timer": None, "dirty": set(), "worker": None,
+            "synced": False, "last_err": "", "last_ok": "", "remote_has": set(), "seeded": False}
 
 def _throttle(key, seconds):
     ps = _proc_state()
@@ -473,6 +491,7 @@ def safe_save_data(df_to_save):
         tmp = DATA_FILE + ".tmp"
         out.to_csv(tmp, index=False)
         os.replace(tmp, DATA_FILE)
+        remote_mark_dirty(DATA_FILE)
         return True
     except Exception as e:
         print(f"Eroare salvare date: {e}")
@@ -534,22 +553,13 @@ def get_filtered_daily_data_df():
     return d[DATA_COLS].reset_index(drop=True)
 
 def build_backup_attachments(workdir):
-    """Toate atașamentele backup-ului (CSV formatat + HTML colorat + baza de date + tratament + programări)."""
+    """Backup = exact 3 fișiere CSV: date medicale (cu buline 🟢/🔴), medicamente, programări – toate la zi."""
     att = {}
     dfc = get_chronological_backup_df()
     if not dfc.empty:
         p = os.path.join(workdir, "backup_date_medicale.csv")
-        dfc.to_csv(p, index=False, encoding="utf-8-sig")
+        dfc.to_csv(p, index=False)
         att["backup_date_medicale.csv"] = p
-        p = os.path.join(workdir, "backup_date_medicale.html")
-        with open(p, "w", encoding="utf-8") as f:
-            f.write(backup_df_to_html(dfc, f"HealthTrack Pro – Backup {now_ro().strftime('%d.%m.%Y %H:%M')}"))
-        att["backup_date_medicale.html"] = p
-    raw = get_filtered_daily_data_df()
-    if not raw.empty:
-        p = os.path.join(workdir, "date_medicale_utilizator.csv")
-        raw.to_csv(p, index=False, encoding="utf-8-sig")
-        att["date_medicale_utilizator.csv"] = p
     if os.path.exists(MEDS_FILE): att["medicamente.csv"] = MEDS_FILE
     if os.path.exists(PROG_FILE): att["programari_medicale.csv"] = PROG_FILE
     return att, list(att.keys())
@@ -578,7 +588,7 @@ def restore_from_email_backup(settings):
                 payload = part.get_payload(decode=True)
                 if not payload:
                     continue
-                if fn == "date_medicale_utilizator.csv":
+                if fn in ("backup_date_medicale.csv", "date_medicale_utilizator.csv"):
                     merged = fill_merge(merged, pd.read_csv(io.BytesIO(payload), encoding="utf-8-sig"))
                     n_mail += 1
                 elif fn == "medicamente.csv" and not got_meds:
@@ -595,13 +605,202 @@ def restore_from_email_backup(settings):
         return False, f"eroare IMAP: {e}"
 
 def startup_restore():
-    """Dacă serverul a fost resetat (fișierul-martor a dispărut), reface datele din ultimele backup-uri primite pe email."""
+    """1) Stocare permanentă GitHub (sursa de adevăr). 2) Dacă nu e configurată/disponibilă: refacere din backup-urile de pe email."""
+    if remote_enabled() and remote_startup():
+        return
     if os.path.exists(INSTANCE_MARKER) or not _throttle("restore", 600):
         return
     ok, msg = restore_from_email_backup(st.session_state.settings)
     _write_text(RESTORE_LOG_FILE, f"{now_ro().strftime('%Y-%m-%d %H:%M')} | {msg}")
     if ok:
         _write_text(INSTANCE_MARKER, now_ro().strftime("%Y-%m-%d %H:%M"))
+
+# ---------- Stocare permanentă în GitHub ----------
+def remote_enabled():
+    return bool(GITHUB_TOKEN and GITHUB_REPO)
+
+def _gh(method, sub="", **kw):
+    url = f"https://api.github.com/repos/{GITHUB_REPO}{sub}"
+    headers = {"Authorization": f"Bearer {GITHUB_TOKEN}", "Accept": "application/vnd.github+json",
+               "X-GitHub-Api-Version": "2022-11-28"}
+    return requests.request(method, url, headers=headers, timeout=25, **kw)
+
+def remote_get(path):
+    r = _gh("GET", f"/contents/{REMOTE_PREFIX}{path}", params={"ref": GITHUB_BRANCH})
+    if r.status_code == 404:
+        return None, None
+    r.raise_for_status()
+    j = r.json()
+    if j.get("content"):
+        return base64.b64decode(j["content"]), j["sha"]
+    r2 = requests.get(j["download_url"], timeout=25)
+    r2.raise_for_status()
+    return r2.content, j["sha"]
+
+def remote_put(path, data, sha):
+    body = {"message": f"HealthTrack {now_ro().strftime('%d.%m.%Y %H:%M:%S')} - {path}",
+            "content": base64.b64encode(data).decode(), "branch": GITHUB_BRANCH}
+    if sha:
+        body["sha"] = sha
+    r = _gh("PUT", f"/contents/{REMOTE_PREFIX}{path}", json=body)
+    r.raise_for_status()
+
+def _csv_bytes_to_df(b):
+    return normalize_data_df(pd.read_csv(io.BytesIO(b), encoding="utf-8-sig"))
+
+def remote_pull_all():
+    """Aduce datele din GitHub pe disc. Datele NU se pierd: măsurătorile se îmbină (uniune), iar fișierele
+    modificate local și încă nesincronizate nu sunt suprascrise."""
+    ps = _proc_state()
+    chk = _gh("GET", "")
+    if chk.status_code != 200:
+        raise RuntimeError(f"repo inaccesibil ({chk.status_code}) – verifică GITHUB_TOKEN / GITHUB_REPO")
+    for p in REMOTE_FILES:
+        b, _sha = remote_get(p)
+        if b is None:
+            continue
+        ps["remote_has"].add(p)
+        with ps["lock"]:
+            pending = p in ps["dirty"]
+        if p == DATA_FILE:
+            merged = fill_merge(_csv_bytes_to_df(b), read_data_file())
+            if not merged.empty:
+                safe_save_data(merged)
+        elif p == SETTINGS_FILE:
+            if pending:
+                continue
+            try:
+                rs = json.loads(b.decode("utf-8"))
+                rs.pop("email_password", None)
+                ls = {}
+                if os.path.exists(SETTINGS_FILE):
+                    try:
+                        with open(SETTINGS_FILE, "r") as f: ls = json.load(f)
+                    except Exception:
+                        ls = {}
+                ls.update(rs)
+                with open(SETTINGS_FILE, "w") as f: json.dump(ls, f)
+            except Exception:
+                pass
+        elif not pending:
+            with open(p, "wb") as f:
+                f.write(b)
+
+def _remote_push_file(p):
+    if not os.path.exists(p):
+        return
+    with open(p, "rb") as f:
+        data = f.read()
+    if p == SETTINGS_FILE:                       # parola NU se urcă în repo (rămâne în Secrets)
+        try:
+            s = json.loads(data.decode("utf-8")); s.pop("email_password", None)
+            data = json.dumps(s, indent=1).encode("utf-8")
+        except Exception:
+            pass
+    b, sha = remote_get(p)
+    if p == DATA_FILE and b is not None:
+        try:
+            rdf, ldf = _csv_bytes_to_df(b), _csv_bytes_to_df(data)
+            nr, nl = int(has_values_mask(rdf).sum()), int(has_values_mask(ldf).sum())
+            if nr >= 6 and nl < nr * 0.8:        # protecție: niciodată nu înlocuim cu o variantă mult mai mică
+                safe_save_data(fill_merge(ldf, rdf))
+                with open(DATA_FILE, "rb") as f:
+                    data = f.read()
+        except Exception:
+            pass
+    if b is not None and b == data:
+        return
+    remote_put(p, data, sha)
+    _proc_state()["remote_has"].add(p)
+
+def _remote_worker():
+    ps = _proc_state()
+    time.sleep(4)                                # debounce: grupăm salvările apropiate
+    fails = 0
+    while True:
+        with ps["lock"]:
+            if not ps["dirty"]:
+                ps["worker"] = None
+                return
+            batch = list(ps["dirty"])
+        if not ps["synced"]:
+            try:
+                remote_pull_all()
+                ps["synced"] = True
+            except Exception as e:
+                fails += 1
+                ps["last_err"] = f"conectare: {e}"
+                time.sleep(min(60, 10 * fails))
+                continue
+        for p in batch:
+            with ps["lock"]:
+                ps["dirty"].discard(p)
+            try:
+                _remote_push_file(p)
+                ps["last_err"] = ""
+                ps["last_ok"] = now_ro().strftime("%d.%m %H:%M")
+                fails = 0
+            except Exception as e:
+                with ps["lock"]:
+                    ps["dirty"].add(p)
+                fails += 1
+                ps["last_err"] = f"{p}: {e}"
+                time.sleep(min(60, 10 * fails))
+                break
+
+def remote_mark_dirty(path):
+    if not remote_enabled() or path not in REMOTE_FILES:
+        return
+    ps = _proc_state()
+    with ps["lock"]:
+        ps["dirty"].add(path)
+        w = ps["worker"]
+        if w is None or not w.is_alive():
+            t = threading.Thread(target=_remote_worker, daemon=True)
+            ps["worker"] = t
+            t.start()
+
+def remote_mark_all_dirty():
+    for p in REMOTE_FILES:
+        if os.path.exists(p):
+            remote_mark_dirty(p)
+
+def remote_seed_missing():
+    """O singură dată/proces: fișierele existente local dar absente din GitHub se urcă (prima configurare)."""
+    ps = _proc_state()
+    if not remote_enabled() or not ps["synced"] or ps["seeded"]:
+        return
+    ps["seeded"] = True
+    for p in REMOTE_FILES:
+        if os.path.exists(p) and p not in ps["remote_has"]:
+            remote_mark_dirty(p)
+
+def remote_startup():
+    ps = _proc_state()
+    if ps["synced"]:
+        return True
+    if not _throttle("remote_pull", 30):
+        return False
+    try:
+        remote_pull_all()
+        ps["synced"] = True
+        ps["last_err"] = ""
+        ps["last_ok"] = now_ro().strftime("%d.%m %H:%M")
+        return True
+    except Exception as e:
+        ps["last_err"] = f"conectare: {e}"
+        return False
+
+def remote_status():
+    if not remote_enabled():
+        return "off", "⚠️ Stocare permanentă NECONFIGURATĂ – datele se pot pierde la restart (vezi Setări)."
+    ps = _proc_state()
+    if ps["last_err"]:
+        return "err", f"❌ Sincronizare eșuată: {ps['last_err'][:140]}"
+    if not ps["synced"]:
+        return "wait", "⏳ Conectare la stocarea permanentă…"
+    pend = len(ps["dirty"])
+    return "ok", ("☁️ Date salvate permanent" + (f" ({pend} fișiere în curs de sincronizare)" if pend else f" · ultima sincronizare {ps['last_ok']}"))
 
 # ---------- Trimitere email (fără blocarea aplicației) ----------
 def trimite_email_cu_multiple_atasamente(destinatar, subiect, mesaj, file_paths_dict, settings=None):
@@ -665,45 +864,11 @@ def _bg_send(dest, subiect, mesaj, att, settings, workdir=None, ok_log=None):
         if workdir:
             shutil.rmtree(workdir, ignore_errors=True)
 
-def _send_change_backup(settings):
-    workdir = tempfile.mkdtemp()
-    try:
-        raw = get_filtered_daily_data_df()
-        if raw.empty:
-            return
-        att = {}
-        p = os.path.join(workdir, "date_medicale_utilizator.csv")
-        raw.to_csv(p, index=False, encoding="utf-8-sig")
-        att["date_medicale_utilizator.csv"] = p
-        if os.path.exists(MEDS_FILE): att["medicamente.csv"] = MEDS_FILE
-        if os.path.exists(PROG_FILE): att["programari_medicale.csv"] = PROG_FILE
-        dest = str(settings.get("email_sender", "")).strip()
-        ok, info = trimite_email_cu_multiple_atasamente(
-            dest, f"💾 [Backup Salvare] HealthTrack Pro - {now_ro().strftime('%d.%m.%Y %H:%M')}",
-            "Backup automat generat la 2 minute după ultima modificare a datelor.", att, settings)
-        _log_backup_result(ok, info)
-    except Exception as e:
-        _log_backup_result(False, str(e))
-    finally:
-        shutil.rmtree(workdir, ignore_errors=True)
-
-def schedule_backup_after_save(delay=120):
-    """După fiecare modificare, la 2 minute de la ultima salvare se trimite automat un backup pe email
-    (astfel, chiar dacă serverul se resetează, ultimele valori se pot recupera)."""
-    try:
-        settings = dict(st.session_state.settings)
-        if not settings.get("email_password") or "adresa_ta@" in str(settings.get("email_sender", "")):
-            return
-        ps = _proc_state()
-        with ps["lock"]:
-            if ps["timer"] is not None:
-                ps["timer"].cancel()
-            t = threading.Timer(delay, _send_change_backup, args=(settings,))
-            t.daemon = True
-            ps["timer"] = t
-            t.start()
-    except Exception:
-        pass
+def schedule_backup_after_save(delay=0):
+    """După orice salvare, datele se sincronizează automat în stocarea permanentă (în fundal)."""
+    for p in (DATA_FILE, MEDS_FILE, MEDS_HIST_FILE, PROG_FILE):
+        if os.path.exists(p):
+            remote_mark_dirty(p)
 
 def verifica_si_fa_backup_automat(force=False):
     """Rulează cel mult o dată la 10 minute (nu la fiecare click), iar trimiterea emailurilor se face în fundal."""
@@ -712,6 +877,12 @@ def verifica_si_fa_backup_automat(force=False):
             return
         settings = dict(st.session_state.settings)
         email_dest = str(settings.get("email_sender", "")).strip()
+        if remote_enabled() and not _proc_state()["synced"]:
+            _log_backup_result(False, "Stocarea permanentă nu e conectată încă – backup-ul zilnic amânat (ca să nu trimită date vechi).")
+            return
+        if read_data_file().empty:
+            _log_backup_result(False, "Nu există date medicale încărcate – backup-ul zilnic amânat.")
+            return
         if not email_dest or "adresa_ta@" in email_dest:
             _log_backup_result(False, "Adresa de email nu este configurată (EMAIL_SENDER în cod/Secrets sau în Setări).")
             return
@@ -938,7 +1109,8 @@ def get_initial_data():
         {"Dată": "25.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 113, "Sistolică": 130, "Diastolică": 88, "Puls": 74, "Observații": ""},
         {"Dată": "26.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 121, "Sistolică": 116, "Diastolică": 72, "Puls": 81, "Observații": "mancat tarziu"},
         {"Dată": "27.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 133, "Sistolică": 124, "Diastolică": 84, "Puls": 88, "Observații": "prajituri si mancat tarziu seara"},
-        {"Dată": "27.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 114, "Sistolică": 122, "Diastolică": 68, "Puls": 79, "Observații": ""}
+        {"Dată": "27.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 114, "Sistolică": 122, "Diastolică": 68, "Puls": 79, "Observații": ""},
+        {"Dată": "28.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 98, "Sistolică": 119, "Diastolică": 68, "Puls": 71, "Observații": ""}
     ]
 
     for r_def in initial_defaults:
@@ -988,6 +1160,7 @@ def get_initial_data():
 
 if "local_df_v2" not in st.session_state:
     st.session_state.local_df_v2 = get_initial_data()
+remote_seed_missing()
 
 df = st.session_state.local_df_v2.copy()
 
@@ -1163,6 +1336,8 @@ st.sidebar.markdown(f"### 👤 **{st.session_state.user}**")
 st.sidebar.markdown(f"Rol: <span class='role-badge'>{current_role}</span>", unsafe_allow_html=True)
 st.sidebar.markdown("<br>", unsafe_allow_html=True)
 
+_lvl, _msg = remote_status()
+{"ok": st.sidebar.success, "wait": st.sidebar.info}.get(_lvl, st.sidebar.error)(_msg)
 st.sidebar.markdown("### 🔍 Filtre Date")
 if not df.empty:
     df['Luna_An'] = df[date_col].dt.strftime('%m-%Y')
@@ -1849,6 +2024,15 @@ with tab_dict["⚙️ Setări"]:
             else:
                 st.error("❌ Nu s-au putut salva setările pe disc.")
 
+        _lvl, _msg = remote_status()
+        {"ok": st.success, "wait": st.info}.get(_lvl, st.error)(_msg)
+        if not remote_enabled():
+            st.info("Ca datele să nu se mai piardă NICIODATĂ: în Streamlit → Settings → Secrets adaugă GITHUB_TOKEN, GITHUB_REPO (repo privat, ex. utilizator/healthtrack-date) și EMAIL_PASSWORD.")
+        if st.button("🔄 Sincronizează acum cu stocarea permanentă", use_container_width=True):
+            remote_mark_all_dirty()
+            st.success("Sincronizare pornită în fundal.")
+        if not EMAIL_PASSWORD_PERMANENT_DEFAULT:
+            st.warning("Parola iCloud introdusă aici se pierde la restart. Pune-o o singură dată în Secrets ca EMAIL_PASSWORD.")
         st.markdown("<small>💡 *Notă: Nu folosi parola ta principală Apple ID. Generează o App-Specific Password din portalul tău Apple ID.*</small>", unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
 
@@ -1948,8 +2132,7 @@ with tab_dict["⚙️ Setări"]:
         st.markdown("#### 💾 Backup Manual (CSV Cronologic Date Medicale)")
         df_backup_cron = get_chronological_backup_df()
         if not df_backup_cron.empty:
-            st.download_button(label="📥 Descarcă Backup CSV Cronologic", data=df_backup_cron.to_csv(index=False).encode("utf-8-sig"), file_name="backup_date_medicale.csv", mime="text/csv", use_container_width=True)
-            st.download_button(label="📥 Descarcă Backup HTML (cu buline colorate)", data=backup_df_to_html(df_backup_cron, "HealthTrack Pro – Backup").encode("utf-8"), file_name="backup_date_medicale.html", mime="text/html", use_container_width=True)
+            st.download_button(label="📥 Descarcă Backup CSV Cronologic", data=df_backup_cron.to_csv(index=False).encode("utf-8"), file_name="backup_date_medicale.csv", mime="text/csv", use_container_width=True)
 
         if is_admin:
             up_file = st.file_uploader("♻️ Restaurează din backup (CSV – orice variantă)", type=["csv"], key="restore_upl")

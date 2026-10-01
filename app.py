@@ -668,6 +668,18 @@ def chunk_by_day(dates, max_pts=MAX_PTS_CHART):
         start = end
     return chunks
 
+def chunk_by_ndays(dates, n_days):
+    """Împarte punctele în grafice de câte n_days zile (zilele fără date nu contează)."""
+    uniq = sorted(set(dates))
+    groups = [set(uniq[i:i + n_days]) for i in range(0, len(uniq), n_days)]
+    chunks, idx = [], 0
+    for g in groups:
+        start = idx
+        while idx < len(dates) and dates[idx] in g:
+            idx += 1
+        chunks.append((start, idx))
+    return chunks
+
 def active_mask(d):
     num = lambda c: pd.to_numeric(d[c], errors="coerce").fillna(0) > 0
     return num("Glicemie") | num("Sistolică") | num("Diastolică") | num("Puls") | (d["Observații"].apply(clean_obs) != "")
@@ -696,9 +708,9 @@ def _px_layout(fig, labels, dates, y_range):
     n = len(labels)
     fig.update_layout(
         template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-        height=560, margin=dict(l=40, r=40, t=40, b=140),
-        xaxis=dict(tickmode="array", tickvals=list(range(n)), ticktext=labels, tickangle=-90,
-                   tickfont=dict(size=9), range=[-0.7, n - 0.3]),
+        height=520, margin=dict(l=40, r=40, t=40, b=110),
+        xaxis=dict(tickmode="array", tickvals=list(range(n)), ticktext=labels, tickangle=-45,
+                   tickfont=dict(size=10), range=[-0.7, n - 0.3]),
         yaxis=dict(range=y_range),
         legend=dict(orientation="h", y=1.08),
     )
@@ -1664,9 +1676,10 @@ with tab_dict["📊 Jurnal & Grafice"]:
                 if not s_puls.empty: val_puls = f"{int(s_puls.iloc[-1])} bpm"
             st.markdown(f'<div class="metric-card"><div class="metric-label">💓 ULTIM PULS</div><div class="metric-value">{val_puls}</div></div>', unsafe_allow_html=True)
         with kpi5:
-            st.markdown(f'<div class="metric-card"><div class="metric-label">📅 TOTAL (FILTRU)</div><div class="metric-value">{len(jv_df)}</div></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="metric-card"><div class="metric-label">📅 ÎNREGISTRĂRI ACTIVE</div><div class="metric-value">{int(active_mask(jv_df).sum())}</div></div>', unsafe_allow_html=True)
 
         st.markdown("<br>", unsafe_allow_html=True)
+        zile_pe_grafic = st.select_slider("📏 Zile afișate pe un grafic (mai puține = mai aerisit)", options=[3, 5, 7, 10, 15, 31], value=7, key="zile_pe_grafic")
         sub_tab_glic, sub_tab_ta, sub_tab_puls, sub_tab_all = st.tabs(["🩸 Glicemie & Analiză Spike", "🫀 Tensiune Arterială", "💓 Puls", "📋 Toate Datele (Doar Înregistrări Active)"])
         
         df_glic_view = jv_df[pd.to_numeric(jv_df[col_glic], errors="coerce").fillna(0) > 0].copy()
@@ -1685,7 +1698,7 @@ with tab_dict["📊 Jurnal & Grafice"]:
             st.markdown("ℹ️ **Legendă Glicemie:** 🔵 Albastru = Valoare în intervalul optim | 🔴 Roșu = Valoare crescută / Spike peste prag. Valorile sunt scrise alternativ deasupra / dedesubtul punctelor, ca să fie toate vizibile.")
             if not df_glic_view.empty and col_glic in df_glic_view.columns:
                 _dts = [d.date() for d in df_glic_view[date_col]]
-                _chunks = chunk_by_day(_dts, MAX_PTS_CHART)
+                _chunks = chunk_by_ndays(_dts, zile_pe_grafic)
                 for _ci, (_a, _b) in enumerate(_chunks):
                     if len(_chunks) > 1:
                         st.markdown(f"**📈 Partea {_ci + 1} din {len(_chunks)}** — {_dts[_a].strftime('%d.%m.%Y')} → {_dts[_b - 1].strftime('%d.%m.%Y')}")
@@ -1706,7 +1719,7 @@ with tab_dict["📊 Jurnal & Grafice"]:
             st.markdown("ℹ️ **Legendă Tensiune:** 🔵 Albastru = Sistolică | 🟠 Portocaliu = Diastolică | 🔴 Roșu = Valori de Tensiune Crescută. Sistolica e scrisă deasupra/dedesubtul punctelor alternativ, la fel și diastolica.")
             if not df_ta_view.empty and col_sis in df_ta_view.columns and col_dia in df_ta_view.columns:
                 _dts = [d.date() for d in df_ta_view[date_col]]
-                _chunks = chunk_by_day(_dts, MAX_PTS_CHART)
+                _chunks = chunk_by_ndays(_dts, zile_pe_grafic)
                 for _ci, (_a, _b) in enumerate(_chunks):
                     if len(_chunks) > 1:
                         st.markdown(f"**📈 Partea {_ci + 1} din {len(_chunks)}** — {_dts[_a].strftime('%d.%m.%Y')} → {_dts[_b - 1].strftime('%d.%m.%Y')}")
@@ -1728,7 +1741,7 @@ with tab_dict["📊 Jurnal & Grafice"]:
             st.markdown("ℹ️ **Legendă Puls:** 🟢 Verde = Interval normal (60-100 bpm) | 🔴 Roșu = Puls în afara limitelor. Valorile sunt scrise alternativ deasupra / dedesubtul punctelor.")
             if not df_puls_view.empty and col_puls in df_puls_view.columns:
                 _dts = [d.date() for d in df_puls_view[date_col]]
-                _chunks = chunk_by_day(_dts, MAX_PTS_CHART)
+                _chunks = chunk_by_ndays(_dts, zile_pe_grafic)
                 for _ci, (_a, _b) in enumerate(_chunks):
                     if len(_chunks) > 1:
                         st.markdown(f"**📈 Partea {_ci + 1} din {len(_chunks)}** — {_dts[_a].strftime('%d.%m.%Y')} → {_dts[_b - 1].strftime('%d.%m.%Y')}")

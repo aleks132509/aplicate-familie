@@ -26,7 +26,7 @@ import plotly.graph_objects as go
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import Image, KeepTogether, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 import streamlit as st
 
 # ==========================================
@@ -550,6 +550,238 @@ def safe_save_data(df_to_save):
         print(f"Eroare salvare date: {e}")
         return False
 
+def format_table_column(series):
+    return series.astype(str).str.strip().replace(["0", "0.0", "nan", "None", "", "<NA>"], "")
+
+def evaluate_glic(val, moment_zi=""):
+    try:
+        v = float(val)
+        if v == 0 or pd.isna(v): return ""
+        m_clean = remove_diacritics(str(moment_zi)).lower()
+        if "dupa masa" in m_clean:
+            t_min, t_max = st.session_state.settings.get("target_glic_post_min", 70), st.session_state.settings.get("target_glic_post_max", 160)
+        else:
+            t_min, t_max = st.session_state.settings.get("target_glic_min", 70), st.session_state.settings.get("target_glic_max", 120)
+
+        if t_min <= v <= t_max: return "🟢 Normală"
+        elif v < t_min: return "🔴 Mică"
+        else: return "🔴 Mare"
+    except:
+        return ""
+
+def evaluate_ta(sis_val, dia_val):
+    try:
+        s, d = float(sis_val), float(dia_val)
+        if s == 0 or d == 0 or pd.isna(s) or pd.isna(d): return ""
+        max_s, max_d = st.session_state.settings["target_ta_sis"], st.session_state.settings["target_ta_dia"]
+        if s <= max_s and d <= max_d: return "🟢 Normală"
+        else: return "🔴 Crescută"
+    except:
+        return ""
+
+def evaluate_puls(val):
+    try:
+        v = float(val)
+        if v == 0 or pd.isna(v): return ""
+        if 60 <= v <= 100: return "🟢 Normal"
+        elif v < 60: return "🔴 Scăzut"
+        else: return "🔴 Ridicat"
+    except:
+        return ""
+
+def is_glic_spike(val, moment_zi=""):
+    try:
+        v = float(val)
+        if v == 0 or pd.isna(v): return False
+        m_clean = remove_diacritics(str(moment_zi)).lower()
+        if "dupa masa" in m_clean:
+            t_max = st.session_state.settings.get("target_glic_post_max", 160)
+        else:
+            t_max = st.session_state.settings.get("target_glic_max", 120)
+        return v > t_max
+    except:
+        return False
+
+def is_ta_spike(sis_val, dia_val):
+    try:
+        s, d = float(sis_val), float(dia_val)
+        if s == 0 or d == 0 or pd.isna(s) or pd.isna(d): return False
+        max_s = st.session_state.settings.get("target_ta_sis", 120)
+        max_d = st.session_state.settings.get("target_ta_dia", 80)
+        return s > max_s or d > max_d
+    except:
+        return False
+
+def is_puls_spike(val):
+    try:
+        v = float(val)
+        if v == 0 or pd.isna(v): return False
+        return v < 60 or v > 100
+    except:
+        return False
+
+def color_status(val):
+    if not isinstance(val, str) or not val.strip(): return ""
+    if "🟢" in val: return "background-color: #047857; color: #ffffff; font-weight: bold; text-align: center;"
+    elif "🔴" in val: return "background-color: #b91c1c; color: #ffffff; font-weight: bold; text-align: center;"
+    return ""
+
+def apply_color_styling(df_to_style, subset_cols):
+    try:
+        if hasattr(df_to_style.style, "map"): return df_to_style.style.map(color_status, subset=subset_cols)
+        else: return df_to_style.style.applymap(color_status, subset=subset_cols)
+    except:
+        return df_to_style
+
+# ---------- Ajutoare pentru grafice / filtru lunar (definite devreme, ca să fie disponibile și în backup) ----------
+RO_MONTHS = ["Ianuarie", "Februarie", "Martie", "Aprilie", "Mai", "Iunie",
+             "Iulie", "August", "Septembrie", "Octombrie", "Noiembrie", "Decembrie"]
+ALL_MONTHS_LABEL = "📆 Toate lunile (din filtrul lateral)"
+MAX_PTS_CHART = 45   # maxim puncte pe un grafic (≈15 zile × 3 valori) – peste, graficul se împarte în părți
+
+def short_moment(m):
+    """Etichetă scurtă și UNICĂ pentru fiecare moment (ex. 'Dim-pre', 'Dim-post', 'Prz-pre', 'Sea-post')."""
+    s = remove_diacritics(str(m)).lower()
+    if s.startswith("dimineata"): p = "Dim"
+    elif s.startswith("pranz"): p = "Prz"
+    elif s.startswith("seara"): p = "Sea"
+    else: p = str(m)[:3]
+    if "inainte" in s: return f"{p}-pre"
+    if "dupa" in s: return f"{p}-post"
+    return p
+
+def point_label(d, m):
+    return f"{d.strftime('%d.%m')} {short_moment(m)}"
+
+def chunk_by_day(dates, max_pts=MAX_PTS_CHART):
+    """Împarte punctele (ordonate cronologic) în segmente de maxim max_pts, fără a rupe o zi la mijloc."""
+    chunks, start, n = [], 0, len(dates)
+    while start < n:
+        end = min(start + max_pts, n)
+        if end < n:
+            k = end
+            while k > start and dates[k] == dates[k - 1]:
+                k -= 1
+            if k > start:
+                end = k
+        chunks.append((start, end))
+        start = end
+    return chunks
+
+def active_mask(d):
+    num = lambda c: pd.to_numeric(d[c], errors="coerce").fillna(0) > 0
+    return num("Glicemie") | num("Sistolică") | num("Diastolică") | num("Puls") | (d["Observații"].apply(clean_obs) != "")
+
+def month_filter(base_df, key):
+    """Selector de lună (doar lunile care au înregistrări). Returnează (df_filtrat, nume_lună sau None pentru 'toate')."""
+    if base_df is None or base_df.empty or "Dată" not in base_df.columns:
+        return base_df, None
+    act = base_df[active_mask(base_df)]
+    ym = sorted({(d.year, d.month) for d in act["Dată"].dropna()})
+    if not ym:
+        return base_df, None
+    labels = {f"{RO_MONTHS[m - 1]} {y}": (y, m) for y, m in ym}
+    options = [l for l, _ in sorted(labels.items(), key=lambda kv: kv[1], reverse=True)] + [ALL_MONTHS_LABEL]
+    if st.session_state.get(key) not in options:
+        st.session_state.pop(key, None)
+    choice = st.selectbox("🗓️ Alege luna", options, index=0, key=key)
+    if choice == ALL_MONTHS_LABEL:
+        return base_df, None
+    y, m = labels[choice]
+    out = base_df[(base_df["Dată"].dt.year == y) & (base_df["Dată"].dt.month == m)].copy()
+    return out, choice
+
+# ---------- Grafice interactive (Plotly): etichetele alternează sus / jos ca să fie toate vizibile ----------
+def _px_layout(fig, labels, dates, y_range):
+    n = len(labels)
+    fig.update_layout(
+        template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        height=560, margin=dict(l=40, r=40, t=40, b=140),
+        xaxis=dict(tickmode="array", tickvals=list(range(n)), ticktext=labels, tickangle=-90,
+                   tickfont=dict(size=9), range=[-0.7, n - 0.3]),
+        yaxis=dict(range=y_range),
+        legend=dict(orientation="h", y=1.08),
+    )
+    for i in range(1, n):
+        if dates[i] != dates[i - 1]:
+            fig.add_vline(x=i - 0.5, line_width=1, line_dash="dot", line_color="rgba(148,163,184,0.35)")
+
+def plotly_glic(sl):
+    moments = sl["Moment Zi"].tolist()
+    dates = [d.date() for d in sl["Dată"]]
+    labels = [point_label(d, m) for d, m in zip(sl["Dată"], moments)]
+    vals = pd.to_numeric(sl["Glicemie"], errors="coerce").fillna(0).tolist()
+    n = len(vals)
+    cols = ["#dc2626" if is_glic_spike(v, m) else "#38bdf8" for v, m in zip(vals, moments)]
+    pos = ["top center" if i % 2 == 0 else "bottom center" for i in range(n)]
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=list(range(n)), y=vals, mode="lines+markers+text", name="Glicemie",
+        line=dict(color="#38bdf8", width=2.5), marker=dict(size=10, color=cols),
+        text=[str(int(v)) for v in vals], textposition=pos,
+        textfont=dict(size=10, color="#ffffff"), cliponaxis=False,
+        hovertext=labels, hovertemplate="%{hovertext}<br>%{y} mg/dL<extra></extra>"))
+    max_post = st.session_state.settings.get("target_glic_post_max", 160)
+    max_pre = st.session_state.settings.get("target_glic_max", 120)
+    fig.add_hline(y=max_post, line_dash="dash", line_color="#dc2626", annotation_text=f"Prag Max După Masă ({max_post})")
+    fig.add_hline(y=max_pre, line_dash="dot", line_color="#f59e0b", annotation_text=f"Prag Max Înainte Masă ({max_pre})")
+    lo = max(0, min(min(vals), 70) - 30)
+    hi = max(max(vals), max_post) + 40
+    _px_layout(fig, labels, dates, [lo, hi])
+    return fig
+
+def plotly_ta(sl):
+    moments = sl["Moment Zi"].tolist()
+    dates = [d.date() for d in sl["Dată"]]
+    labels = [point_label(d, m) for d, m in zip(sl["Dată"], moments)]
+    sis = pd.to_numeric(sl["Sistolică"], errors="coerce").replace(0, None).tolist()
+    dia = pd.to_numeric(sl["Diastolică"], errors="coerce").replace(0, None).tolist()
+    n = len(sis)
+    s_cols = ["#dc2626" if is_ta_spike(s, d) else "#2563eb" for s, d in zip(sis, dia)]
+    d_cols = ["#dc2626" if is_ta_spike(s, d) else "#f59e0b" for s, d in zip(sis, dia)]
+    s_pos = ["top center" if i % 2 == 0 else "bottom center" for i in range(n)]
+    d_pos = ["bottom center" if i % 2 == 0 else "top center" for i in range(n)]
+    txt = lambda arr: [str(int(v)) if pd.notna(v) else "" for v in arr]
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=list(range(n)), y=sis, mode="lines+markers+text", name="Sistolică",
+        line=dict(color="#2563eb", width=2.5), marker=dict(size=10, color=s_cols),
+        text=txt(sis), textposition=s_pos, textfont=dict(size=10, color="#ffffff"), cliponaxis=False,
+        connectgaps=True, hovertext=labels, hovertemplate="%{hovertext}<br>Sistolică %{y}<extra></extra>"))
+    fig.add_trace(go.Scatter(
+        x=list(range(n)), y=dia, mode="lines+markers+text", name="Diastolică",
+        line=dict(color="#f59e0b", width=2.5), marker=dict(size=10, color=d_cols),
+        text=txt(dia), textposition=d_pos, textfont=dict(size=10, color="#ffffff"), cliponaxis=False,
+        connectgaps=True, hovertext=labels, hovertemplate="%{hovertext}<br>Diastolică %{y}<extra></extra>"))
+    max_s_target = st.session_state.settings.get("target_ta_sis", 120)
+    fig.add_hline(y=max_s_target, line_dash="dash", line_color="#dc2626", annotation_text=f"Prag Max Sistolică ({max_s_target})")
+    allv = [v for v in sis + dia if pd.notna(v)]
+    lo = max(0, min(allv) - 30) if allv else 0
+    hi = max(max(allv) if allv else 0, max_s_target) + 30
+    _px_layout(fig, labels, dates, [lo, hi])
+    return fig
+
+def plotly_puls(sl):
+    dates = [d.date() for d in sl["Dată"]]
+    labels = [point_label(d, m) for d, m in zip(sl["Dată"], sl["Moment Zi"])]
+    vals = pd.to_numeric(sl["Puls"], errors="coerce").fillna(0).tolist()
+    n = len(vals)
+    cols = ["#dc2626" if is_puls_spike(p) else "#10b981" for p in vals]
+    pos = ["top center" if i % 2 == 0 else "bottom center" for i in range(n)]
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=list(range(n)), y=vals, mode="lines+markers+text", name="Puls (bpm)",
+        line=dict(color="#10b981", width=2.5), marker=dict(size=10, color=cols),
+        text=[str(int(v)) for v in vals], textposition=pos,
+        textfont=dict(size=10, color="#ffffff"), cliponaxis=False,
+        hovertext=labels, hovertemplate="%{hovertext}<br>%{y} bpm<extra></extra>"))
+    fig.add_hline(y=100, line_dash="dash", line_color="#dc2626", annotation_text="Limită Maximă Puls (100)")
+    fig.add_hline(y=60, line_dash="dash", line_color="#dc2626", annotation_text="Limită Minimă Puls (60)")
+    lo = max(0, min(min(vals), 60) - 15)
+    hi = max(max(vals), 100) + 15
+    _px_layout(fig, labels, dates, [lo, hi])
+    return fig
+
 def get_chronological_backup_df():
     """Exact tabelul din tab-ul 'Toate' (aceleași coloane, aceleași buline 🟢/🔴, cu diacritice)."""
     d = read_data_file()
@@ -571,7 +803,8 @@ def get_chronological_backup_df():
         o["St. Puls"] = [evaluate_puls(p) for p in d["Puls"]]
         o["Observații"] = d["Observații"].values
         return o.reset_index(drop=True)
-    except Exception:
+    except Exception as e:
+        _write_text(BACKUP_ERROR_LOG_FILE, f"{now_ro().strftime('%Y-%m-%d %H:%M')} | Eroare generare fișier date medicale: {e}")
         return pd.DataFrame()
 
 def backup_df_to_html(df_b, titlu):
@@ -1007,7 +1240,10 @@ def verifica_si_fa_backup_automat(force=False):
         if ultima != azi_iso:
             workdir = tempfile.mkdtemp()
             att, incluse = build_backup_attachments(workdir)
-            if att:
+            if has_values_mask(df_n).any() and "backup_date_medicale.csv" not in att:
+                _log_backup_result(False, "Fișierul cu date medicale nu a putut fi generat – backup-ul zilnic NU a fost trimis (se reîncearcă automat).")
+                shutil.rmtree(workdir, ignore_errors=True)
+            elif att:
                 mesaj = (f"Salut!\n\nAcesta este backup-ul tău zilnic automat generat la data de {azi.strftime('%d.%m.%Y')}.\n"
                          f"Fișiere incluse: {', '.join(incluse)}\n\nHealthTrack Pro System")
                 _run_bg(_bg_send, email_dest, f"💾 [Backup Zilnic Automat] HealthTrack Pro - {azi.strftime('%d.%m.%Y')}",
@@ -1337,89 +1573,6 @@ def save_local_record(date_str, moment_str, glic_v, sis_v, dia_v, puls_v, obs_v)
     except Exception as e:
         print(f"Eroare: {e}")
 
-def format_table_column(series):
-    return series.astype(str).str.strip().replace(["0", "0.0", "nan", "None", "", "<NA>"], "")
-
-def evaluate_glic(val, moment_zi=""):
-    try:
-        v = float(val)
-        if v == 0 or pd.isna(v): return ""
-        m_clean = remove_diacritics(str(moment_zi)).lower()
-        if "dupa masa" in m_clean:
-            t_min, t_max = st.session_state.settings.get("target_glic_post_min", 70), st.session_state.settings.get("target_glic_post_max", 160)
-        else:
-            t_min, t_max = st.session_state.settings.get("target_glic_min", 70), st.session_state.settings.get("target_glic_max", 120)
-
-        if t_min <= v <= t_max: return "🟢 Normală"
-        elif v < t_min: return "🔴 Mică"
-        else: return "🔴 Mare"
-    except:
-        return ""
-
-def evaluate_ta(sis_val, dia_val):
-    try:
-        s, d = float(sis_val), float(dia_val)
-        if s == 0 or d == 0 or pd.isna(s) or pd.isna(d): return ""
-        max_s, max_d = st.session_state.settings["target_ta_sis"], st.session_state.settings["target_ta_dia"]
-        if s <= max_s and d <= max_d: return "🟢 Normală"
-        else: return "🔴 Crescută"
-    except:
-        return ""
-
-def evaluate_puls(val):
-    try:
-        v = float(val)
-        if v == 0 or pd.isna(v): return ""
-        if 60 <= v <= 100: return "🟢 Normal"
-        elif v < 60: return "🔴 Scăzut"
-        else: return "🔴 Ridicat"
-    except:
-        return ""
-
-def is_glic_spike(val, moment_zi=""):
-    try:
-        v = float(val)
-        if v == 0 or pd.isna(v): return False
-        m_clean = remove_diacritics(str(moment_zi)).lower()
-        if "dupa masa" in m_clean:
-            t_max = st.session_state.settings.get("target_glic_post_max", 160)
-        else:
-            t_max = st.session_state.settings.get("target_glic_max", 120)
-        return v > t_max
-    except:
-        return False
-
-def is_ta_spike(sis_val, dia_val):
-    try:
-        s, d = float(sis_val), float(dia_val)
-        if s == 0 or d == 0 or pd.isna(s) or pd.isna(d): return False
-        max_s = st.session_state.settings.get("target_ta_sis", 120)
-        max_d = st.session_state.settings.get("target_ta_dia", 80)
-        return s > max_s or d > max_d
-    except:
-        return False
-
-def is_puls_spike(val):
-    try:
-        v = float(val)
-        if v == 0 or pd.isna(v): return False
-        return v < 60 or v > 100
-    except:
-        return False
-
-def color_status(val):
-    if not isinstance(val, str) or not val.strip(): return ""
-    if "🟢" in val: return "background-color: #047857; color: #ffffff; font-weight: bold; text-align: center;"
-    elif "🔴" in val: return "background-color: #b91c1c; color: #ffffff; font-weight: bold; text-align: center;"
-    return ""
-
-def apply_color_styling(df_to_style, subset_cols):
-    try:
-        if hasattr(df_to_style.style, "map"): return df_to_style.style.map(color_status, subset=subset_cols)
-        else: return df_to_style.style.applymap(color_status, subset=subset_cols)
-    except:
-        return df_to_style
-
 # ==========================================
 # SIDEBAR & FILTRARE
 # ==========================================
@@ -1474,96 +1627,69 @@ tab_dict = {title: tabs[i] for i, title in enumerate(tab_titles)}
 # ----------------- TAB: JURNAL & GRAFICE -----------------
 with tab_dict["📊 Jurnal & Grafice"]:
     st.markdown("### 📊 Tablou de Bord Medical")
-    st.caption(f"Filtru curent: **{filtru_luni_str}**")
+    jv_df, jv_luna = month_filter(view_df, "flt_luna_jurnal")
+    st.caption(f"Perioadă afișată: **{jv_luna if jv_luna else filtru_luni_str}**")
 
-    if view_df.empty:
+    if jv_df.empty:
         st.info("📭 Nu există nicio înregistrare pentru selecția curentă.")
     else:
         avg_glic_str = ""
-        if col_glic in view_df.columns:
-            s_glic_all = pd.to_numeric(view_df[col_glic], errors="coerce").fillna(0).replace(0, None).dropna()
+        if col_glic in jv_df.columns:
+            s_glic_all = pd.to_numeric(jv_df[col_glic], errors="coerce").fillna(0).replace(0, None).dropna()
             if not s_glic_all.empty: avg_glic_str = f"{int(s_glic_all.mean())} mg/dL"
 
         kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
         with kpi1:
             val_glic = ""
-            if col_glic in view_df.columns:
-                s_glic = pd.to_numeric(view_df[col_glic], errors="coerce").fillna(0).replace(0, None).dropna()
+            if col_glic in jv_df.columns:
+                s_glic = pd.to_numeric(jv_df[col_glic], errors="coerce").fillna(0).replace(0, None).dropna()
                 if not s_glic.empty: val_glic = f"{int(s_glic.iloc[-1])} mg/dL"
             st.markdown(f'<div class="metric-card"><div class="metric-label">🩸 ULTIMA GLICEMIE</div><div class="metric-value">{val_glic}</div></div>', unsafe_allow_html=True)
         with kpi2:
             st.markdown(f'<div class="metric-card"><div class="metric-label">📊 MEDIE GLICEMIE</div><div class="metric-value">{avg_glic_str}</div></div>', unsafe_allow_html=True)
         with kpi3:
             val_sis, val_dia = "", ""
-            if col_sis in view_df.columns:
-                s_sis = pd.to_numeric(view_df[col_sis], errors="coerce").fillna(0).replace(0, None).dropna()
+            if col_sis in jv_df.columns:
+                s_sis = pd.to_numeric(jv_df[col_sis], errors="coerce").fillna(0).replace(0, None).dropna()
                 if not s_sis.empty: val_sis = int(s_sis.iloc[-1])
-            if col_dia in view_df.columns:
-                s_dia = pd.to_numeric(view_df[col_dia], errors="coerce").fillna(0).replace(0, None).dropna()
+            if col_dia in jv_df.columns:
+                s_dia = pd.to_numeric(jv_df[col_dia], errors="coerce").fillna(0).replace(0, None).dropna()
                 if not s_dia.empty: val_dia = int(s_dia.iloc[-1])
             val_ta_str = f"{val_sis}/{val_dia}" if val_sis != "" or val_dia != "" else ""
             st.markdown(f'<div class="metric-card"><div class="metric-label">🫀 ULTIMA TENSIUNE</div><div class="metric-value">{val_ta_str}</div></div>', unsafe_allow_html=True)
         with kpi4:
             val_puls = ""
-            if col_puls in view_df.columns:
-                s_puls = pd.to_numeric(view_df[col_puls], errors="coerce").fillna(0).replace(0, None).dropna()
+            if col_puls in jv_df.columns:
+                s_puls = pd.to_numeric(jv_df[col_puls], errors="coerce").fillna(0).replace(0, None).dropna()
                 if not s_puls.empty: val_puls = f"{int(s_puls.iloc[-1])} bpm"
             st.markdown(f'<div class="metric-card"><div class="metric-label">💓 ULTIM PULS</div><div class="metric-value">{val_puls}</div></div>', unsafe_allow_html=True)
         with kpi5:
-            st.markdown(f'<div class="metric-card"><div class="metric-label">📅 TOTAL (FILTRU)</div><div class="metric-value">{len(view_df)}</div></div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="metric-card"><div class="metric-label">📅 TOTAL (FILTRU)</div><div class="metric-value">{len(jv_df)}</div></div>', unsafe_allow_html=True)
 
         st.markdown("<br>", unsafe_allow_html=True)
         sub_tab_glic, sub_tab_ta, sub_tab_puls, sub_tab_all = st.tabs(["🩸 Glicemie & Analiză Spike", "🫀 Tensiune Arterială", "💓 Puls", "📋 Toate Datele (Doar Înregistrări Active)"])
         
-        df_glic_view = view_df[pd.to_numeric(view_df[col_glic], errors="coerce").fillna(0) > 0].copy()
-        df_ta_view = view_df[(pd.to_numeric(view_df[col_sis], errors="coerce").fillna(0) > 0) | (pd.to_numeric(view_df[col_dia], errors="coerce").fillna(0) > 0)].copy()
-        df_puls_view = view_df[pd.to_numeric(view_df[col_puls], errors="coerce").fillna(0) > 0].copy()
+        df_glic_view = jv_df[pd.to_numeric(jv_df[col_glic], errors="coerce").fillna(0) > 0].copy()
+        df_ta_view = jv_df[(pd.to_numeric(jv_df[col_sis], errors="coerce").fillna(0) > 0) | (pd.to_numeric(jv_df[col_dia], errors="coerce").fillna(0) > 0)].copy()
+        df_puls_view = jv_df[pd.to_numeric(jv_df[col_puls], errors="coerce").fillna(0) > 0].copy()
         
-        df_all_view = view_df[
-            (pd.to_numeric(view_df[col_glic], errors="coerce").fillna(0) > 0) |
-            (pd.to_numeric(view_df[col_sis], errors="coerce").fillna(0) > 0) |
-            (pd.to_numeric(view_df[col_dia], errors="coerce").fillna(0) > 0) |
-            (pd.to_numeric(view_df[col_puls], errors="coerce").fillna(0) > 0) |
-            (view_df[col_obs].astype(str).str.strip() != "")
+        df_all_view = jv_df[
+            (pd.to_numeric(jv_df[col_glic], errors="coerce").fillna(0) > 0) |
+            (pd.to_numeric(jv_df[col_sis], errors="coerce").fillna(0) > 0) |
+            (pd.to_numeric(jv_df[col_dia], errors="coerce").fillna(0) > 0) |
+            (pd.to_numeric(jv_df[col_puls], errors="coerce").fillna(0) > 0) |
+            (jv_df[col_obs].astype(str).str.strip() != "")
         ].copy()
 
         with sub_tab_glic:
-            st.markdown("ℹ️ **Legendă Glicemie:** 🔵 Albastru = Valoare în intervalul optim | 🔴 Roșu = Valoare crescută / Spike peste prag.")
+            st.markdown("ℹ️ **Legendă Glicemie:** 🔵 Albastru = Valoare în intervalul optim | 🔴 Roșu = Valoare crescută / Spike peste prag. Valorile sunt scrise alternativ deasupra / dedesubtul punctelor, ca să fie toate vizibile.")
             if not df_glic_view.empty and col_glic in df_glic_view.columns:
-                x_labels_g = [f"{d.strftime('%d.%m')} ({m[:3]})" for d, m in zip(df_glic_view[date_col], df_glic_view[moment_col])]
-                glic_vals = pd.to_numeric(df_glic_view[col_glic], errors="coerce").replace(0, None)
-                moments = df_glic_view[moment_col].tolist()
-
-                spike_colors = []
-                spike_texts = []
-                for v, m in zip(glic_vals, moments):
-                    if is_glic_spike(v, m):
-                        spike_colors.append("#dc2626")
-                    else:
-                        spike_colors.append("#38bdf8")
-                    spike_texts.append(str(int(v)) if pd.notna(v) else "")
-
-                fig_g = go.Figure()
-                fig_g.add_trace(go.Scatter(
-                    x=x_labels_g, y=glic_vals, mode="lines+markers+text", name="Glicemie",
-                    line=dict(color="#38bdf8", width=2.5),
-                    marker=dict(size=10, color=spike_colors),
-                    text=spike_texts, textposition="top center",
-                    textfont=dict(size=9.5, color="#ffffff"),
-                    texttemplate="%{text}",
-                    connectgaps=True
-                ))
-                
-                max_post = st.session_state.settings.get("target_glic_post_max", 160)
-                max_pre = st.session_state.settings.get("target_glic_max", 120)
-                fig_g.add_hline(y=max_post, line_dash="dash", line_color="#dc2626", annotation_text=f"Prag Max După Masă ({max_post})")
-                fig_g.add_hline(y=max_pre, line_dash="dot", line_color="#f59e0b", annotation_text=f"Prag Max Înainte Masă ({max_pre})")
-                
-                max_glic_data = glic_vals.max() if not glic_vals.dropna().empty else 200
-                upper_limit_g = max(250, int(max_glic_data) + 50)
-                
-                fig_g.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=40, r=40, t=50, b=120), xaxis=dict(tickangle=-45, dtick=1), yaxis=dict(range=[0, upper_limit_g]))
-                st.plotly_chart(fig_g, use_container_width=True)
+                _dts = [d.date() for d in df_glic_view[date_col]]
+                _chunks = chunk_by_day(_dts, MAX_PTS_CHART)
+                for _ci, (_a, _b) in enumerate(_chunks):
+                    if len(_chunks) > 1:
+                        st.markdown(f"**📈 Partea {_ci + 1} din {len(_chunks)}** — {_dts[_a].strftime('%d.%m.%Y')} → {_dts[_b - 1].strftime('%d.%m.%Y')}")
+                    st.plotly_chart(plotly_glic(df_glic_view.iloc[_a:_b]), use_container_width=True, key=f"pc_glic_{_ci}")
 
                 cols_g = [date_col, moment_col, col_glic, col_obs]
                 df_g_tab = df_glic_view[cols_g].copy()
@@ -1577,35 +1703,15 @@ with tab_dict["📊 Jurnal & Grafice"]:
                 st.info("Nicio înregistrare de glicemie pentru selecția curentă.")
 
         with sub_tab_ta:
-            st.markdown("ℹ️ **Legendă Tensiune:** 🔵 Albastru/Indigo = Tensiune Sistolică normală | 🟠 Portocaliu = Diastolică | 🔴 Roșu = Valori de Tensiune Crescută.")
+            st.markdown("ℹ️ **Legendă Tensiune:** 🔵 Albastru = Sistolică | 🟠 Portocaliu = Diastolică | 🔴 Roșu = Valori de Tensiune Crescută. Sistolica e scrisă deasupra/dedesubtul punctelor alternativ, la fel și diastolica.")
             if not df_ta_view.empty and col_sis in df_ta_view.columns and col_dia in df_ta_view.columns:
-                x_labels_ta = [f"{d.strftime('%d.%m')} ({m[:3]})" for d, m in zip(df_ta_view[date_col], df_ta_view[moment_col])]
-                sis_vals = pd.to_numeric(df_ta_view[col_sis], errors="coerce").replace(0, None)
-                dia_vals = pd.to_numeric(df_ta_view[col_dia], errors="coerce").replace(0, None)
-                
-                sis_colors = ["#dc2626" if is_ta_spike(s, d) else "#2563eb" for s, d in zip(sis_vals, dia_vals)]
-                dia_colors = ["#dc2626" if is_ta_spike(s, d) else "#f59e0b" for s, d in zip(sis_vals, dia_vals)]
+                _dts = [d.date() for d in df_ta_view[date_col]]
+                _chunks = chunk_by_day(_dts, MAX_PTS_CHART)
+                for _ci, (_a, _b) in enumerate(_chunks):
+                    if len(_chunks) > 1:
+                        st.markdown(f"**📈 Partea {_ci + 1} din {len(_chunks)}** — {_dts[_a].strftime('%d.%m.%Y')} → {_dts[_b - 1].strftime('%d.%m.%Y')}")
+                    st.plotly_chart(plotly_ta(df_ta_view.iloc[_a:_b]), use_container_width=True, key=f"pc_ta_{_ci}")
 
-                fig_ta = go.Figure()
-                fig_ta.add_trace(go.Scatter(
-                    x=x_labels_ta, y=sis_vals, mode="lines+markers+text", name="Sistolică", 
-                    line=dict(color="#2563eb", width=2.5), marker=dict(size=10, color=sis_colors), 
-                    text=sis_vals, textposition="top center", textfont=dict(size=10, color="#ffffff"), 
-                    texttemplate="<b>%{text}</b>", connectgaps=True
-                ))
-                fig_ta.add_trace(go.Scatter(
-                    x=x_labels_ta, y=dia_vals, mode="lines+markers+text", name="Diastolică", 
-                    line=dict(color="#f59e0b", width=2.5), marker=dict(size=10, color=dia_colors), 
-                    text=dia_vals, textposition="bottom center", textfont=dict(size=10, color="#ffffff"), 
-                    texttemplate="<b>%{text}</b>", connectgaps=True
-                ))
-                
-                max_s_target = st.session_state.settings.get("target_ta_sis", 120)
-                fig_ta.add_hline(y=max_s_target, line_dash="dash", line_color="#dc2626", annotation_text=f"Prag Max Sistolică ({max_s_target})")
-                
-                fig_ta.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=40, r=40, t=50, b=120), xaxis=dict(tickangle=-45, dtick=1))
-                st.plotly_chart(fig_ta, use_container_width=True)
-                
                 cols_t = [date_col, moment_col, col_sis, col_dia, col_obs]
                 df_t_tab = df_ta_view[cols_t].copy()
                 df_t_tab[date_col] = df_t_tab[date_col].dt.strftime("%d.%m.%Y")
@@ -1619,25 +1725,15 @@ with tab_dict["📊 Jurnal & Grafice"]:
                 st.info("Nicio înregistrare de tensiune arterială pentru selecția curentă.")
 
         with sub_tab_puls:
-            st.markdown("ℹ️ **Legendă Puls:** 🟢 Verde = Interval normal (60-100 bpm) | 🔴 Roșu = Puls în afara limitelor.")
+            st.markdown("ℹ️ **Legendă Puls:** 🟢 Verde = Interval normal (60-100 bpm) | 🔴 Roșu = Puls în afara limitelor. Valorile sunt scrise alternativ deasupra / dedesubtul punctelor.")
             if not df_puls_view.empty and col_puls in df_puls_view.columns:
-                x_labels_p = [f"{d.strftime('%d.%m')} ({m[:3]})" for d, m in zip(df_puls_view[date_col], df_puls_view[moment_col])]
-                puls_vals = pd.to_numeric(df_puls_view[col_puls], errors="coerce").replace(0, None)
-                puls_colors = ["#dc2626" if is_puls_spike(p) else "#10b981" for p in puls_vals]
+                _dts = [d.date() for d in df_puls_view[date_col]]
+                _chunks = chunk_by_day(_dts, MAX_PTS_CHART)
+                for _ci, (_a, _b) in enumerate(_chunks):
+                    if len(_chunks) > 1:
+                        st.markdown(f"**📈 Partea {_ci + 1} din {len(_chunks)}** — {_dts[_a].strftime('%d.%m.%Y')} → {_dts[_b - 1].strftime('%d.%m.%Y')}")
+                    st.plotly_chart(plotly_puls(df_puls_view.iloc[_a:_b]), use_container_width=True, key=f"pc_puls_{_ci}")
 
-                fig_p = go.Figure()
-                fig_p.add_trace(go.Scatter(
-                    x=x_labels_p, y=puls_vals, mode="lines+markers+text", name="Puls (bpm)", 
-                    line=dict(color="#10b981", width=2.5), marker=dict(size=10, color=puls_colors), 
-                    text=puls_vals, textposition="top center", textfont=dict(size=10, color="#ffffff"), 
-                    texttemplate="<b>%{text}</b>", connectgaps=True
-                ))
-                fig_p.add_hline(y=100, line_dash="dash", line_color="#dc2626", annotation_text="Limită Maximă Puls (100)")
-                fig_p.add_hline(y=60, line_dash="dash", line_color="#dc2626", annotation_text="Limită Minimă Puls (60)")
-                
-                fig_p.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=40, r=40, t=50, b=120), xaxis=dict(tickangle=-45, dtick=1))
-                st.plotly_chart(fig_p, use_container_width=True)
-                
                 cols_p = [date_col, moment_col, col_puls, col_obs]
                 df_p_tab = df_puls_view[cols_p].copy()
                 df_p_tab[date_col] = df_p_tab[date_col].dt.strftime("%d.%m.%Y")
@@ -2280,7 +2376,9 @@ with tab_dict["⚙️ Setări"]:
 # ----------------- TAB: RAPORT PDF -----------------
 with tab_dict["📄 Raport PDF"]:
     st.markdown("### 📄 Generare Raport PDF Personalizat și Profesional")
-    st.markdown(f"Raportul va include datele conform filtrului aplicat: **{filtru_luni_str}**.")
+    pdf_df, pdf_luna = month_filter(view_df, "flt_luna_pdf")
+    perioada_pdf = pdf_luna if pdf_luna else filtru_luni_str
+    st.markdown(f"Raportul va include datele pentru: **{perioada_pdf}**.")
 
     col_opt1, col_opt2 = st.columns(2)
     with col_opt1:
@@ -2290,160 +2388,161 @@ with tab_dict["📄 Raport PDF"]:
         opt_puls = st.checkbox("Include Grafic Puls 💓", value=True)
         opt_tabele = st.checkbox("Include Tabelul Centralizator (Curat, Toate Înregistrările Active) 📋", value=True)
 
-    def generate_pdf_chart_glic(x_vals, y_vals, moments_list, title, ylabel, color_hex):
-        plt.figure(figsize=(9.5, 3.4))
-        for i in range(len(y_vals) - 1):
-            x_seg = [x_vals[i], x_vals[i+1]]
-            y_seg = [y_vals[i], y_vals[i+1]]
-            is_spike1 = is_glic_spike(y_vals[i], moments_list[i])
-            is_spike2 = is_glic_spike(y_vals[i+1], moments_list[i+1])
-            seg_color = "#dc2626" if (is_spike1 or is_spike2) else color_hex
-            plt.plot(x_seg, y_seg, linestyle="-", color=seg_color, linewidth=2.5)
+    PDF_FIG_W, PDF_FIG_H = 11.0, 4.2
+    PDF_IMG_W = 555
+    PDF_IMG_H = PDF_IMG_W * PDF_FIG_H / PDF_FIG_W
 
-        for xi, yi, m in zip(x_vals, y_vals, moments_list):
+    def _pdf_axes_common(ax, labels, dates, title, ylabel):
+        n = len(labels)
+        ax.set_xlim(-0.7, n - 0.3)
+        ax.set_xticks(list(range(n)))
+        ax.set_xticklabels(labels, rotation=90, fontsize=6.5)
+        ax.tick_params(axis="y", labelsize=8)
+        ax.set_ylabel(ylabel, fontsize=9, fontweight="bold")
+        ax.set_title(title, fontsize=9.5, fontweight="bold", color="#1e3a8a", pad=12)
+        ax.grid(True, linestyle=":", alpha=0.7)
+        for i in range(1, n):
+            if dates[i] != dates[i - 1]:
+                ax.axvline(i - 0.5, color="#94a3b8", linewidth=0.8, alpha=0.6)
+
+    def _pdf_png(fig):
+        fig.tight_layout()
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", dpi=220)
+        plt.close(fig)
+        buf.seek(0)
+        return buf
+
+    def _lbl(ax, i, y, text, color, up, extra=0):
+        off = 7 + extra
+        ax.annotate(text, (i, y), textcoords="offset points", xytext=(0, off if up else -off),
+                    ha="center", va="bottom" if up else "top", fontsize=7.5, fontweight="bold",
+                    bbox=dict(boxstyle="round,pad=0.12", fc="white", ec=color, alpha=0.95))
+
+    def generate_pdf_chart_glic(labels, dates, y_vals, moments_list, title, ylabel, color_hex):
+        n = len(y_vals)
+        fig, ax = plt.subplots(figsize=(PDF_FIG_W, PDF_FIG_H))
+        for i in range(n - 1):
+            spike = is_glic_spike(y_vals[i], moments_list[i]) or is_glic_spike(y_vals[i + 1], moments_list[i + 1])
+            ax.plot([i, i + 1], [y_vals[i], y_vals[i + 1]], "-", color="#dc2626" if spike else color_hex, linewidth=2.2)
+        for i, (yi, m) in enumerate(zip(y_vals, moments_list)):
             if yi > 0:
-                is_spike = is_glic_spike(yi, m)
-                dot_color = "#dc2626" if is_spike else color_hex
-                plt.plot(xi, yi, marker="o", markersize=6.5, color=dot_color)
-                plt.annotate(str(int(yi)), (xi, yi), textcoords="offset points", xytext=(0, 7), ha="center", fontsize=7.5, fontweight="bold", bbox=dict(boxstyle="round,pad=0.15", fc="white", ec=dot_color, alpha=0.95))
-        
-        max_y = max(y_vals) if y_vals and max(y_vals) > 0 else 200
-        plt.ylim(0, max(max_y * 1.25, 220))
-        plt.title(title + " | Legenda: Albastru = Normal, Rosu = Spike / Afara pragului", fontsize=9.5, fontweight="bold", color="#1e3a8a", pad=15)
-        plt.ylabel(ylabel, fontsize=9, fontweight="bold")
-        plt.xticks(rotation=35, fontsize=7.5, ha="right")
-        plt.yticks(fontsize=8)
-        plt.grid(True, linestyle=":", alpha=0.7)
-        plt.tight_layout()
+                dot = "#dc2626" if is_glic_spike(yi, m) else color_hex
+                ax.plot(i, yi, "o", markersize=6, color=dot)
+                _lbl(ax, i, yi, str(int(yi)), dot, up=(i % 2 == 0))
+        pos = [v for v in y_vals if v > 0]
+        lo = max(0, min(min(pos), 70) - 30) if pos else 0
+        hi = max(max(pos) if pos else 0, 180)
+        ax.set_ylim(lo, hi * 1.12)
+        _pdf_axes_common(ax, labels, dates, title + " | Albastru = Normal, Rosu = Spike / Afara pragului", ylabel)
+        return _pdf_png(fig)
 
-        img_buffer = io.BytesIO()
-        plt.savefig(img_buffer, format="png", dpi=250)
-        plt.close()
-        img_buffer.seek(0)
-        return img_buffer
-
-    def generate_pdf_chart_ta(x_vals, sis_vals, dia_vals, title):
-        plt.figure(figsize=(9.5, 3.4))
-        for i in range(len(sis_vals) - 1):
-            x_seg = [x_vals[i], x_vals[i+1]]
-            s_seg = [sis_vals[i], sis_vals[i+1]]
-            d_seg = [dia_vals[i], dia_vals[i+1]]
-            is_spike1 = is_ta_spike(sis_vals[i], dia_vals[i])
-            is_spike2 = is_ta_spike(sis_vals[i+1], dia_vals[i+1])
-            s_color = "#dc2626" if (is_spike1 or is_spike2) else "#2563eb"
-            d_color = "#dc2626" if (is_spike1 or is_spike2) else "#f59e0b"
-            plt.plot(x_seg, s_seg, linestyle="-", color=s_color, linewidth=2.5)
-            plt.plot(x_seg, d_seg, linestyle="-", color=d_color, linewidth=2.5)
-        
-        for xi, s, d in zip(x_vals, sis_vals, dia_vals):
+    def generate_pdf_chart_ta(labels, dates, sis_vals, dia_vals, title):
+        n = len(sis_vals)
+        fig, ax = plt.subplots(figsize=(PDF_FIG_W, PDF_FIG_H))
+        for i in range(n - 1):
+            spike = is_ta_spike(sis_vals[i], dia_vals[i]) or is_ta_spike(sis_vals[i + 1], dia_vals[i + 1])
+            ax.plot([i, i + 1], [sis_vals[i], sis_vals[i + 1]], "-", color="#dc2626" if spike else "#2563eb", linewidth=2.2)
+            ax.plot([i, i + 1], [dia_vals[i], dia_vals[i + 1]], "-", color="#dc2626" if spike else "#f59e0b", linewidth=2.2)
+        for i, (s, d) in enumerate(zip(sis_vals, dia_vals)):
             if s > 0 and d > 0:
-                is_spike = is_ta_spike(s, d)
-                s_color = "#dc2626" if is_spike else "#2563eb"
-                d_color = "#dc2626" if is_spike else "#f59e0b"
-                plt.plot(xi, s, marker="o", markersize=6.5, color=s_color)
-                plt.annotate(f"S:{int(s)}", (xi, s), textcoords="offset points", xytext=(0, 7), ha="center", fontsize=7, fontweight="bold", bbox=dict(boxstyle="round,pad=0.15", fc="white", ec=s_color, alpha=0.95))
-                plt.plot(xi, d, marker="o", markersize=6.5, color=d_color)
-                plt.annotate(f"D:{int(d)}", (xi, d), textcoords="offset points", xytext=(0, -12), ha="center", fontsize=7, fontweight="bold", bbox=dict(boxstyle="round,pad=0.15", fc="white", ec=d_color, alpha=0.95))
-                
-        all_ta = [s for s in sis_vals if s > 0] + [d for d in dia_vals if d > 0]
-        max_t = max(all_ta) if all_ta else 180
-        plt.ylim(0, max(max_t * 1.25, 200))
-        plt.title(title + " | Legenda: Albastru = Sistolica, Galben = Diastolica, Rosu = Crescuta", fontsize=9.5, fontweight="bold", color="#1e3a8a", pad=15)
-        plt.ylabel("mmHg", fontsize=9, fontweight="bold")
-        plt.xticks(rotation=35, fontsize=7.5, ha="right")
-        plt.yticks(fontsize=8)
-        plt.grid(True, linestyle=":", alpha=0.7)
-        plt.tight_layout()
+                sp = is_ta_spike(s, d)
+                sc = "#dc2626" if sp else "#2563eb"
+                dc = "#dc2626" if sp else "#f59e0b"
+                ax.plot(i, s, "o", markersize=6, color=sc)
+                ax.plot(i, d, "o", markersize=6, color=dc)
+                extra = 0 if i % 2 == 0 else 13      # decalaj pe 2 niveluri: etichetele vecine nu se suprapun
+                _lbl(ax, i, s, str(int(s)), sc, up=True, extra=extra)     # sistolica – mereu deasupra
+                _lbl(ax, i, d, str(int(d)), dc, up=False, extra=extra)    # diastolica – mereu dedesubt
+        s_pos = [v for v in sis_vals if v > 0]
+        d_pos = [v for v in dia_vals if v > 0]
+        lo = max(0, (min(d_pos) if d_pos else 60) - 30)
+        hi = (max(s_pos) if s_pos else 160) + 28
+        ax.set_ylim(lo, hi)
+        _pdf_axes_common(ax, labels, dates, title + " | Albastru = Sistolica (sus), Galben = Diastolica (jos), Rosu = Crescuta", "mmHg")
+        return _pdf_png(fig)
 
-        img_buffer = io.BytesIO()
-        plt.savefig(img_buffer, format="png", dpi=250)
-        plt.close()
-        img_buffer.seek(0)
-        return img_buffer
-
-    def generate_pdf_chart_puls(x_vals, puls_vals, title):
-        plt.figure(figsize=(9.5, 3.4))
-        for i in range(len(puls_vals) - 1):
-            x_seg = [x_vals[i], x_vals[i+1]]
-            p_seg = [puls_vals[i], puls_vals[i+1]]
-            is_spike1 = is_puls_spike(puls_vals[i])
-            is_spike2 = is_puls_spike(puls_vals[i+1])
-            p_color = "#dc2626" if (is_spike1 or is_spike2) else "#10b981"
-            plt.plot(x_seg, p_seg, linestyle="-", color=p_color, linewidth=2.5)
-
-        for xi, p in zip(x_vals, puls_vals):
+    def generate_pdf_chart_puls(labels, dates, puls_vals, title):
+        n = len(puls_vals)
+        fig, ax = plt.subplots(figsize=(PDF_FIG_W, PDF_FIG_H))
+        for i in range(n - 1):
+            spike = is_puls_spike(puls_vals[i]) or is_puls_spike(puls_vals[i + 1])
+            ax.plot([i, i + 1], [puls_vals[i], puls_vals[i + 1]], "-", color="#dc2626" if spike else "#10b981", linewidth=2.2)
+        for i, p in enumerate(puls_vals):
             if p > 0:
-                is_spike = is_puls_spike(p)
-                p_color = "#dc2626" if is_spike else "#10b981"
-                plt.plot(xi, p, marker="o", markersize=6.5, color=p_color)
-                plt.annotate(str(int(p)), (xi, p), textcoords="offset points", xytext=(0, 7), ha="center", fontsize=7.5, fontweight="bold", bbox=dict(boxstyle="round,pad=0.15", fc="white", ec=p_color, alpha=0.95))
-                
-        max_p = max(puls_vals) if puls_vals and max(puls_vals) > 0 else 100
-        plt.ylim(30, max(max_p * 1.25, 140))
-        plt.title(title + " | Legenda: Verde = Normal (60-100), Rosu = Afara intervalului", fontsize=9.5, fontweight="bold", color="#1e3a8a", pad=15)
-        plt.ylabel("bpm", fontsize=9, fontweight="bold")
-        plt.xticks(rotation=35, fontsize=7.5, ha="right")
-        plt.yticks(fontsize=8)
-        plt.grid(True, linestyle=":", alpha=0.7)
-        plt.tight_layout()
+                pc = "#dc2626" if is_puls_spike(p) else "#10b981"
+                ax.plot(i, p, "o", markersize=6, color=pc)
+                _lbl(ax, i, p, str(int(p)), pc, up=(i % 2 == 0))
+        pos = [v for v in puls_vals if v > 0]
+        lo = max(0, min(min(pos) if pos else 60, 60) - 15)
+        hi = max(max(pos) if pos else 0, 100) + 15
+        ax.set_ylim(lo, hi)
+        _pdf_axes_common(ax, labels, dates, title + " | Verde = Normal (60-100), Rosu = Afara intervalului", "bpm")
+        return _pdf_png(fig)
 
-        img_buffer = io.BytesIO()
-        plt.savefig(img_buffer, format="png", dpi=250)
-        plt.close()
-        img_buffer.seek(0)
-        return img_buffer
-
-    def make_pdf_report(data_frame, include_glic, include_ta, include_puls, include_tables):
+    def make_pdf_report(data_frame, include_glic, include_ta, include_puls, include_tables, period_label):
         buffer = io.BytesIO()
         doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=20, leftMargin=20, topMargin=20, bottomMargin=20)
         story = []
         styles = getSampleStyleSheet()
 
         title_text = remove_diacritics("RAPORT MEDICAL DE MONITORIZARE - HEALTHTRACK PRO")
-        date_text = remove_diacritics(f"Generat la: {now_ro().strftime('%d.%m.%Y %H:%M')} | Perioada: {filtru_luni_str}")
+        date_text = remove_diacritics(f"Generat la: {now_ro().strftime('%d.%m.%Y %H:%M')} | Perioada: {period_label}")
 
         story.append(Paragraph(f"<b>{title_text}</b>", ParagraphStyle("TitleStyle", parent=styles["Heading1"], fontSize=13, textColor=colors.HexColor("#1e3a8a"), alignment=1, spaceAfter=12)))
         story.append(Paragraph(date_text, ParagraphStyle("DateStyle", parent=styles["Normal"], alignment=1, spaceAfter=15)))
 
+        def add_charts(heading, df_sub, make_img):
+            """Adaugă graficele; dacă sunt prea multe puncte, graficul se împarte în părți (fără a rupe o zi)."""
+            dts = [d.date() for d in df_sub[date_col]]
+            chunks = chunk_by_day(dts, MAX_PTS_CHART)
+            for ci, (a, b) in enumerate(chunks):
+                sl = df_sub.iloc[a:b]
+                rng = f"{dts[a].strftime('%d.%m.%Y')} - {dts[b - 1].strftime('%d.%m.%Y')}"
+                img = Image(make_img(sl, rng), width=PDF_IMG_W, height=PDF_IMG_H)
+                if ci == 0:
+                    story.append(KeepTogether([Paragraph(heading, styles["Heading2"]), img]))
+                else:
+                    story.append(img)
+                story.append(Spacer(1, 8))
+
+        def labels_dates(sl):
+            return ([point_label(d, m) for d, m in zip(sl[date_col], sl[moment_col])],
+                    [d.date() for d in sl[date_col]])
+
         if not data_frame.empty:
             df_pdf_all = data_frame.copy()
-            df_pdf_glic = df_pdf_all[pd.to_numeric(df_pdf_all[col_glic], errors="coerce").fillna(0) > 0]
-            df_pdf_ta = df_pdf_all[(pd.to_numeric(df_pdf_all[col_sis], errors="coerce").fillna(0) > 0) | (pd.to_numeric(df_pdf_all[col_dia], errors="coerce").fillna(0) > 0)]
-            df_pdf_puls = df_pdf_all[pd.to_numeric(df_pdf_all[col_puls], errors="coerce").fillna(0) > 0]
-            
-            df_pdf_table = df_pdf_all[
-                (pd.to_numeric(df_pdf_all[col_glic], errors="coerce").fillna(0) > 0) |
-                (pd.to_numeric(df_pdf_all[col_sis], errors="coerce").fillna(0) > 0) |
-                (pd.to_numeric(df_pdf_all[col_dia], errors="coerce").fillna(0) > 0) |
-                (pd.to_numeric(df_pdf_all[col_puls], errors="coerce").fillna(0) > 0) |
-                (df_pdf_all[col_obs].astype(str).str.strip() != "")
-            ]
+            n_glic = pd.to_numeric(df_pdf_all[col_glic], errors="coerce").fillna(0)
+            n_sis = pd.to_numeric(df_pdf_all[col_sis], errors="coerce").fillna(0)
+            n_dia = pd.to_numeric(df_pdf_all[col_dia], errors="coerce").fillna(0)
+            n_puls = pd.to_numeric(df_pdf_all[col_puls], errors="coerce").fillna(0)
+
+            df_pdf_glic = df_pdf_all[n_glic > 0]
+            df_pdf_ta = df_pdf_all[(n_sis > 0) & (n_dia > 0)]
+            df_pdf_puls = df_pdf_all[n_puls > 0]
+            df_pdf_table = df_pdf_all[(n_glic > 0) | (n_sis > 0) | (n_dia > 0) | (n_puls > 0) | (df_pdf_all[col_obs].astype(str).str.strip() != "")]
 
             if include_glic and not df_pdf_glic.empty:
-                x_g = [f"{d.strftime('%d.%m')} ({m[:3]})" for d, m in zip(df_pdf_glic[date_col], df_pdf_glic[moment_col])]
-                g_vals = pd.to_numeric(df_pdf_glic[col_glic], errors='coerce').fillna(0).tolist()
-                moments_g = df_pdf_glic[moment_col].tolist()
-                story.append(Paragraph("Evolutie Glicemie", styles["Heading2"]))
-                img_buf = generate_pdf_chart_glic(x_g, g_vals, moments_g, "Glicemie (mg/dL)", "mg/dL", "#38bdf8")
-                story.append(Image(img_buf, width=480, height=170))
-                story.append(Spacer(1, 10))
-                
+                def _mk_g(sl, rng):
+                    lb, dt = labels_dates(sl)
+                    return generate_pdf_chart_glic(lb, dt, pd.to_numeric(sl[col_glic], errors="coerce").fillna(0).tolist(),
+                                                   sl[moment_col].tolist(), f"Glicemie (mg/dL) | {rng}", "mg/dL", "#38bdf8")
+                add_charts("Evolutie Glicemie", df_pdf_glic, _mk_g)
+
             if include_ta and not df_pdf_ta.empty:
-                x_ta = [f"{d.strftime('%d.%m')} ({m[:3]})" for d, m in zip(df_pdf_ta[date_col], df_pdf_ta[moment_col])]
-                s_vals = pd.to_numeric(df_pdf_ta[col_sis], errors='coerce').fillna(0).tolist()
-                d_vals = pd.to_numeric(df_pdf_ta[col_dia], errors='coerce').fillna(0).tolist()
-                story.append(Paragraph("Evolutie Tensiune Arteriala", styles["Heading2"]))
-                img_buf = generate_pdf_chart_ta(x_ta, s_vals, d_vals, "Tensiune Arteriala (mmHg)")
-                story.append(Image(img_buf, width=480, height=170))
-                story.append(Spacer(1, 10))
-                
+                def _mk_t(sl, rng):
+                    lb, dt = labels_dates(sl)
+                    return generate_pdf_chart_ta(lb, dt, pd.to_numeric(sl[col_sis], errors="coerce").fillna(0).tolist(),
+                                                 pd.to_numeric(sl[col_dia], errors="coerce").fillna(0).tolist(),
+                                                 f"Tensiune Arteriala (mmHg) | {rng}")
+                add_charts("Evolutie Tensiune Arteriala", df_pdf_ta, _mk_t)
+
             if include_puls and not df_pdf_puls.empty:
-                x_p = [f"{d.strftime('%d.%m')} ({m[:3]})" for d, m in zip(df_pdf_puls[date_col], df_pdf_puls[moment_col])]
-                p_vals = pd.to_numeric(df_pdf_puls[col_puls], errors='coerce').fillna(0).tolist()
-                story.append(Paragraph("Evolutie Puls", styles["Heading2"]))
-                img_buf = generate_pdf_chart_puls(x_p, p_vals, "Puls (bpm)")
-                story.append(Image(img_buf, width=480, height=170))
-                story.append(Spacer(1, 10))
+                def _mk_p(sl, rng):
+                    lb, dt = labels_dates(sl)
+                    return generate_pdf_chart_puls(lb, dt, pd.to_numeric(sl[col_puls], errors="coerce").fillna(0).tolist(),
+                                                   f"Puls (bpm) | {rng}")
+                add_charts("Evolutie Puls", df_pdf_puls, _mk_p)
 
             if include_tables and not df_pdf_table.empty:
                 story.append(Paragraph("Date Tabelare si Observatii (Doar Inregistrari Active)", styles["Heading2"]))
@@ -2526,8 +2625,8 @@ with tab_dict["📄 Raport PDF"]:
         return buffer
 
     if st.button("Crează Raport PDF", type="primary"):
-        pdf_buffer = make_pdf_report(view_df, opt_glic, opt_ta, opt_puls, opt_tabele)
-        file_name = f"Raport_Medical_{filtru_luni_str.replace(', ', '_')}.pdf"
+        pdf_buffer = make_pdf_report(pdf_df, opt_glic, opt_ta, opt_puls, opt_tabele, perioada_pdf)
+        file_name = f"Raport_Medical_{remove_diacritics(perioada_pdf).replace(', ', '_').replace(' ', '_')}.pdf"
         
         b64_pdf = base64.b64encode(pdf_buffer.getvalue()).decode('utf-8')
         href = f'''

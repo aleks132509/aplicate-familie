@@ -202,6 +202,8 @@ BACKUP_ERROR_LOG_FILE = "ultima_eroare_backup_auto.txt"
 ALERT_23_LOG = "ultima_alerta_23.txt"
 ALERT_GAP_LOG = "ultima_alerta_gap.txt"
 SETTINGS_FILE = "setari_email.json"
+LEDGER_FILE = "registru_valori.json"          # cel mai mare număr de valori văzut vreodată, pe fiecare zi
+ALERT_DROP_LOG = "ultima_alerta_scadere.txt"
 
 # Adresă de e-mail permanentă: dacă fișierul de setări se pierde (ex. la redeploy/restart
 # al aplicației), câmpul de email nu mai rămâne gol — revine automat la adresa de mai jos.
@@ -233,7 +235,7 @@ GITHUB_REPO = _secret("GITHUB_REPO")
 GITHUB_BRANCH = _secret("GITHUB_BRANCH", "main")
 REMOTE_PREFIX = "healthtrack/"
 REMOTE_FILES = [DATA_FILE, MEDS_FILE, MEDS_HIST_FILE, PROG_FILE, FOODS_FILE, SETTINGS_FILE,
-                BACKUP_LOG_FILE, ALERT_23_LOG, ALERT_GAP_LOG]
+                BACKUP_LOG_FILE, ALERT_23_LOG, ALERT_GAP_LOG, LEDGER_FILE, ALERT_DROP_LOG]
 
 
 moment_order = [
@@ -403,6 +405,7 @@ DATA_COLS = ["Dată", "Moment Zi"] + NUM_COLS + ["Observații"]
 SNAP_DIR = "snapshots"
 INSTANCE_MARKER = ".instance_ok"
 RESTORE_LOG_FILE = "ultima_restaurare.txt"
+MAX_CELLS_LOST_PER_SAVE = 10     # o singură salvare normală nu poate șterge mai mult de atât
 _MOMENT_MAP = {remove_diacritics(m).lower(): m for m in moment_order}
 
 def norm_moment(s):
@@ -425,11 +428,17 @@ def _write_text(path, txt):
     except Exception:
         pass
 
+def _mtime(path):
+    try:
+        return os.path.getmtime(path)
+    except Exception:
+        return 0
+
 @st.cache_resource
 def _proc_state():
     return {"lock": threading.Lock(), "t": {}, "timer": None, "dirty": set(), "worker": None,
             "synced": False, "last_err": "", "last_ok": "", "remote_has": set(), "seeded": False,
-            "push_lock": threading.RLock()}
+            "push_lock": threading.RLock(), "sha": {}}
 
 def _throttle(key, seconds):
     ps = _proc_state()
@@ -476,9 +485,20 @@ def has_values_mask(d):
         m = m | (pd.to_numeric(d[c], errors="coerce").fillna(0) > 0)
     return m | (d["Observații"].apply(clean_obs) != "")
 
+def count_cells(d):
+    """Numărul de CELULE completate (valori > 0 + observații) – o măsură mult mai fină decât numărul de rânduri.
+    Dacă dispare o singură valoare dintr-un rând, se vede imediat."""
+    if d is None or len(d) == 0:
+        return 0
+    n = 0
+    for c in NUM_COLS:
+        n += int((pd.to_numeric(d[c], errors="coerce").fillna(0) > 0).sum())
+    n += int((d["Observații"].apply(clean_obs) != "").sum())
+    return n
+
 def fill_merge(base, extra):
     """Îmbină `extra` în `base`: completează DOAR celulele goale/0 și adaugă rândurile lipsă.
-    Nu suprascrie niciodată o valoare existentă => nu se pierd date."""
+    Nu suprascrie niciodată o valoare existentă din `base` => nu se pierd date."""
     b, e = normalize_data_df(base), normalize_data_df(extra)
     if e.empty:
         return b
@@ -501,18 +521,10 @@ def fill_merge(base, extra):
         b = pd.concat([b, pd.DataFrame(add)], ignore_index=True)
     return b
 
-def merge_with_disk(session_df):
-    """Înainte de orice salvare: reunește sesiunea curentă cu ce e pe disc (ex. valori introduse
-    de pe alt dispozitiv / altă sesiune), ca o sesiune veche să nu șteargă date noi."""
-    m = fill_merge(session_df, read_data_file())
-    if m.empty:
-        return session_df.copy()
-    m = m.copy()
-    m["Dată"] = m["Dată_dt"].dt.strftime("%d.%m.%Y")
-    return m[DATA_COLS].reset_index(drop=True)
-
-def safe_save_data(df_to_save):
-    """Scriere atomică + snapshot rotativ + protecție anti-ștergere accidentală. Returnează True/False."""
+def safe_save_data(df_to_save, allow_shrink=False):
+    """Scriere atomică + snapshot + protecție anti-pierdere la nivel de CELULĂ.
+    Refuză orice salvare care ar șterge brusc multe valori (în afară de cazul în care allow_shrink=True).
+    Returnează True/False."""
     try:
         n = normalize_data_df(df_to_save)
         out = n[has_values_mask(n)].copy() if not n.empty else n.copy()
@@ -524,21 +536,24 @@ def safe_save_data(df_to_save):
         out = out[DATA_COLS]
 
         old = read_data_file()
-        n_old = int(has_values_mask(old).sum()) if not old.empty else 0
-        n_new = int(has_values_mask(n).sum()) if not n.empty else 0
+        c_old = count_cells(old)
+        c_new = count_cells(n)
+        lost = c_old - c_new
 
         os.makedirs(SNAP_DIR, exist_ok=True)
-        if n_old and os.path.exists(DATA_FILE):
+        if c_old and os.path.exists(DATA_FILE):
             snaps = sorted(glob.glob(os.path.join(SNAP_DIR, "date_*.csv")))
-            if not snaps or time.time() - os.path.getmtime(snaps[-1]) > 300:
-                shutil.copy2(DATA_FILE, os.path.join(SNAP_DIR, f"date_{now_ro().strftime('%Y%m%d_%H%M%S')}.csv"))
-                for oldf in snaps[:-39]:
+            # snapshot la fiecare 5 minute SAU imediat dacă această salvare ar pierde celule
+            if lost > 0 or not snaps or time.time() - os.path.getmtime(snaps[-1]) > 300:
+                shutil.copy2(DATA_FILE, os.path.join(SNAP_DIR, f"date_{now_ro().strftime('%Y%m%d_%H%M%S_%f')}.csv"))
+                snaps = sorted(glob.glob(os.path.join(SNAP_DIR, "date_*.csv")))
+                for oldf in snaps[:-80]:
                     try: os.remove(oldf)
                     except Exception: pass
 
-        if n_old >= 6 and n_new < n_old * 0.5:
+        if (not allow_shrink) and c_old >= 6 and (lost > MAX_CELLS_LOST_PER_SAVE or c_new < c_old * 0.5):
             out.to_csv(os.path.join(SNAP_DIR, f"REFUZAT_{now_ro().strftime('%Y%m%d_%H%M%S')}.csv"), index=False)
-            _write_text(BACKUP_ERROR_LOG_FILE, f"{now_ro().strftime('%Y-%m-%d %H:%M')} | Salvare refuzată: ar fi șters {n_old - n_new} înregistrări.")
+            _write_text(BACKUP_ERROR_LOG_FILE, f"{now_ro().strftime('%Y-%m-%d %H:%M')} | Salvare refuzată: ar fi șters {lost} valori.")
             return False
 
         tmp = DATA_FILE + ".tmp"
@@ -549,6 +564,67 @@ def safe_save_data(df_to_save):
     except Exception as e:
         print(f"Eroare salvare date: {e}")
         return False
+
+
+# ---------- Registru anti-pierdere: ține minte, pe fiecare zi, cel mai mare număr de valori văzut vreodată ----------
+def day_cell_counts():
+    """{'2026-10-01': nr. de valori + observații completate în acea zi}"""
+    d = read_data_file()
+    out = {}
+    if d.empty:
+        return out
+    tmp = d.copy()
+    tmp["_n"] = sum((pd.to_numeric(tmp[c], errors="coerce").fillna(0) > 0).astype(int) for c in NUM_COLS) \
+        + (tmp["Observații"].apply(clean_obs) != "").astype(int)
+    for k, n in tmp.groupby(tmp["Dată_dt"].dt.strftime("%Y-%m-%d"))["_n"].sum().items():
+        out[str(k)] = int(n)
+    return out
+
+def load_ledger():
+    try:
+        with open(LEDGER_FILE, "r") as f:
+            return {str(k): int(v) for k, v in json.load(f).items()}
+    except Exception:
+        return {}
+
+def save_ledger(led):
+    try:
+        tmp = LEDGER_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(led, f)
+        os.replace(tmp, LEDGER_FILE)
+        remote_mark_dirty(LEDGER_FILE)
+    except Exception:
+        pass
+
+def ledger_check():
+    """Ridică registrul acolo unde sunt mai multe valori și întoarce zilele la care au DISPĂRUT valori:
+    [(zi_iso, câte_aveai, câte_sunt_acum), ...]"""
+    cur, led = day_cell_counts(), load_ledger()
+    changed, drops = False, []
+    for k in sorted(set(cur) | set(led)):
+        c, l = cur.get(k, 0), led.get(k, 0)
+        if c > l:
+            led[k] = c
+            changed = True
+        elif c < l:
+            drops.append((k, l, c))
+    if changed:
+        save_ledger(led)
+    return drops
+
+def ledger_accept(day_keys):
+    """Ștergere intenționată: registrul coboară la valoarea actuală, deci nu mai dă alarmă pentru acele zile."""
+    cur, led = day_cell_counts(), load_ledger()
+    for k in day_keys:
+        led[k] = cur.get(k, 0)
+    save_ledger(led)
+
+def _fmt_iso_ro(k):
+    try:
+        return datetime.strptime(k, "%Y-%m-%d").strftime("%d.%m.%Y")
+    except Exception:
+        return k
 
 def format_table_column(series):
     return series.astype(str).str.strip().replace(["0", "0.0", "nan", "None", "", "<NA>"], "")
@@ -850,14 +926,17 @@ def get_filtered_daily_data_df():
         d[c] = d[c].round().astype(int)
     return d[DATA_COLS].reset_index(drop=True)
 
+BACKUP_CSV_PREFIX = "backup_date_medicale"
+
 def build_backup_attachments(workdir):
-    """Backup = exact 3 fișiere CSV: date medicale (cu buline 🟢/🔴), medicamente, programări – toate la zi."""
+    """Backup = 3 fișiere CSV: date medicale (cu buline 🟢/🔴, numele conține data), medicamente, programări – toate la zi."""
     att = {}
     dfc = get_chronological_backup_df()
     if not dfc.empty:
-        p = os.path.join(workdir, "backup_date_medicale.csv")
+        nm = f"{BACKUP_CSV_PREFIX}_{now_ro().strftime('%Y-%m-%d')}.csv"
+        p = os.path.join(workdir, nm)
         dfc.to_csv(p, index=False)
-        att["backup_date_medicale.csv"] = p
+        att[nm] = p
     if os.path.exists(MEDS_FILE): att["medicamente.csv"] = MEDS_FILE
     if os.path.exists(PROG_FILE): att["programari_medicale.csv"] = PROG_FILE
     return att, list(att.keys())
@@ -874,7 +953,7 @@ def restore_from_email_backup(settings):
         M.login(sender, pw)
         M.select("INBOX", readonly=True)
         _, data = M.search(None, '(SUBJECT "Backup")')
-        ids = data[0].split()[-12:][::-1]           # cele mai noi 12, începând cu ultimul
+        ids = data[0].split()[-30:][::-1]           # cele mai noi 30, începând cu ultimul
         merged, got_meds, got_prog, n_mail = read_data_file(), False, False, 0
         for mid in ids:
             _, md = M.fetch(mid, "(RFC822)")
@@ -886,7 +965,7 @@ def restore_from_email_backup(settings):
                 payload = part.get_payload(decode=True)
                 if not payload:
                     continue
-                if fn in ("backup_date_medicale.csv", "date_medicale_utilizator.csv"):
+                if fn.startswith(BACKUP_CSV_PREFIX) or fn in ("date_medicale_utilizator.csv", "date_medicale.csv"):
                     merged = fill_merge(merged, pd.read_csv(io.BytesIO(payload), encoding="utf-8-sig"))
                     n_mail += 1
                 elif fn == "medicamente.csv" and not got_meds:
@@ -942,13 +1021,40 @@ def remote_put(path, data, sha):
         body["sha"] = sha
     r = _gh("PUT", f"/contents/{REMOTE_PREFIX}{path}", json=body)
     r.raise_for_status()
+    try:
+        return r.json().get("content", {}).get("sha")
+    except Exception:
+        return None
+
+def remote_history(limit=100):
+    """Lista versiunilor (commit-uri) fișierului de date din GitHub – fiecare salvare este o versiune recuperabilă."""
+    r = _gh("GET", "/commits", params={"path": f"{REMOTE_PREFIX}{DATA_FILE}", "sha": GITHUB_BRANCH, "per_page": limit})
+    r.raise_for_status()
+    out = []
+    for c in r.json():
+        try:
+            dt = datetime.fromisoformat(c["commit"]["committer"]["date"].replace("Z", "+00:00")).astimezone(BUCHAREST_TZ)
+            out.append((c["sha"], dt.strftime("%d.%m.%Y %H:%M:%S")))
+        except Exception:
+            pass
+    return out
+
+def remote_get_data_at(commit_sha):
+    r = _gh("GET", f"/contents/{REMOTE_PREFIX}{DATA_FILE}", params={"ref": commit_sha})
+    r.raise_for_status()
+    j = r.json()
+    if j.get("content"):
+        return base64.b64decode(j["content"])
+    r2 = requests.get(j["download_url"], timeout=25)
+    r2.raise_for_status()
+    return r2.content
 
 def _csv_bytes_to_df(b):
     return normalize_data_df(pd.read_csv(io.BytesIO(b), encoding="utf-8-sig"))
 
 def remote_pull_all():
-    """Aduce datele din GitHub pe disc. Datele NU se pierd: măsurătorile se îmbină (uniune), iar fișierele
-    modificate local și încă nesincronizate nu sunt suprascrise."""
+    """Aduce datele din GitHub pe disc. Datele NU se pierd: măsurătorile se îmbină (uniune; la conflict
+    câștigă versiunea din GitHub), iar fișierele modificate local și încă nesincronizate nu sunt suprascrise."""
     ps = _proc_state()
     chk = _gh("GET", "")
     if chk.status_code != 200:
@@ -958,6 +1064,7 @@ def remote_pull_all():
         if b is None:
             continue
         ps["remote_has"].add(p)
+        ps["sha"][p] = _sha                      # versiunea cunoscută a fișierului din GitHub
         with ps["lock"]:
             pending = p in ps["dirty"]
         if p == DATA_FILE:
@@ -980,6 +1087,16 @@ def remote_pull_all():
                 with open(SETTINGS_FILE, "w") as f: json.dump(ls, f)
             except Exception:
                 pass
+        elif p == LEDGER_FILE:
+            try:
+                rl = {str(k): int(v) for k, v in json.loads(b.decode("utf-8")).items()}
+                ll = load_ledger()
+                for k, v in rl.items():
+                    if v > ll.get(k, 0):
+                        ll[k] = v
+                save_ledger(ll)
+            except Exception:
+                pass
         elif not pending:
             with open(p, "wb") as f:
                 f.write(b)
@@ -991,6 +1108,7 @@ def _remote_push_file(p):
 def _remote_push_file_unlocked(p):
     if not os.path.exists(p):
         return
+    ps = _proc_state()
     with open(p, "rb") as f:
         data = f.read()
     if p == SETTINGS_FILE:                       # parola NU se urcă în repo (rămâne în Secrets)
@@ -1001,19 +1119,27 @@ def _remote_push_file_unlocked(p):
             pass
     b, sha = remote_get(p)
     if p == DATA_FILE and b is not None:
+        rdf = ldf = None
         try:
             rdf, ldf = _csv_bytes_to_df(b), _csv_bytes_to_df(data)
-            nr, nl = int(has_values_mask(rdf).sum()), int(has_values_mask(ldf).sum())
-            if nr >= 6 and nl < nr * 0.8:        # protecție: niciodată nu înlocuim cu o variantă mult mai mică
-                safe_save_data(fill_merge(ldf, rdf))
+        except Exception:
+            rdf = ldf = None
+        if rdf is not None:
+            # Concurență optimistă: dacă versiunea din GitHub NU mai este cea pe care am văzut-o noi
+            # (altă sesiune / alt dispozitiv a salvat între timp) sau dacă varianta locală e suspect de mică,
+            # NU înlocuim – reunim (local câștigă la conflict, valorile lipsă se completează din GitHub).
+            changed_remote = (sha != ps["sha"].get(p))
+            nr, nl = count_cells(rdf), count_cells(ldf)
+            if changed_remote or (nr >= 6 and nl < nr * 0.8):
+                safe_save_data(fill_merge(ldf, rdf), allow_shrink=True)
                 with open(DATA_FILE, "rb") as f:
                     data = f.read()
-        except Exception:
-            pass
     if b is not None and b == data:
+        ps["sha"][p] = sha
         return
-    remote_put(p, data, sha)
-    _proc_state()["remote_has"].add(p)
+    new_sha = remote_put(p, data, sha)
+    ps["sha"][p] = new_sha
+    ps["remote_has"].add(p)
 
 def _remote_worker():
     ps = _proc_state()
@@ -1248,11 +1374,21 @@ def verifica_si_fa_backup_automat(force=False):
                 _run_bg(_bg_send, email_dest, "🚨 [Alertă Zile Lipsă] HealthTrack Pro - Detectat gap în jurnal", msg_gap, {}, settings)
                 _write_text(ALERT_GAP_LOG, azi_iso)
 
+        if _read_text(ALERT_DROP_LOG) != azi_iso:
+            drops_m = ledger_check()
+            if drops_m:
+                msg_dr = "🚨 ALERTĂ PIERDERE DATE - HEALTHTRACK PRO\n\nAu dispărut valori din jurnal:\n"
+                for k, l, c in drops_m[-15:]:
+                    msg_dr += f"• {_fmt_iso_ro(k)}: aveai {l} valori, acum {c}.\n"
+                msg_dr += "\nRecuperează din aplicație: Setări → Recuperare date pierdute."
+                _run_bg(_bg_send, email_dest, "🚨 [Alertă Pierdere Date] HealthTrack Pro - au dispărut valori", msg_dr, {}, settings)
+                _write_text(ALERT_DROP_LOG, azi_iso)
+
         ultima = _read_text(BACKUP_LOG_FILE)[:10]
         if ultima != azi_iso:
             workdir = tempfile.mkdtemp()
             att, incluse = build_backup_attachments(workdir)
-            if has_values_mask(df_n).any() and "backup_date_medicale.csv" not in att:
+            if has_values_mask(df_n).any() and not any(k.startswith(BACKUP_CSV_PREFIX) for k in att):
                 _log_backup_result(False, "Fișierul cu date medicale nu a putut fi generat – backup-ul zilnic NU a fost trimis (se reîncearcă automat).")
                 shutil.rmtree(workdir, ignore_errors=True)
             elif att:
@@ -1314,7 +1450,7 @@ if "user" not in st.session_state:
 if "settings" not in st.session_state:
     st.session_state.settings = load_persisted_settings()
 
-startup_restore()  # refacere automată din backup-urile de pe email dacă serverul a fost resetat
+startup_restore()  # refacere automată din GitHub / din backup-urile de pe email dacă serverul a fost resetat
 if remote_enabled() and _proc_state()["synced"] and not st.session_state.get("_settings_reloaded"):
     st.session_state.settings = load_persisted_settings()   # setările aduse din GitHub (ținte etc.)
     st.session_state["_settings_reloaded"] = True
@@ -1379,10 +1515,57 @@ verifica_si_fa_backup_automat()
 # ==========================================
 # DATE MEDICALE (DINAMICE & INTEGRALE)
 # ==========================================
+INITIAL_DEFAULTS = [
+    {"Dată": "12.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 137, "Sistolică": 108, "Diastolică": 61, "Puls": 0, "Observații": "Prima zi cu tratament"},
+    {"Dată": "12.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 134, "Sistolică": 132, "Diastolică": 61, "Puls": 0, "Observații": "Prima zi cu tratament"},
+    {"Dată": "13.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 143, "Sistolică": 115, "Diastolică": 52, "Puls": 0, "Observații": "A doua zi cu tratament"},
+    {"Dată": "13.09.2026", "Moment Zi": "Seara - După masă", "Glicemie": 133, "Sistolică": 114, "Diastolică": 50, "Puls": 0, "Observații": ""},
+    {"Dată": "14.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 114, "Sistolică": 133, "Diastolică": 62, "Puls": 0, "Observații": ""},
+    {"Dată": "14.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 114, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+    {"Dată": "15.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 116, "Sistolică": 111, "Diastolică": 70, "Puls": 0, "Observații": ""},
+    {"Dată": "15.09.2026", "Moment Zi": "Dimineața - După masă", "Glicemie": 151, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+    {"Dată": "15.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 102, "Sistolică": 120, "Diastolică": 80, "Puls": 0, "Observații": ""},
+    {"Dată": "16.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 108, "Sistolică": 105, "Diastolică": 64, "Puls": 0, "Observații": ""},
+    {"Dată": "16.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 111, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+    {"Dată": "17.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 105, "Sistolică": 106, "Diastolică": 68, "Puls": 78, "Observații": ""},
+    {"Dată": "17.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 100, "Sistolică": 106, "Diastolică": 62, "Puls": 84, "Observații": ""},
+    {"Dată": "18.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 127, "Sistolică": 114, "Diastolică": 72, "Puls": 78, "Observații": "mancat tarziu, baton orez expandat cu ciocolata 0 zahar, chipsuri proteice, inghetata fara zahar"},
+    {"Dată": "18.09.2026", "Moment Zi": "Dimineața - După masă", "Glicemie": 143, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+    {"Dată": "18.09.2026", "Moment Zi": "Prânz - Înainte de masă", "Glicemie": 112, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+    {"Dată": "18.09.2026", "Moment Zi": "Seara - După masă", "Glicemie": 112, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+    {"Dată": "19.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 95, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+    {"Dată": "19.09.2026", "Moment Zi": "Seara - După masă", "Glicemie": 150, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": "cartofi prajiti, paine alba"},
+    {"Dată": "20.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 122, "Sistolică": 120, "Diastolică": 78, "Puls": 70, "Observații": "mancat seara prost"},
+    {"Dată": "20.09.2026", "Moment Zi": "Prânz - Înainte de masă", "Glicemie": 154, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": "cartofi prajiti, paine alba"},
+    {"Dată": "20.09.2026", "Moment Zi": "Seara - După masă", "Glicemie": 149, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": "paine alba, pizza, prajitura"},
+    {"Dată": "21.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 126, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
+    {"Dată": "21.09.2026", "Moment Zi": "Prânz - După masă", "Glicemie": 127, "Sistolică": 114, "Diastolică": 73, "Puls": 80, "Observații": ""},
+    {"Dată": "21.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 87, "Sistolică": 118, "Diastolică": 73, "Puls": 67, "Observații": "Sarmale si inghetata fara zahar"},
+    {"Dată": "22.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 118, "Sistolică": 109, "Diastolică": 72, "Puls": 75, "Observații": ""},
+    {"Dată": "22.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 104, "Sistolică": 115, "Diastolică": 70, "Puls": 72, "Observații": ""},
+    {"Dată": "23.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 148, "Sistolică": 119, "Diastolică": 68, "Puls": 73, "Observații": "mancat seara tarziu, inghetata fara zahar"},
+    {"Dată": "23.09.2026", "Moment Zi": "Seara - După masă", "Glicemie": 102, "Sistolică": 116, "Diastolică": 73, "Puls": 81, "Observații": ""},
+    {"Dată": "24.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 118, "Sistolică": 110, "Diastolică": 69, "Puls": 74, "Observații": ""},
+    {"Dată": "24.09.2026", "Moment Zi": "Prânz - Înainte de masă", "Glicemie": 113, "Sistolică": 123, "Diastolică": 83, "Puls": 71, "Observații": ""},
+    {"Dată": "24.09.2026", "Moment Zi": "Prânz - După masă", "Glicemie": 107, "Sistolică": 118, "Diastolică": 79, "Puls": 76, "Observații": ""},
+    {"Dată": "24.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 110, "Sistolică": 115, "Diastolică": 72, "Puls": 74, "Observații": ""},
+    {"Dată": "25.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 123, "Sistolică": 115, "Diastolică": 71, "Puls": 78, "Observații": ""},
+    {"Dată": "25.09.2026", "Moment Zi": "Prânz - Înainte de masă", "Glicemie": 92, "Sistolică": 128, "Diastolică": 78, "Puls": 86, "Observații": ""},
+    {"Dată": "25.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 113, "Sistolică": 130, "Diastolică": 88, "Puls": 74, "Observații": ""},
+    {"Dată": "26.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 121, "Sistolică": 116, "Diastolică": 72, "Puls": 81, "Observații": "mancat tarziu"},
+    {"Dată": "27.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 133, "Sistolică": 124, "Diastolică": 84, "Puls": 88, "Observații": "prajituri si mancat tarziu seara"},
+    {"Dată": "27.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 114, "Sistolică": 122, "Diastolică": 68, "Puls": 79, "Observații": ""},
+    {"Dată": "28.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 98, "Sistolică": 119, "Diastolică": 68, "Puls": 71, "Observații": ""}
+]
+
 def get_initial_data():
+    """Construiește tabelul complet (toate zilele × toate momentele) din fișierul de pe disc.
+    Discul este ADEVĂRUL: valorile implicite (primele măsurători) se folosesc DOAR dacă fișierul de date
+    este complet gol (prima rulare) – altfel nu mai pot reapărea peste valorile reale."""
     start_date = datetime.strptime("12.09.2026", "%d.%m.%Y").date()
-    
+
     _dfd = read_data_file()
+    first_run = _dfd.empty
     end_date = max(now_ro().date(), start_date)
     if not _dfd.empty:
         start_date = min(start_date, _dfd["Dată_dt"].dt.date.min())
@@ -1393,7 +1576,7 @@ def get_initial_data():
     while curr <= end_date:
         all_dates_str.append(curr.strftime("%d.%m.%Y"))
         curr += timedelta(days=1)
-        
+
     full_template = []
     for d_str in all_dates_str:
         for m in moment_order:
@@ -1409,96 +1592,47 @@ def get_initial_data():
     df_template = pd.DataFrame(full_template)
     df_template["Dată_dt"] = parse_flexible_date(df_template["Dată"])
 
-    initial_defaults = [
-        {"Dată": "12.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 137, "Sistolică": 108, "Diastolică": 61, "Puls": 0, "Observații": "Prima zi cu tratament"},
-        {"Dată": "12.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 134, "Sistolică": 132, "Diastolică": 61, "Puls": 0, "Observații": "Prima zi cu tratament"},
-        {"Dată": "13.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 143, "Sistolică": 115, "Diastolică": 52, "Puls": 0, "Observații": "A doua zi cu tratament"},
-        {"Dată": "13.09.2026", "Moment Zi": "Seara - După masă", "Glicemie": 133, "Sistolică": 114, "Diastolică": 50, "Puls": 0, "Observații": ""},
-        {"Dată": "14.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 114, "Sistolică": 133, "Diastolică": 62, "Puls": 0, "Observații": ""},
-        {"Dată": "14.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 114, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
-        {"Dată": "15.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 116, "Sistolică": 111, "Diastolică": 70, "Puls": 0, "Observații": ""},
-        {"Dată": "15.09.2026", "Moment Zi": "Dimineața - După masă", "Glicemie": 151, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
-        {"Dată": "15.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 102, "Sistolică": 120, "Diastolică": 80, "Puls": 0, "Observații": ""},
-        {"Dată": "16.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 108, "Sistolică": 105, "Diastolică": 64, "Puls": 0, "Observații": ""},
-        {"Dată": "16.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 111, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
-        {"Dată": "17.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 105, "Sistolică": 106, "Diastolică": 68, "Puls": 78, "Observații": ""},
-        {"Dată": "17.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 100, "Sistolică": 106, "Diastolică": 62, "Puls": 84, "Observații": ""},
-        {"Dată": "18.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 127, "Sistolică": 114, "Diastolică": 72, "Puls": 78, "Observații": "mancat tarziu, baton orez expandat cu ciocolata 0 zahar, chipsuri proteice, inghetata fara zahar"},
-        {"Dată": "18.09.2026", "Moment Zi": "Dimineața - După masă", "Glicemie": 143, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
-        {"Dată": "18.09.2026", "Moment Zi": "Prânz - Înainte de masă", "Glicemie": 112, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
-        {"Dată": "18.09.2026", "Moment Zi": "Seara - După masă", "Glicemie": 112, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
-        {"Dată": "19.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 95, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
-        {"Dată": "19.09.2026", "Moment Zi": "Seara - După masă", "Glicemie": 150, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": "cartofi prajiti, paine alba"},
-        {"Dată": "20.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 122, "Sistolică": 120, "Diastolică": 78, "Puls": 70, "Observații": "mancat seara prost"},
-        {"Dată": "20.09.2026", "Moment Zi": "Prânz - Înainte de masă", "Glicemie": 154, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": "cartofi prajiti, paine alba"},
-        {"Dată": "20.09.2026", "Moment Zi": "Seara - După masă", "Glicemie": 149, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": "paine alba, pizza, prajitura"},
-        {"Dată": "21.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 126, "Sistolică": 0, "Diastolică": 0, "Puls": 0, "Observații": ""},
-        {"Dată": "21.09.2026", "Moment Zi": "Prânz - După masă", "Glicemie": 127, "Sistolică": 114, "Diastolică": 73, "Puls": 80, "Observații": ""},
-        {"Dată": "21.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 87, "Sistolică": 118, "Diastolică": 73, "Puls": 67, "Observații": "Sarmale si inghetata fara zahar"},
-        {"Dată": "22.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 118, "Sistolică": 109, "Diastolică": 72, "Puls": 75, "Observații": ""},
-        {"Dată": "22.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 104, "Sistolică": 115, "Diastolică": 70, "Puls": 72, "Observații": ""},
-        {"Dată": "23.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 148, "Sistolică": 119, "Diastolică": 68, "Puls": 73, "Observații": "mancat seara tarziu, inghetata fara zahar"},
-        {"Dată": "23.09.2026", "Moment Zi": "Seara - După masă", "Glicemie": 102, "Sistolică": 116, "Diastolică": 73, "Puls": 81, "Observații": ""},
-        {"Dată": "24.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 118, "Sistolică": 110, "Diastolică": 69, "Puls": 74, "Observații": ""},
-        {"Dată": "24.09.2026", "Moment Zi": "Prânz - Înainte de masă", "Glicemie": 113, "Sistolică": 123, "Diastolică": 83, "Puls": 71, "Observații": ""},
-        {"Dată": "24.09.2026", "Moment Zi": "Prânz - După masă", "Glicemie": 107, "Sistolică": 118, "Diastolică": 79, "Puls": 76, "Observații": ""},
-        {"Dată": "24.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 110, "Sistolică": 115, "Diastolică": 72, "Puls": 74, "Observații": ""},
-        {"Dată": "25.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 123, "Sistolică": 115, "Diastolică": 71, "Puls": 78, "Observații": ""},
-        {"Dată": "25.09.2026", "Moment Zi": "Prânz - Înainte de masă", "Glicemie": 92, "Sistolică": 128, "Diastolică": 78, "Puls": 86, "Observații": ""},
-        {"Dată": "25.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 113, "Sistolică": 130, "Diastolică": 88, "Puls": 74, "Observații": ""},
-        {"Dată": "26.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 121, "Sistolică": 116, "Diastolică": 72, "Puls": 81, "Observații": "mancat tarziu"},
-        {"Dată": "27.09.2026", "Moment Zi": "Dimineața - Înainte de masă", "Glicemie": 133, "Sistolică": 124, "Diastolică": 84, "Puls": 88, "Observații": "prajituri si mancat tarziu seara"},
-        {"Dată": "27.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 114, "Sistolică": 122, "Diastolică": 68, "Puls": 79, "Observații": ""},
-        {"Dată": "28.09.2026", "Moment Zi": "Seara - Înainte de masă", "Glicemie": 98, "Sistolică": 119, "Diastolică": 68, "Puls": 71, "Observații": ""}
-    ]
+    if first_run:
+        for r_def in INITIAL_DEFAULTS:
+            d_dt = parse_flexible_date(r_def["Dată"])
+            m_val = r_def["Moment Zi"]
+            mask = (df_template["Dată_dt"] == d_dt) & (df_template["Moment Zi"] == m_val)
+            if mask.any():
+                for col in ["Glicemie", "Sistolică", "Diastolică", "Puls"]:
+                    if col in r_def:
+                        df_template.loc[mask, col] = r_def[col]
+                if r_def.get("Observații"):
+                    df_template.loc[mask, "Observații"] = clean_obs(r_def["Observații"])
 
-    for r_def in initial_defaults:
-        d_dt = parse_flexible_date(r_def["Dată"])
-        m_val = r_def["Moment Zi"]
-        mask = (df_template["Dată_dt"] == d_dt) & (df_template["Moment Zi"] == m_val)
-        if mask.any():
-            for col in ["Glicemie", "Sistolică", "Diastolică", "Puls"]:
-                if col in r_def:
-                    df_template.loc[mask, col] = r_def[col]
-            if r_def.get("Observații"):
-                df_template.loc[mask, "Observații"] = clean_obs(r_def["Observații"])
-
-    if os.path.exists(DATA_FILE):
+    if not _dfd.empty:
         try:
-            df_saved = read_data_file()
-            if not df_saved.empty:
-                
-                for _, row in df_saved.iterrows():
-                    d_dt = row["Dată_dt"]
-                    m_val = str(row.get("Moment Zi", ""))
-                    mask = (df_template["Dată_dt"] == d_dt) & (df_template["Moment Zi"] == m_val)
-                    if mask.any():
-                        for col in ["Glicemie", "Sistolică", "Diastolică", "Puls"]:
-                            if col in row and pd.notna(row[col]):
-                                try:
-                                    val_num = float(row[col])
-                                    if val_num > 0:
-                                        df_template.loc[mask, col] = val_num
-                                except:
-                                    pass
-                        obs_val = clean_obs(row.get("Observații", ""))
-                        if obs_val:
-                            existing_obs = clean_obs(str(df_template.loc[mask, "Observații"].values[0]))
-                            if existing_obs:
-                                if obs_val not in existing_obs:
-                                    df_template.loc[mask, "Observații"] = f"{existing_obs}, {obs_val}"
-                            else:
-                                df_template.loc[mask, "Observații"] = obs_val
+            for _, row in _dfd.iterrows():
+                mask = (df_template["Dată_dt"] == row["Dată_dt"]) & (df_template["Moment Zi"] == str(row.get("Moment Zi", "")))
+                if mask.any():
+                    for col in ["Glicemie", "Sistolică", "Diastolică", "Puls"]:
+                        try:
+                            val_num = float(row[col])
+                            if val_num > 0:
+                                df_template.loc[mask, col] = val_num
+                        except Exception:
+                            pass
+                    obs_val = clean_obs(row.get("Observații", ""))
+                    if obs_val:
+                        df_template.loc[mask, "Observații"] = obs_val
         except Exception as e:
             print(f"Erore citire CSV: {e}")
 
     df_template["Moment_Cat"] = pd.Categorical(df_template["Moment Zi"], categories=moment_order, ordered=True)
     df_template = df_template.sort_values(by=["Dată_dt", "Moment_Cat"]).drop(columns=["Dată_dt", "Moment_Cat"]).reset_index(drop=True)
-    safe_save_data(df_template)
+    if first_run:
+        safe_save_data(df_template)
     return df_template
 
-if "local_df_v2" not in st.session_state:
+# Sesiunea este doar o VEDERE a discului: dacă fișierul s-a modificat (altă sesiune, alt dispozitiv,
+# sincronizare GitHub) vederea se reîncarcă automat – nu mai lucrăm niciodată cu date vechi.
+if "local_df_v2" not in st.session_state or st.session_state.get("_data_mtime") != _mtime(DATA_FILE):
     st.session_state.local_df_v2 = get_initial_data()
+    st.session_state["_data_mtime"] = _mtime(DATA_FILE)
 remote_seed_missing()
 
 df = st.session_state.local_df_v2.copy()
@@ -1516,48 +1650,72 @@ if date_col in df.columns and not df.empty:
     df["Moment_Cat"] = pd.Categorical(df[moment_col], categories=moment_order, ordered=True)
     df = df.dropna(subset=[date_col]).sort_values(by=[date_col, "Moment_Cat"]).drop(columns=["Moment_Cat"]).reset_index(drop=True)
 
-def save_local_record(date_str, moment_str, glic_v, sis_v, dia_v, puls_v, obs_v):
-    global df
-    current_df = merge_with_disk(st.session_state.local_df_v2)
-    if col_obs in current_df.columns:
-        current_df[col_obs] = current_df[col_obs].apply(clean_obs)
+def save_local_record(date_str, moment_str, glic_v, sis_v, dia_v, puls_v, obs_v, allow_clear=False, record_undo=True):
+    """Salvează UN singur moment, pornind mereu de la ce este PE DISC (nu de la vederea veche a sesiunii).
+    Regula de aur: un câmp lăsat pe 0 / o notiță goală NU șterge valoarea existentă, decât dacă allow_clear=True.
+    Astfel, o sesiune/un formular vechi nu mai poate suprascrie cu zero valorile introduse între timp."""
+    disk = read_data_file()
+    if disk.empty:
+        base = st.session_state.local_df_v2.copy()
+        base[date_col] = parse_flexible_date(base[date_col])
     else:
-        current_df[col_obs] = ""
+        base = disk.copy()
+        base[date_col] = base["Dată_dt"]
+        base = base[DATA_COLS].copy()
 
-    if not current_df.empty and date_col in current_df.columns:
-        current_df["Dată_str"] = parse_flexible_date(current_df[date_col]).dt.strftime("%d.%m.%Y")
-        mask = (current_df["Dată_str"] == date_str) & (current_df[moment_col].astype(str) == moment_str)
-        current_df = current_df.drop(columns=["Dată_str"])
-    else:
-        mask = pd.Series([False] * len(current_df))
+    target_dt = pd.Timestamp(parse_flexible_date(date_str)).normalize()
+    mask = (base[date_col].dt.normalize() == target_dt) & (base[moment_col].astype(str) == moment_str)
 
-    obs_clean_val = clean_obs(obs_v)
-    
-    st.session_state.action_history_stack.append({
-        "old_df": st.session_state.local_df_v2.copy(),
-        "desc": f"Salvare înregistrare {date_str} - {moment_str}"
-    })
+    old_vals = {col_glic: 0, col_sis: 0, col_dia: 0, col_puls: 0}
+    old_obs = ""
+    if mask.any():
+        old_row = base[mask].iloc[0]
+        for c in old_vals:
+            try:
+                old_vals[c] = int(float(old_row[c] or 0))
+            except Exception:
+                old_vals[c] = 0
+        old_obs = clean_obs(old_row[col_obs])
+
+    def pick(new_v, old_v):
+        try:
+            nv = int(float(new_v or 0))
+        except Exception:
+            nv = 0
+        if nv > 0:
+            return nv
+        return 0 if allow_clear else old_v
+
+    final = {
+        col_glic: pick(glic_v, old_vals[col_glic]),
+        col_sis: pick(sis_v, old_vals[col_sis]),
+        col_dia: pick(dia_v, old_vals[col_dia]),
+        col_puls: pick(puls_v, old_vals[col_puls]),
+    }
+    new_obs = clean_obs(obs_v)
+    final_obs = new_obs if new_obs else ("" if allow_clear else old_obs)
+
+    if record_undo:
+        st.session_state.action_history_stack.append({
+            "date_str": date_str, "moment": moment_str,
+            "old": (old_vals[col_glic], old_vals[col_sis], old_vals[col_dia], old_vals[col_puls], old_obs),
+            "desc": f"Salvare înregistrare {date_str} - {moment_str}"
+        })
 
     if mask.any():
-        current_df.loc[mask, col_glic] = glic_v
-        current_df.loc[mask, col_sis] = sis_v
-        current_df.loc[mask, col_dia] = dia_v
-        current_df.loc[mask, col_puls] = puls_v
-        current_df.loc[mask, col_obs] = obs_clean_val
+        for c, v in final.items():
+            base.loc[mask, c] = v
+        base.loc[mask, col_obs] = final_obs
     else:
-        new_record = {
-            date_col: parse_flexible_date(date_str),
-            moment_col: moment_str, col_glic: glic_v, col_sis: sis_v, col_dia: dia_v, col_puls: puls_v,
-            col_obs: obs_clean_val,
-        }
-        current_df = pd.concat([current_df, pd.DataFrame([new_record])], ignore_index=True)
+        new_record = {date_col: target_dt, moment_col: moment_str, **final, col_obs: final_obs}
+        base = pd.concat([base, pd.DataFrame([new_record])], ignore_index=True)
 
-    current_df[date_col] = parse_flexible_date(current_df[date_col])
-    dates_unique = sorted(current_df[date_col].dropna().unique())
+    base[date_col] = parse_flexible_date(base[date_col])
+    dates_unique = sorted(base[date_col].dropna().unique())
     full_rows = []
     for d in dates_unique:
         d_str = pd.to_datetime(d).strftime("%d.%m.%Y")
-        df_d = current_df[current_df[date_col] == d]
+        df_d = base[base[date_col] == d]
         for m in moment_order:
             row_m = df_d[df_d[moment_col] == m]
             if not row_m.empty:
@@ -1578,12 +1736,18 @@ def save_local_record(date_str, moment_str, glic_v, sis_v, dia_v, puls_v, obs_v)
     current_df["Moment_Cat"] = pd.Categorical(current_df[moment_col], categories=moment_order, ordered=True)
     current_df = current_df.sort_values(by=[date_col, "Moment_Cat"]).drop(columns=["Moment_Cat"]).reset_index(drop=True)
 
-    st.session_state.local_df_v2 = current_df
+    ok = False
     try:
-        if safe_save_data(current_df):
+        ok = safe_save_data(current_df, allow_shrink=allow_clear)
+        if ok:
+            st.session_state.local_df_v2 = current_df
+            st.session_state["_data_mtime"] = _mtime(DATA_FILE)
             schedule_backup_after_save()
+            if allow_clear:
+                ledger_accept([target_dt.strftime("%Y-%m-%d")])
     except Exception as e:
         print(f"Eroare: {e}")
+    return ok
 
 # ==========================================
 # SIDEBAR & FILTRARE
@@ -1623,6 +1787,22 @@ if st.sidebar.button("🚪 Deconectare", use_container_width=True):
     _clear_auth_token()
     trigger_rerun()
 st.sidebar.markdown("---")
+
+# ----------------- AVERTIZARE: valori dispărute -----------------
+_ledger_ready = (not remote_enabled()) or _proc_state()["synced"]
+_drops = []
+if _ledger_ready:
+    try:
+        _drops = ledger_check()
+    except Exception:
+        _drops = []
+if _drops:
+    _lines = "\n".join(f"- **{_fmt_iso_ro(k)}** — aveai {l} valori, acum {c}" for k, l, c in _drops[-15:])
+    st.error("🚨 **Au dispărut valori din jurnal!**\n\n" + _lines +
+             "\n\nRecuperează din ⚙️ Setări → ♻️ Recuperare date pierdute (istoric GitHub sau backup email).")
+    if is_admin and st.button("✅ Am șters intenționat – acceptă situația actuală", key="accept_drops_btn"):
+        ledger_accept([k for k, _l, _c in _drops])
+        trigger_rerun()
 
 # ==========================================
 # ORGANIZARE TAB-URI
@@ -1793,10 +1973,12 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
             if st.session_state.action_history_stack:
                 if st.button("↩️ Undo Ultima Modificare", type="secondary"):
                     last_action = st.session_state.action_history_stack.pop()
-                    st.session_state.local_df_v2 = last_action["old_df"]
-                    safe_save_data(st.session_state.local_df_v2)
-                    schedule_backup_after_save()
-                    st.success(f"S-a revenit cu succes la starea anterioară! ({last_action['desc']})")
+                    _o = last_action["old"]
+                    # Undo = readuce DOAR momentul modificat la valorile lui de dinainte (nu rescrie tot fișierul)
+                    save_local_record(last_action["date_str"], last_action["moment"], _o[0], _o[1], _o[2], _o[3], _o[4],
+                                      allow_clear=True, record_undo=False)
+                    remote_push_now([DATA_FILE])
+                    st.session_state["success_message"] = f"S-a revenit la starea anterioară pentru {last_action['desc'].replace('Salvare înregistrare ', '')}."
                     trigger_rerun()
         
         if "success_message" in st.session_state:
@@ -1843,7 +2025,9 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
                     return clean_obs(existing_row[col_obs])
                 return ""
 
-            session_form_key = f"form_state_{date_str}_{selected_moment}"
+            # cheia formularului include și "versiunea" fișierului: dacă datele se schimbă în altă parte,
+            # formularul se reîncarcă din datele reale (nu rămâne cu valori vechi)
+            session_form_key = f"form_state_{date_str}_{selected_moment}_{int(st.session_state.get('_data_mtime', 0))}"
             if "last_form_key" not in st.session_state or st.session_state["last_form_key"] != session_form_key:
                 st.session_state["last_form_key"] = session_form_key
                 st.session_state["inp_glic"] = get_val(col_glic)
@@ -1859,11 +2043,11 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
 
             c1, c2 = st.columns(2)
             with c1: 
-                st.number_input("🩸 Glicemie (mg/dL) [0 = nemăsurat]", min_value=0, key="inp_glic")
+                st.number_input("🩸 Glicemie (mg/dL) [0 = nemăsurat / nu modifica]", min_value=0, key="inp_glic")
             with c2:
-                st.number_input("🫀 Tensiune Sistolică [0 = nemăsurat]", min_value=0, key="inp_sis")
-                st.number_input("🫀 Tensiune Diastolică [0 = nemăsurat]", min_value=0, key="inp_dia")
-                st.number_input("💓 Puls [0 = nemăsurat]", min_value=0, key="inp_puls")
+                st.number_input("🫀 Tensiune Sistolică [0 = nemăsurat / nu modifica]", min_value=0, key="inp_sis")
+                st.number_input("🫀 Tensiune Diastolică [0 = nemăsurat / nu modifica]", min_value=0, key="inp_dia")
+                st.number_input("💓 Puls [0 = nemăsurat / nu modifica]", min_value=0, key="inp_puls")
 
             st.markdown("---")
             st.markdown("##### ⚡ Asistent Inteligent Mese & Indice Glicemic (Actualizare Instantanee)")
@@ -1914,8 +2098,13 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
                 d_val = st.session_state.get("inp_dia", 0)
                 p_val = st.session_state.get("inp_puls", 0)
                 o_val = st.session_state.get("inp_obs", "")
+                clear_flag = bool(st.session_state.get("allow_clear_chk", False))
 
-                save_local_record(date_str, selected_moment, g_val, s_val, d_val, p_val, o_val)
+                saved_ok = save_local_record(date_str, selected_moment, g_val, s_val, d_val, p_val, o_val, allow_clear=clear_flag)
+                st.session_state["allow_clear_chk"] = False
+                if not saved_ok:
+                    st.session_state["success_message"] = "⚠️ Salvarea a fost REFUZATĂ de protecția anti-pierdere (ar fi șters prea multe valori). Nimic nu s-a modificat."
+                    return
                 _ok, _info = remote_push_now([DATA_FILE])
                 if _ok is True:
                     st.session_state["success_message"] = "✅ Salvat și confirmat în stocarea permanentă (GitHub)."
@@ -1923,9 +2112,9 @@ if is_admin and "➕ Adaugă / Suprascrie" in tab_dict:
                     st.session_state["success_message"] = "⚠️ Salvat doar pe server. Stocarea permanentă NU este configurată – valorile se pot pierde la restart!"
                 else:
                     st.session_state["success_message"] = f"⚠️ Salvat local, dar NEconfirmat în GitHub ({_info}). NU reporni aplicația! Se reîncearcă automat."
-                trigger_rerun()
 
             st.markdown("---")
+            st.checkbox("🧹 Permite ștergerea valorilor: câmpurile lăsate pe 0 / notița goală ȘTERG valoarea existentă (altfel rămân neschimbate)", key="allow_clear_chk")
             st.button("💾 Salvează / Suprascrie Înregistrarea", type="primary", use_container_width=True, on_click=handle_save_action, key="bottom_save_btn")
 
 # ----------------- TAB: TRATAMENT -----------------
@@ -2341,13 +2530,51 @@ with tab_dict["⚙️ Setări"]:
             st.download_button(label="📥 Descarcă Backup CSV Cronologic", data=df_backup_cron.to_csv(index=False).encode("utf-8"), file_name="backup_date_medicale.csv", mime="text/csv", use_container_width=True)
 
         if is_admin:
+            st.markdown("#### ♻️ Recuperare date pierdute")
+            st.caption(f"Acum în baza de date: **{count_cells(read_data_file())}** valori/observații completate.")
+
+            # --- (1) Recuperare din istoricul GitHub: fiecare salvare este o versiune care poate fi recuperată ---
+            if remote_enabled():
+                if st.button("🕘 Încarcă istoricul versiunilor din GitHub", key="load_hist_btn", use_container_width=True):
+                    try:
+                        st.session_state["gh_hist"] = remote_history(100)
+                    except Exception as e:
+                        st.session_state["gh_hist"] = []
+                        st.error(f"❌ Nu pot citi istoricul: {e}")
+                _hist = st.session_state.get("gh_hist", [])
+                if _hist:
+                    _labels = {f"{ts}": sh for sh, ts in _hist}
+                    _pick = st.selectbox("Alege versiunea (de ex. seara de ieri, când aveai toate valorile)", list(_labels.keys()), key="gh_hist_pick")
+                    _prio_h = st.checkbox("Versiunea aleasă are prioritate la conflicte (suprascrie valorile diferite)", value=False, key="gh_hist_prio")
+                    if st.button("♻️ Îmbină versiunea aleasă în baza de date", key="gh_hist_btn", use_container_width=True):
+                        try:
+                            _ver = _csv_bytes_to_df(remote_get_data_at(_labels[_pick]))
+                            _cur = read_data_file()
+                            _merged_h = fill_merge(_ver, _cur) if _prio_h else fill_merge(_cur, _ver)
+                            _before = count_cells(_cur)
+                            if safe_save_data(_merged_h, allow_shrink=True):
+                                st.session_state.pop("local_df_v2", None)
+                                remote_push_now([DATA_FILE])
+                                st.success(f"✅ Recuperat. Valori completate: {_before} → {count_cells(read_data_file())}.")
+                                trigger_rerun()
+                            else:
+                                st.error("❌ Salvarea a fost refuzată.")
+                        except Exception as e:
+                            st.error(f"❌ Eroare la recuperare: {e}")
+
+            # --- (2) Recuperare dintr-un fișier CSV (backup primit pe email / descărcat) ---
             up_file = st.file_uploader("♻️ Restaurează din backup (CSV – orice variantă)", type=["csv"], key="restore_upl")
+            _prio_up = st.checkbox("Backup-ul are prioritate la conflicte (suprascrie valorile diferite)", value=False, key="restore_prio")
             if up_file is not None and st.button("♻️ Îmbină în baza de date (nu șterge nimic)", key="restore_btn"):
                 try:
-                    merged_up = fill_merge(read_data_file(), pd.read_csv(up_file, encoding="utf-8-sig"))
-                    if safe_save_data(merged_up):
+                    _up_df = pd.read_csv(up_file, encoding="utf-8-sig")
+                    _cur2 = read_data_file()
+                    merged_up = fill_merge(_up_df, _cur2) if _prio_up else fill_merge(_cur2, _up_df)
+                    _before2 = count_cells(_cur2)
+                    if safe_save_data(merged_up, allow_shrink=True):
                         st.session_state.pop("local_df_v2", None)
-                        st.success("✅ Datele au fost îmbinate cu succes.")
+                        remote_push_now([DATA_FILE])
+                        st.success(f"✅ Datele au fost îmbinate cu succes. Valori completate: {_before2} → {count_cells(read_data_file())}.")
                         trigger_rerun()
                     else:
                         st.error("❌ Salvarea a fost refuzată de protecția anti-ștergere.")
